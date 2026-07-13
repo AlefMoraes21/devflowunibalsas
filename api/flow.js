@@ -1,4 +1,10 @@
 export default async function handler(req, res) {
+  // 1. Health Check da Meta - responde ao GET
+  if (req.method === 'GET') {
+    return res.status(200).json({ status: "ok" });
+  }
+
+  // 2. Bloqueia qualquer coisa que não seja POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
