@@ -1,66 +1,56 @@
+import crypto from 'crypto';
+
 export default async function handler(req, res) {
-  // 1. Health Check da Meta - responde ao GET
-  if (req.method === 'GET') {
-    return res.status(200).json({ status: "ok" });
-  }
+  if (req.method === 'GET') return res.status(200).send('ok');
+  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
-  // 2. Bloqueia qualquer coisa que não seja POST
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  try {
+    const { encrypted_flow_data, encrypted_aes_key, initial_vector } = req.body;
+    const privateKey = process.env.FLOW_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!privateKey) throw new Error('FLOW_PRIVATE_KEY vazia');
 
-  const RBS_TOKEN = '1e527dbd3b9bc702b65cccfed83d31ba0ab4bb401fb6b85b8e4256fef8fca49a';
-  const RBS_PORTAL = '257';
+    const aesKey = crypto.privateDecrypt(
+      { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+      Buffer.from(encrypted_aes_key, 'base64')
+    );
 
-  // Só trata o INIT por enquanto
-  if (req.body.action === 'INIT') {
-    try {
-      // 1. Chama a API da RBS
-      const rbs = await fetch(`https://admin.portal.apprbs.com.br/api/v1/selective-processes?portal=${RBS_PORTAL}`, {
-        headers: { 
-          'Authorization': `Bearer ${RBS_TOKEN}`,
-          'Accept': 'application/json'
-        }
-      });
+    const iv = Buffer.from(initial_vector, 'base64');
+    const encryptedData = Buffer.from(encrypted_flow_data, 'base64');
+    const authTag = encryptedData.subarray(-16);
+    const data = encryptedData.subarray(0, -16);
 
-      if (!rbs.ok) {
-        throw new Error(`RBS API erro: ${rbs.status}`);
+    const decipher = crypto.createDecipheriv('aes-128-gcm', aesKey, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(data, undefined, 'utf8') + decipher.final('utf8');
+    const requestData = JSON.parse(decrypted);
+
+    let responsePayload = { screen: 'ESCOLHA_PROCESSO', data: { processo_seletivo_id: [] } };
+
+    if (requestData.action === 'INIT') {
+      try {
+        const rbs = await fetch(`https://admin.portal.apprbs.com.br/api/v1/selective-processes?portal=257`, {
+          headers: { 'Authorization': `Bearer ${process.env.RBS_TOKEN}` }
+        });
+        const json = await rbs.json();
+        responsePayload.data.processo_seletivo_id = json.data.map(p => ({ id: String(p.id), title: p.name }));
+      } catch (e) {
+        responsePayload.data.processo_seletivo_id = [
+          { id: '18713', title: 'Vestibular Online - 2026/2' },
+          { id: '18716', title: 'Transferência - 2026/2' }
+        ];
       }
-
-      const json = await rbs.json();
-      
-      // 2. Converte o formato da RBS pro formato do Flow
-      const processos = json.data.map(p => ({
-        id: String(p.id), // WhatsApp quer string
-        title: p.name     // RBS manda 'name', Flow quer 'title'
-      }));
-
-      // 3. Retorna pro WhatsApp
-      return res.status(200).json({
-        screen: 'ESCOLHA_PROCESSO',
-        data: {
-          processo_seletivo_id: processos
-        }
-      });
-
-    } catch (error) {
-      console.error('Erro RBS:', error);
-      // Se der erro na RBS, retorna fallback hardcoded pra não quebrar
-      return res.status(200).json({
-        screen: 'ESCOLHA_PROCESSO',
-        data: {
-          processo_seletivo_id: [
-            { id: '18713', title: 'Vestibular Online - 2026/2' },
-            { id: '18716', title: 'Transferência - 2026/2' }
-          ]
-        }
-      });
     }
-  }
 
-  // Qualquer outra ação, só devolve a tela 1 mesmo
-  res.status(200).json({
-    screen: 'ESCOLHA_PROCESSO',
-    data: { processo_seletivo_id: [] }
-  });
+    const ivResp = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-128-gcm', aesKey, ivResp);
+    const enc = Buffer.concat([cipher.update(JSON.stringify(responsePayload), 'utf8'), cipher.final()]);
+    const finalBuf = Buffer.concat([ivResp, enc, cipher.getAuthTag()]).toString('base64');
+
+    res.setHeader('Content-Type', 'text/plain');
+    return res.status(200).send(finalBuf);
+
+  } catch (err) {
+    console.error('FLOW ERROR:', err);
+    return res.status(500).send(err.message);
+  }
 }
