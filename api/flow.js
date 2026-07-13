@@ -36,8 +36,11 @@ export default async function handler(req, res) {
           headers: { 'Authorization': `Bearer ${process.env.RBS_TOKEN}` }
         });
         const json = await rbsRes.json();
-        const lista = json.data.map(p => ({ id: String(p.id), title: p.name }));
-        responsePayload = { screen: 'ESCOLHA_PROCESSO', data: { processo_seletivo_id: lista } };
+let lista = json.data?.map(p => ({ id: String(p.id), title: p.name })) || [];
+
+if (lista.length === 0) throw new Error('RBS vazia'); // força cair no fallback
+
+responsePayload = { screen: 'ESCOLHA_PROCESSO', data: { processo_seletivo_id: lista } };
       } catch (e) {
         // Fallback se a RBS falhar, pra não quebrar a publicação
         responsePayload = {
