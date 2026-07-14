@@ -3,6 +3,20 @@ import crypto from 'crypto';
 const RUBEUS_BASE_URL = 'https://admin.portal.apprbs.com.br/api/v1';
 const PORTAL_ID = 257;
 const MAX_FLOW_DROPDOWN_OPTIONS = 200;
+const RUBEUS_TIMEOUT_MS = 6000;
+
+const FALLBACK_ORIGINS = [
+  { id: '01', title: 'Site oficial da instituição' },
+  { id: '02', title: 'Pesquisa no próprio Google' },
+  { id: '03', title: 'Redes sociais' },
+  { id: '04', title: 'Anúncios patrocinados' },
+  { id: '05', title: 'Indicação de amigos ou familiares' },
+  { id: '06', title: 'Divulgação na escola ou empresa' },
+  { id: '07', title: 'Feiras, palestras ou eventos' },
+  { id: '08', title: 'Contato do time comercial' },
+  { id: '09', title: 'Materiais impressos' },
+  { id: '10', title: 'Outro' }
+];
 
 const FALLBACK_PROCESSES = [
   { id: '18713', title: 'Vestibular Online - Cursos presenciais - 2026/2' },
@@ -194,10 +208,32 @@ async function rubeusRequest(path, { method = 'GET', body } = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${RUBEUS_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RUBEUS_TIMEOUT_MS);
+  const startedAt = Date.now();
+
+  let response;
+
+  try {
+    response = await fetch(`${RUBEUS_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`A Rubeus demorou mais de ${RUBEUS_TIMEOUT_MS / 1000} segundos em ${path}.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  console.log('RUBEUS RESPONSE:', {
+    path,
+    status: response.status,
+    duration_ms: Date.now() - startedAt
   });
 
   const raw = await response.text();
@@ -707,6 +743,40 @@ async function shiftRetryData(data, message) {
   };
 }
 
+function fastAlmostThereRetryData(data, message) {
+  const nationalityId = toStringValue(data.nacionalidade, '10');
+  const nationalityTitle = nationalityId === '10' ? 'Brasileira' : 'Nacionalidade selecionada';
+
+  return {
+    token: toStringValue(data.token),
+    target: toStringValue(data.target),
+    local: toStringValue(data.local, 'step'),
+    button_id: toStringValue(data.button_id),
+    person_id: toStringValue(data.person_id),
+    applyment_id: toStringValue(data.applyment_id),
+    campo_cpf_id: toStringValue(data.campo_cpf_id),
+    campo_nacionalidade_id: toStringValue(data.campo_nacionalidade_id),
+    campo_ensino_medio_id: toStringValue(data.campo_ensino_medio_id),
+    campo_deficiencia_id: toStringValue(data.campo_deficiencia_id),
+    campo_def_auditiva_id: toStringValue(data.campo_def_auditiva_id),
+    campo_def_fala_id: toStringValue(data.campo_def_fala_id),
+    campo_def_fisica_id: toStringValue(data.campo_def_fisica_id),
+    campo_def_intelectual_id: toStringValue(data.campo_def_intelectual_id),
+    campo_def_visual_id: toStringValue(data.campo_def_visual_id),
+    campo_def_mental_id: toStringValue(data.campo_def_mental_id),
+    campo_def_outras_id: toStringValue(data.campo_def_outras_id),
+    campo_def_outras_texto_id: toStringValue(data.campo_def_outras_texto_id),
+    campo_origem_id: toStringValue(data.campo_origem_id),
+    campo_origem_outro_id: toStringValue(data.campo_origem_outro_id),
+    datasource_nacionalidade: toStringValue(data.datasource_nacionalidade),
+    datasource_origem: toStringValue(data.datasource_origem),
+    nacionalidades: [{ id: nationalityId, title: nationalityTitle }],
+    origens: FALLBACK_ORIGINS,
+    nacionalidade_padrao: nationalityId,
+    erro: message || 'Não foi possível concluir a inscrição. Revise os dados e tente novamente.'
+  };
+}
+
 async function almostThereRetryData(data, message) {
   let nacionalidades = [{ id: '10', title: 'Brasileira' }];
   let origens = [
@@ -1063,10 +1133,17 @@ async function routeFlowRequest(requestData) {
           inscricao_id: applicationId
         });
       } catch (error) {
-        console.error('Erro ao concluir inscrição:', error);
+        console.error('Erro ao concluir inscrição:', {
+          message: error.message,
+          applyment_id: toStringValue(data.applyment_id),
+          person_id: toStringValue(data.person_id)
+        });
+
+        // Não consulta novamente a Rubeus aqui. O Flow precisa receber uma
+        // resposta criptografada rapidamente, mesmo quando o último submit falha.
         return responseForScreen(
           'QUASE_LA',
-          await almostThereRetryData(data, error.message)
+          fastAlmostThereRetryData(data, error.message)
         );
       }
     }
@@ -1123,18 +1200,25 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'turno-separado-v1' });
+    return res.status(200).json({ status: 'ok', version: 'final-submit-safe-v2' });
   }
 
   if (req.method !== 'POST') {
     return res.status(405).send('Method not allowed');
   }
 
+  let aesKey;
+  let iv;
+  let requestData;
+
   try {
     requirePrivateKey();
 
     const privateKey = process.env.FLOW_PRIVATE_KEY.replace(/\\n/g, '\n');
-    const { requestData, aesKey, iv } = decryptRequest(req.body, privateKey);
+    const decrypted = decryptRequest(req.body, privateKey);
+    requestData = decrypted.requestData;
+    aesKey = decrypted.aesKey;
+    iv = decrypted.iv;
 
     console.log('FLOW REQUEST:', {
       action: requestData?.action,
@@ -1149,6 +1233,28 @@ export default async function handler(req, res) {
     return res.status(200).send(encryptedResponse);
   } catch (error) {
     console.error('FLOW ERROR:', error);
-    return res.status(500).send(error.message);
+
+    // Depois que a requisição foi descriptografada, nunca devolve 500 em texto
+    // puro para o WhatsApp Flow. Devolve uma tela válida e criptografada.
+    if (aesKey && iv) {
+      const data = requestData?.data ?? {};
+      const screen = requestData?.screen;
+      let responsePayload;
+
+      if (screen === 'QUASE_LA') {
+        responsePayload = responseForScreen(
+          'QUASE_LA',
+          fastAlmostThereRetryData(data, error.message)
+        );
+      } else {
+        responsePayload = { data: { status: 'active' } };
+      }
+
+      const encryptedResponse = encryptResponse(responsePayload, aesKey, iv);
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(200).send(encryptedResponse);
+    }
+
+    return res.status(500).send('Não foi possível descriptografar a requisição do Flow.');
   }
 }
