@@ -171,8 +171,23 @@ async function rubeusRequest(path, { method = 'GET', body } = {}) {
     throw new Error('A variável RBS_TOKEN não foi configurada.');
   }
 
+  // Saneia o token: remove "Bearer", quebras de linha, espaços e repetições
+  let rawToken = String(process.env.RBS_TOKEN || '').trim();
+  // Se colaram "Bearer XXX", remove o prefixo
+  rawToken = rawToken.replace(/^Bearer\s+/i, '');
+  // Remove quebras de linha, espaços e aspas
+  rawToken = rawToken.replace(/[\r\n\s'"]+/g, '');
+  // Se por acidente colaram o token 2-3x seguidos, pega só os primeiros 64-128 chars hex
+  // Token da Rubeus normalmente tem 64 chars hex. Se tiver 128 ou 192 (2x ou 3x), corta.
+  if (rawToken.length > 128 && /^[a-f0-9]+$/i.test(rawToken)) {
+    rawToken = rawToken.slice(0, 64);
+  }
+  if (!rawToken) {
+    throw new Error('RBS_TOKEN está vazio após saneamento. Verifique a variável de ambiente.');
+  }
+
   const headers = {
-    Authorization: `Bearer ${process.env.RBS_TOKEN}`
+    Authorization: `Bearer ${rawToken}`
   };
 
   if (body !== undefined) {
@@ -730,7 +745,13 @@ async function routeFlowRequest(requestData) {
   switch (customAction) {
     case 'selecionar_processo': {
       try {
-        const startResponse = await startApplication(data.processo_seletivo_id);
+        // Aceita tanto o nome novo (processo_id) quanto o antigo para compatibilidade
+        const rawProcessId = data.processo_seletivo_id ?? data.processo_id ?? data.form?.processo_id ?? data.form?.processo_seletivo_id;
+        console.log('selecionar_processo raw:', rawProcessId, 'full data:', JSON.stringify(data).slice(0,500));
+        if (!rawProcessId || String(rawProcessId).trim() === '') {
+          throw new Error('Selecione um processo seletivo antes de continuar.');
+        }
+        const startResponse = await startApplication(rawProcessId);
         const formResponse = await getForm(
           startResponse.data.next,
           startResponse.data.local,
