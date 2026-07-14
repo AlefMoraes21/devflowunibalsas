@@ -76,10 +76,14 @@ function toInteger(value, fieldName) {
   return parsed;
 }
 
-function formatCpf(value) {
-  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 11);
-  if (digits.length !== 11) return String(value ?? '');
-  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+function normalizeCpf(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+
+  if (digits.length !== 11) {
+    throw new Error('O CPF deve conter exatamente 11 números.');
+  }
+
+  return digits;
 }
 
 function formatBrazilianPhone(value) {
@@ -1075,7 +1079,7 @@ async function routeFlowRequest(requestData) {
         const selectedOther = selected('outras');
 
         const fields = compactFields([
-          fieldItem(data.campo_cpf_id, formatCpf(data.cpf)),
+          fieldItem(data.campo_cpf_id, normalizeCpf(data.cpf)),
           fieldItem(data.campo_nacionalidade_id, normalizeNationality(data.nacionalidade)),
           fieldItem(
             data.campo_ensino_medio_id,
