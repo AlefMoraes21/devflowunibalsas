@@ -3,7 +3,7 @@ import crypto from 'crypto';
 const RUBEUS_BASE_URL = 'https://admin.portal.apprbs.com.br/api/v1';
 const PORTAL_ID = 257;
 const RUBEUS_TIMEOUT_MS = 6000;
-const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 8500;
+const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 9200;
 
 const NACIONALIDADES_ESTATICAS = [
   { id: '10', title: 'Brasileira' },
@@ -971,7 +971,7 @@ async function routeFlowRequest(requestData) {
           throw new Error('Nenhum turno foi encontrado para o curso selecionado.');
         }
 
-        return responseForScreen('TURNO_INTERESSE', {
+        return responseForScreen('CURSO_INTERESSE', {
           token: toStringValue(data.token),
           target: toStringValue(data.target),
           local: toStringValue(data.local, 'step'),
@@ -984,9 +984,11 @@ async function routeFlowRequest(requestData) {
           campo_coligada_id: toStringValue(data.campo_coligada_id),
           campo_filial_id: toStringValue(data.campo_filial_id),
           campo_tipo_curso_id: toStringValue(data.campo_tipo_curso_id),
-          curso_id: selectedCourseId,
-          curso_nome: selectedCourse?.title ?? 'Curso selecionado',
+          cursos: courseOptions,
           turnos: shifts,
+          turno_visivel: true,
+          curso_selecionado: selectedCourseId,
+          turno_selecionado: shifts.length === 1 ? shifts[0].id : '',
           area_interesse_valor: toStringValue(
             nextOptions[toStringValue(data.campo_area_interesse_id)]?.value
           ),
@@ -1043,8 +1045,8 @@ async function routeFlowRequest(requestData) {
       } catch (error) {
         console.error('Erro ao enviar curso:', error);
         return responseForScreen(
-          'TURNO_INTERESSE',
-          await shiftRetryData(data, error.message)
+          'CURSO_INTERESSE',
+          await courseRetryData(data, error.message)
         );
       }
     }
@@ -1171,7 +1173,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'static-nationalities-final-timeout-v3' });
+    return res.status(200).json({ status: 'ok', version: 'same-screen-course-shift-final-timeout-v4' });
   }
 
   if (req.method !== 'POST') {
