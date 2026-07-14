@@ -243,23 +243,37 @@ async function rubeusRequest(
   const raw = await response.text();
   let json;
 
-  try {
-    json = raw ? JSON.parse(raw) : {};
-  } catch {
-    json = { message: raw || 'Resposta inválida da Rubeus.' };
-  }
+try {
+  json = raw ? JSON.parse(raw) : {};
+} catch {
+  json = {
+    message: raw || 'Resposta inválida da Rubeus.'
+  };
+}
 
-  if (!response.ok) {
-    throw new Error(
-      json?.message || `A Rubeus respondeu com status HTTP ${response.status}.`
-    );
-  }
+if (!response.ok || json?.success === false) {
+  console.error('RUBEUS ERROR BODY:', {
+    path,
+    status: response.status,
+    body: json
+  });
+}
 
-  if (json?.success === false) {
-    throw new Error(json?.message || 'A operação não pôde ser concluída na Rubeus.');
-  }
+if (!response.ok) {
+  throw new Error(
+    json?.message ||
+    `A Rubeus respondeu com status HTTP ${response.status}.`
+  );
+}
 
-  return json;
+if (json?.success === false) {
+  throw new Error(
+    json?.message ||
+    'A operação não pôde ser concluída na Rubeus.'
+  );
+}
+
+return json;
 }
 
 async function listProcesses() {
@@ -1088,6 +1102,53 @@ async function routeFlowRequest(requestData) {
           )
         ]);
 
+        const cpfDigits = String(data.cpf ?? '').replace(/\D/g, '');
+
+        console.log('QUASE_LA RECEBIDO:', {
+          cpf_preenchido: cpfDigits.length > 0,
+          cpf_quantidade_digitos: cpfDigits.length,
+          nacionalidade: toStringValue(data.nacionalidade),
+          concluiu_ensino_medio: toStringValue(data.concluiu_ensino_medio),
+          possui_deficiencia: toStringValue(data.possui_deficiencia),
+          tipos_deficiencia: Array.isArray(data.tipos_deficiencia)
+            ? data.tipos_deficiencia.map(String)
+            : [],
+          como_conheceu: toStringValue(data.como_conheceu),
+          como_conheceu_outro_preenchido:
+            toStringValue(data.como_conheceu_outro).trim().length > 0,
+          campo_cpf_id: toStringValue(data.campo_cpf_id),
+          campo_ensino_medio_id: toStringValue(data.campo_ensino_medio_id),
+          campo_origem_id: toStringValue(data.campo_origem_id)
+        });
+
+        console.log(
+          'QUASE_LA CAMPOS RUBEUS:',
+          fields.map((item) => {
+            const fieldId = Number(item.field_id);
+
+            if (fieldId === Number(data.campo_cpf_id)) {
+              return {
+                field_id: item.field_id,
+                value: '[CPF OCULTADO]',
+                quantidade_digitos: cpfDigits.length
+              };
+            }
+
+            if (fieldId === Number(data.campo_origem_outro_id)) {
+              return {
+                field_id: item.field_id,
+                value: item.value ? '[TEXTO OCULTADO]' : ''
+              };
+            }
+
+            return {
+              field_id: item.field_id,
+              value: item.value,
+              tipo: typeof item.value
+            };
+          })
+        );
+
         const submitResponse = await submitForm(
           data.button_id,
           fields,
@@ -1173,7 +1234,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'same-screen-course-shift-final-timeout-v4' });
+    return res.status(200).json({ status: 'ok', version: 'quase-la-diagnostic-logs-v6' });
   }
 
   if (req.method !== 'POST') {
