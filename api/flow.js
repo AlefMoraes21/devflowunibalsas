@@ -638,6 +638,75 @@ async function courseRetryData(data, message) {
   };
 }
 
+async function shiftRetryData(data, message) {
+  let shifts = [];
+  let nextOptions = {};
+
+  try {
+    const technicalFields = [
+      data.campo_area_interesse_id,
+      data.campo_oferta_id,
+      data.campo_coligada_id,
+      data.campo_filial_id,
+      data.campo_tipo_curso_id
+    ].filter(Boolean);
+
+    const shiftsResponse = await getDataSource({
+      datasource: data.datasource,
+      target: data.campo_turno_id,
+      filter: [
+        {
+          field: toInteger(data.campo_curso_id, 'campo_curso_id'),
+          values: toStringValue(data.curso_id)
+        }
+      ],
+      nextFields: technicalFields,
+      token: data.token
+    });
+
+    shifts = flowOptions(extractDataSourceOptions(shiftsResponse));
+    nextOptions = shiftsResponse?.data?.nextOptions ?? {};
+  } catch (error) {
+    console.error('Não foi possível recarregar os turnos:', error);
+  }
+
+  const optionValue = (fieldId, existingValue) =>
+    toStringValue(
+      nextOptions[toStringValue(fieldId)]?.value,
+      toStringValue(existingValue)
+    );
+
+  return {
+    token: toStringValue(data.token),
+    target: toStringValue(data.target),
+    local: toStringValue(data.local, 'step'),
+    button_id: toStringValue(data.button_id),
+    datasource: toStringValue(data.datasource),
+    campo_curso_id: toStringValue(data.campo_curso_id),
+    campo_turno_id: toStringValue(data.campo_turno_id),
+    campo_area_interesse_id: toStringValue(data.campo_area_interesse_id),
+    campo_oferta_id: toStringValue(data.campo_oferta_id),
+    campo_coligada_id: toStringValue(data.campo_coligada_id),
+    campo_filial_id: toStringValue(data.campo_filial_id),
+    campo_tipo_curso_id: toStringValue(data.campo_tipo_curso_id),
+    curso_id: toStringValue(data.curso_id),
+    curso_nome: toStringValue(data.curso_nome, 'Curso selecionado'),
+    turnos: shifts,
+    area_interesse_valor: optionValue(
+      data.campo_area_interesse_id,
+      data.area_interesse_valor
+    ),
+    oferta_valor: optionValue(data.campo_oferta_id, data.oferta_valor),
+    coligada_valor: optionValue(data.campo_coligada_id, data.coligada_valor),
+    filial_valor: optionValue(data.campo_filial_id, data.filial_valor),
+    tipo_curso_valor: optionValue(
+      data.campo_tipo_curso_id,
+      data.tipo_curso_valor
+    ),
+    erro: message
+  };
+}
+
 async function almostThereRetryData(data, message) {
   let nacionalidades = [{ id: '10', title: 'Brasileira' }];
   let origens = [
@@ -854,10 +923,19 @@ async function routeFlowRequest(requestData) {
           })
         ]);
 
+        const courseOptions = flowOptions(extractDataSourceOptions(coursesResponse));
         const shifts = flowOptions(extractDataSourceOptions(shiftsResponse));
         const nextOptions = shiftsResponse?.data?.nextOptions ?? {};
+        const selectedCourseId = toStringValue(data.curso_id);
+        const selectedCourse = courseOptions.find(
+          (item) => item.id === selectedCourseId
+        );
 
-        return responseForScreen('CURSO_INTERESSE', {
+        if (shifts.length === 0) {
+          throw new Error('Nenhum turno foi encontrado para o curso selecionado.');
+        }
+
+        return responseForScreen('TURNO_INTERESSE', {
           token: toStringValue(data.token),
           target: toStringValue(data.target),
           local: toStringValue(data.local, 'step'),
@@ -870,11 +948,9 @@ async function routeFlowRequest(requestData) {
           campo_coligada_id: toStringValue(data.campo_coligada_id),
           campo_filial_id: toStringValue(data.campo_filial_id),
           campo_tipo_curso_id: toStringValue(data.campo_tipo_curso_id),
-          cursos: flowOptions(extractDataSourceOptions(coursesResponse)),
+          curso_id: selectedCourseId,
+          curso_nome: selectedCourse?.title ?? 'Curso selecionado',
           turnos: shifts,
-          turno_visivel: shifts.length > 0,
-          curso_selecionado: toStringValue(data.curso_id),
-          turno_selecionado: shifts.length === 1 ? shifts[0].id : '',
           area_interesse_valor: toStringValue(
             nextOptions[toStringValue(data.campo_area_interesse_id)]?.value
           ),
@@ -931,8 +1007,8 @@ async function routeFlowRequest(requestData) {
       } catch (error) {
         console.error('Erro ao enviar curso:', error);
         return responseForScreen(
-          'CURSO_INTERESSE',
-          await courseRetryData(data, error.message)
+          'TURNO_INTERESSE',
+          await shiftRetryData(data, error.message)
         );
       }
     }
@@ -1047,7 +1123,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).send('ok');
+    return res.status(200).json({ status: 'ok', version: 'turno-separado-v1' });
   }
 
   if (req.method !== 'POST') {
