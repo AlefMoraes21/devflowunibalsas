@@ -2,8 +2,15 @@ import crypto from 'crypto';
 
 const RUBEUS_BASE_URL = 'https://admin.portal.apprbs.com.br/api/v1';
 const PORTAL_ID = 257;
-const MAX_FLOW_DROPDOWN_OPTIONS = 200;
 const RUBEUS_TIMEOUT_MS = 6000;
+const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 8500;
+
+const NACIONALIDADES_ESTATICAS = [
+  { id: '10', title: 'Brasileira' },
+  { id: '20', title: 'Naturalizado Brasileiro' },
+  { id: '30', title: 'Estrangeira' },
+  { id: '50', title: 'Outros' }
+];
 
 const FALLBACK_ORIGINS = [
   { id: '01', title: 'Site oficial da instituição' },
@@ -46,6 +53,19 @@ function toBoolean(value) {
 function toStringValue(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
   return String(value);
+}
+
+function normalizeNationality(value) {
+  const nationalityId = toStringValue(value, '10');
+  const isAllowed = NACIONALIDADES_ESTATICAS.some(
+    (item) => item.id === nationalityId
+  );
+
+  if (!isAllowed) {
+    throw new Error('Nacionalidade inválida.');
+  }
+
+  return nationalityId;
 }
 
 function toInteger(value, fieldName) {
@@ -157,30 +177,14 @@ function extractDataSourceOptions(response) {
   return [];
 }
 
-function prioritizeNationalities(options) {
-  const priorities = ['10', '20', '50'];
-  const byValue = new Map(options.map((item) => [String(item.value), item]));
-  const prioritized = priorities.map((value) => byValue.get(value)).filter(Boolean);
-  const remaining = options.filter((item) => !priorities.includes(String(item.value)));
-
-  const limited = [...prioritized, ...remaining].slice(0, MAX_FLOW_DROPDOWN_OPTIONS);
-
-  if (options.length > MAX_FLOW_DROPDOWN_OPTIONS) {
-    console.warn(
-      `A Rubeus retornou ${options.length} nacionalidades. ` +
-      `O WhatsApp Flow aceita até ${MAX_FLOW_DROPDOWN_OPTIONS} itens em um Dropdown; ` +
-      'a lista foi limitada mantendo Brasileira, Naturalizado Brasileiro e Outros no início.'
-    );
-  }
-
-  return limited;
-}
-
 function currentIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function rubeusRequest(path, { method = 'GET', body } = {}) {
+async function rubeusRequest(
+  path,
+  { method = 'GET', body, timeoutMs = RUBEUS_TIMEOUT_MS } = {}
+) {
   if (!process.env.RBS_TOKEN) {
     throw new Error('A variável RBS_TOKEN não foi configurada.');
   }
@@ -209,7 +213,7 @@ async function rubeusRequest(path, { method = 'GET', body } = {}) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RUBEUS_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = Date.now();
 
   let response;
@@ -223,7 +227,7 @@ async function rubeusRequest(path, { method = 'GET', body } = {}) {
     });
   } catch (error) {
     if (error?.name === 'AbortError') {
-      throw new Error(`A Rubeus demorou mais de ${RUBEUS_TIMEOUT_MS / 1000} segundos em ${path}.`);
+      throw new Error(`A Rubeus demorou mais de ${timeoutMs / 1000} segundos em ${path}.`);
     }
     throw error;
   } finally {
@@ -292,9 +296,15 @@ async function getForm(target, local, token) {
   });
 }
 
-async function submitForm(button, data, token) {
+async function submitForm(
+  button,
+  data,
+  token,
+  timeoutMs = RUBEUS_TIMEOUT_MS
+) {
   return rubeusRequest('/submit', {
     method: 'POST',
+    timeoutMs,
     body: {
       button: toInteger(button, 'button_id'),
       validate_on_server: true,
@@ -487,34 +497,26 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
   );
   const origemOutro = requireInput(findInput(form, ['Outro:'], 319428), 'Outro canal');
   const button = findButton(form, ['Concluir']);
-
-  const nationalityQuery = findQueryForField(form, nacionalidade.field_id);
   const originQuery = findQueryForField(form, origem.field_id);
 
-  if (!nationalityQuery?.query_data || !originQuery?.query_data) {
-    throw new Error('As fontes de nacionalidade ou origem não foram localizadas.');
+  let origens = FALLBACK_ORIGINS;
+
+  if (originQuery?.query_data) {
+    try {
+      const originsResponse = await getDataSource({
+        datasource: originQuery.query_data,
+        target: origem.field_id,
+        filter: [],
+        nextFields: [],
+        token
+      });
+
+      const dynamicOrigins = flowOptions(extractDataSourceOptions(originsResponse));
+      if (dynamicOrigins.length > 0) origens = dynamicOrigins;
+    } catch (error) {
+      console.error('Não foi possível carregar as origens; usando lista estática:', error.message);
+    }
   }
-
-  const [nationalitiesResponse, originsResponse] = await Promise.all([
-    getDataSource({
-      datasource: nationalityQuery.query_data,
-      target: nacionalidade.field_id,
-      filter: [],
-      nextFields: [],
-      token
-    }),
-    getDataSource({
-      datasource: originQuery.query_data,
-      target: origem.field_id,
-      filter: [],
-      nextFields: [],
-      token
-    })
-  ]);
-
-  const nationalityOptions = prioritizeNationalities(
-    extractDataSourceOptions(nationalitiesResponse)
-  );
 
   const redirect = previousSubmitResponse?.data?.redirect ?? {};
 
@@ -539,15 +541,11 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
     campo_def_outras_texto_id: String(outrasTexto.field_id),
     campo_origem_id: String(origem.field_id),
     campo_origem_outro_id: String(origemOutro.field_id),
-    datasource_nacionalidade: String(nationalityQuery.query_data),
-    datasource_origem: String(originQuery.query_data),
-    nacionalidades: flowOptions(nationalityOptions),
-    origens: flowOptions(extractDataSourceOptions(originsResponse)),
-    nacionalidade_padrao: toStringValue(nacionalidade.value, '10'),
+    datasource_origem: toStringValue(originQuery?.query_data),
+    origens,
     erro: ''
   };
 }
-
 function responseForScreen(screen, data) {
   return { screen, data };
 }
@@ -744,9 +742,6 @@ async function shiftRetryData(data, message) {
 }
 
 function fastAlmostThereRetryData(data, message) {
-  const nationalityId = toStringValue(data.nacionalidade, '10');
-  const nationalityTitle = nationalityId === '10' ? 'Brasileira' : 'Nacionalidade selecionada';
-
   return {
     token: toStringValue(data.token),
     target: toStringValue(data.target),
@@ -768,54 +763,29 @@ function fastAlmostThereRetryData(data, message) {
     campo_def_outras_texto_id: toStringValue(data.campo_def_outras_texto_id),
     campo_origem_id: toStringValue(data.campo_origem_id),
     campo_origem_outro_id: toStringValue(data.campo_origem_outro_id),
-    datasource_nacionalidade: toStringValue(data.datasource_nacionalidade),
     datasource_origem: toStringValue(data.datasource_origem),
-    nacionalidades: [{ id: nationalityId, title: nationalityTitle }],
     origens: FALLBACK_ORIGINS,
-    nacionalidade_padrao: nationalityId,
     erro: message || 'Não foi possível concluir a inscrição. Revise os dados e tente novamente.'
   };
 }
-
 async function almostThereRetryData(data, message) {
-  let nacionalidades = [{ id: '10', title: 'Brasileira' }];
-  let origens = [
-    { id: '01', title: 'Site oficial da instituição' },
-    { id: '02', title: 'Pesquisa no próprio Google' },
-    { id: '03', title: 'Redes sociais' },
-    { id: '04', title: 'Anúncios patrocinados' },
-    { id: '05', title: 'Indicação de amigos ou familiares' },
-    { id: '06', title: 'Divulgação na escola ou empresa' },
-    { id: '07', title: 'Feiras, palestras ou eventos' },
-    { id: '08', title: 'Contato do time comercial' },
-    { id: '09', title: 'Materiais impressos' },
-    { id: '10', title: 'Outro' }
-  ];
+  let origens = FALLBACK_ORIGINS;
 
-  try {
-    const [nationalitiesResponse, originsResponse] = await Promise.all([
-      getDataSource({
-        datasource: data.datasource_nacionalidade,
-        target: data.campo_nacionalidade_id,
-        filter: [],
-        nextFields: [],
-        token: data.token
-      }),
-      getDataSource({
+  if (data.datasource_origem) {
+    try {
+      const originsResponse = await getDataSource({
         datasource: data.datasource_origem,
         target: data.campo_origem_id,
         filter: [],
         nextFields: [],
         token: data.token
-      })
-    ]);
+      });
 
-    nacionalidades = flowOptions(
-      prioritizeNationalities(extractDataSourceOptions(nationalitiesResponse))
-    );
-    origens = flowOptions(extractDataSourceOptions(originsResponse));
-  } catch (error) {
-    console.error('Não foi possível recarregar nacionalidades/origens:', error);
+      const dynamicOrigins = flowOptions(extractDataSourceOptions(originsResponse));
+      if (dynamicOrigins.length > 0) origens = dynamicOrigins;
+    } catch (error) {
+      console.error('Não foi possível recarregar as origens:', error.message);
+    }
   }
 
   return {
@@ -839,15 +809,11 @@ async function almostThereRetryData(data, message) {
     campo_def_outras_texto_id: toStringValue(data.campo_def_outras_texto_id),
     campo_origem_id: toStringValue(data.campo_origem_id),
     campo_origem_outro_id: toStringValue(data.campo_origem_outro_id),
-    datasource_nacionalidade: toStringValue(data.datasource_nacionalidade),
     datasource_origem: toStringValue(data.datasource_origem),
-    nacionalidades,
     origens,
-    nacionalidade_padrao: toStringValue(data.nacionalidade, '10'),
     erro: message
   };
 }
-
 async function routeFlowRequest(requestData) {
   const action = requestData?.action;
   const data = requestData?.data ?? {};
@@ -1094,7 +1060,7 @@ async function routeFlowRequest(requestData) {
 
         const fields = compactFields([
           fieldItem(data.campo_cpf_id, formatCpf(data.cpf)),
-          fieldItem(data.campo_nacionalidade_id, toStringValue(data.nacionalidade, '10')),
+          fieldItem(data.campo_nacionalidade_id, normalizeNationality(data.nacionalidade)),
           fieldItem(
             data.campo_ensino_medio_id,
             toStringValue(data.concluiu_ensino_medio)
@@ -1120,7 +1086,12 @@ async function routeFlowRequest(requestData) {
           )
         ]);
 
-        const submitResponse = await submitForm(data.button_id, fields, data.token);
+        const submitResponse = await submitForm(
+          data.button_id,
+          fields,
+          data.token,
+          RUBEUS_FINAL_SUBMIT_TIMEOUT_MS
+        );
         const redirect = submitResponse?.data?.redirect ?? {};
         const applicationId = toStringValue(
           redirect.applyment_id ?? data.applyment_id,
@@ -1200,7 +1171,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'final-submit-safe-v2' });
+    return res.status(200).json({ status: 'ok', version: 'static-nationalities-final-timeout-v3' });
   }
 
   if (req.method !== 'POST') {
