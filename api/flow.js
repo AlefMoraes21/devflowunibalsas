@@ -32,9 +32,84 @@ const FALLBACK_PROCESSES = [
   { id: '18714', title: 'Nota do ENEM - 2026/2' }
 ];
 
-function requirePrivateKey() {
-  if (!process.env.FLOW_PRIVATE_KEY) {
-    throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.');
+function loadPrivateKey() {
+  let privateKey = process.env.FLOW_PRIVATE_KEY;
+  const base64Parts = [];
+  let foundNumberedPart = false;
+
+  for (let index = 1; index <= 20; index += 1) {
+    const part = process.env[`FLOW_PRIVATE_KEY_BASE64_${index}`];
+    if (!part) {
+      if (foundNumberedPart) {
+        const nextPart = process.env[`FLOW_PRIVATE_KEY_BASE64_${index + 1}`];
+        if (nextPart) {
+          throw new Error(
+            `Falta a variável FLOW_PRIVATE_KEY_BASE64_${index} no cPanel.`
+          );
+        }
+      }
+      break;
+    }
+    foundNumberedPart = true;
+    base64Parts.push(part);
+  }
+
+  const privateKeyBase64 =
+    base64Parts.length > 0
+      ? base64Parts.join('')
+      : process.env.FLOW_PRIVATE_KEY_BASE64;
+
+  if (privateKeyBase64) {
+    const normalizedBase64 = privateKeyBase64.replace(/\s/g, '');
+
+    if (
+      normalizedBase64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(normalizedBase64)
+    ) {
+      throw new Error('As variáveis da chave privada contêm um base64 incompleto.');
+    }
+
+    privateKey = Buffer.from(normalizedBase64, 'base64').toString('utf8');
+  }
+
+  if (!privateKey) {
+    throw new Error(
+      'Configure FLOW_PRIVATE_KEY, FLOW_PRIVATE_KEY_BASE64 ou as partes FLOW_PRIVATE_KEY_BASE64_1... no cPanel.'
+    );
+  }
+
+  privateKey = privateKey.replace(/(?:\\)+n/g, '\n').trim();
+
+  const isPkcs8 =
+    privateKey.includes('-----BEGIN PRIVATE KEY-----') &&
+    privateKey.includes('-----END PRIVATE KEY-----');
+  const isPkcs1 =
+    privateKey.includes('-----BEGIN RSA PRIVATE KEY-----') &&
+    privateKey.includes('-----END RSA PRIVATE KEY-----');
+
+  if (!isPkcs8 && !isPkcs1) {
+    throw new Error('A chave privada do Flow está incompleta ou em formato inválido.');
+  }
+
+  try {
+    crypto.createPrivateKey(privateKey);
+  } catch (error) {
+    throw new Error(`A chave privada do Flow não pôde ser lida: ${error.message}`);
+  }
+
+  return privateKey;
+}
+
+function privateKeyFingerprint() {
+  try {
+    const privateKey = loadPrivateKey();
+    const publicKey = crypto.createPublicKey(privateKey).export({
+      type: 'spki',
+      format: 'der'
+    });
+    return crypto.createHash('sha256').update(publicKey).digest('hex').slice(0, 16);
+  } catch (error) {
+    return error.message;
   }
 }
 
@@ -1191,8 +1266,29 @@ async function routeFlowRequest(requestData) {
   }
 }
 
+function parseEncryptedEnvelope(body) {
+  if (body && typeof body === 'object' && !Buffer.isBuffer(body)) {
+    return body;
+  }
+
+  const rawBody = Buffer.isBuffer(body)
+    ? body.toString('utf8')
+    : String(body ?? '');
+
+  if (!rawBody.trim()) {
+    throw new Error('O corpo da requisição do WhatsApp Flow está vazio.');
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    throw new Error('O envelope criptografado do WhatsApp Flow não é um JSON válido.');
+  }
+}
+
 function decryptRequest(body, privateKey) {
-  const { encrypted_flow_data, encrypted_aes_key, initial_vector } = body ?? {};
+  const envelope = parseEncryptedEnvelope(body);
+  const { encrypted_flow_data, encrypted_aes_key, initial_vector } = envelope;
 
   if (!encrypted_flow_data || !encrypted_aes_key || !initial_vector) {
     throw new Error('Payload criptografado do WhatsApp Flow incompleto.');
@@ -1238,7 +1334,11 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'quase-la-diagnostic-logs-v6' });
+    return res.status(200).json({
+      status: 'ok',
+      version: 'cpanel-key-diagnostic-v1',
+      key_fingerprint: privateKeyFingerprint()
+    });
   }
 
   if (req.method !== 'POST') {
@@ -1250,9 +1350,7 @@ export default async function handler(req, res) {
   let requestData;
 
   try {
-    requirePrivateKey();
-
-    const privateKey = process.env.FLOW_PRIVATE_KEY.replace(/\\n/g, '\n');
+    const privateKey = loadPrivateKey();
     const decrypted = decryptRequest(req.body, privateKey);
     requestData = decrypted.requestData;
     aesKey = decrypted.aesKey;
@@ -1270,7 +1368,7 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', 'text/plain');
     return res.status(200).send(encryptedResponse);
   } catch (error) {
-    console.error('FLOW ERROR:', error);
+    console.error('FLOW ERROR:', error.stack ?? error);
 
     // Depois que a requisição foi descriptografada, nunca devolve 500 em texto
     // puro para o WhatsApp Flow. Devolve uma tela válida e criptografada.

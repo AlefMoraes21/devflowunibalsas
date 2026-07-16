@@ -1,0 +1,13 @@
+{
+  "name": "devflowunibalsas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "check": "node --check app.js && node --check api/flow.js"
+  }
+}
