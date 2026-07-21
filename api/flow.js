@@ -807,7 +807,12 @@ async function courseRetryData(data, message) {
       data.area_interesse_valor
     ),
     oferta_valor: optionValue(data.campo_oferta_id, data.oferta_valor),
-    polo_valor: optionValue(data.campo_polo_id, data.polo_valor),
+    polo_valor: toStringValue(
+      nextOptions[toStringValue(data.campo_polo_id)]?.value,
+      isNotaEnemContext(data)
+        ? toStringValue(data.polo_valor, '01')
+        : toStringValue(data.polo_valor)
+    ),
     coligada_valor: optionValue(data.campo_coligada_id, data.coligada_valor),
     filial_valor: optionValue(data.campo_filial_id, data.filial_valor),
     tipo_curso_valor: optionValue(
@@ -892,7 +897,12 @@ async function shiftRetryData(data, message) {
       data.area_interesse_valor
     ),
     oferta_valor: optionValue(data.campo_oferta_id, data.oferta_valor),
-    polo_valor: optionValue(data.campo_polo_id, data.polo_valor),
+    polo_valor: toStringValue(
+      nextOptions[toStringValue(data.campo_polo_id)]?.value,
+      isNotaEnemContext(data)
+        ? toStringValue(data.polo_valor, '01')
+        : toStringValue(data.polo_valor)
+    ),
     coligada_valor: optionValue(data.campo_coligada_id, data.coligada_valor),
     filial_valor: optionValue(data.campo_filial_id, data.filial_valor),
     tipo_curso_valor: optionValue(
@@ -1083,24 +1093,13 @@ async function routeFlowRequest(requestData) {
           fieldItem(data.campo_genero_rubeus_id, genero)
         ]);
 
-        console.log('CURSO SUBMIT:', {
+        console.log('DADOS BÁSICOS SUBMIT:', {
           processo_seletivo_id: toStringValue(data.processo_seletivo_id),
           target: toStringValue(data.target),
           button_id: toStringValue(data.button_id),
           nota_enem: notaEnem,
           campos_enviados: fields.map((item) => item.field_id)
         });
-
-        console.log(
-          'CAMPOS ENVIAR CURSO:',
-          fields.map((item) => ({
-            field_id: item.field_id,
-            value: Number(item.field_id) === 38556
-              ? '[INSCRIÇÃO ENEM OCULTADA]'
-              : item.value,
-            tipo: typeof item.value
-          }))
-        );
 
         const submitResponse = await submitForm(data.button_id, fields, data.token);
         const nextFormResponse = await getForm(
@@ -1124,10 +1123,11 @@ async function routeFlowRequest(requestData) {
         const technicalFields = [
           data.campo_area_interesse_id,
           data.campo_oferta_id,
+          data.campo_polo_id,
           data.campo_coligada_id,
           data.campo_filial_id,
           data.campo_tipo_curso_id
-        ];
+        ].filter(Boolean);
 
         const [coursesResponse, shiftsResponse] = await Promise.all([
           getDataSource({
@@ -1192,7 +1192,8 @@ async function routeFlowRequest(requestData) {
             nextOptions[toStringValue(data.campo_oferta_id)]?.value
           ),
           polo_valor: toStringValue(
-            nextOptions[toStringValue(data.campo_polo_id)]?.value
+            nextOptions[toStringValue(data.campo_polo_id)]?.value,
+            isNotaEnemContext(data) ? '01' : ''
           ),
           coligada_valor: toStringValue(
             nextOptions[toStringValue(data.campo_coligada_id)]?.value
@@ -1239,6 +1240,14 @@ async function routeFlowRequest(requestData) {
           nota_enem_calculado: notaEnem
         });
 
+        const campoPoloId = notaEnem
+          ? toStringValue(data.campo_polo_id, '38550')
+          : toStringValue(data.campo_polo_id);
+
+        const poloValor = notaEnem
+          ? toStringValue(data.polo_valor, '01')
+          : toStringValue(data.polo_valor);
+
         const fields = compactFields([
           fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
           fieldItem(data.campo_turno_id, toStringValue(data.turno_id)),
@@ -1280,11 +1289,22 @@ async function routeFlowRequest(requestData) {
             toStringValue(data.area_interesse_valor)
           ),
           fieldItem(data.campo_oferta_id, toStringValue(data.oferta_valor)),
-          fieldItem(data.campo_polo_id, toStringValue(data.polo_valor)),
+          fieldItem(campoPoloId, poloValor),
           fieldItem(data.campo_coligada_id, toStringValue(data.coligada_valor)),
           fieldItem(data.campo_filial_id, toStringValue(data.filial_valor)),
           fieldItem(data.campo_tipo_curso_id, toStringValue(data.tipo_curso_valor))
         ]);
+
+        console.log(
+          'CAMPOS ENVIAR CURSO:',
+          fields.map((item) => ({
+            field_id: item.field_id,
+            value: Number(item.field_id) === 38556
+              ? '[INSCRIÇÃO ENEM OCULTADA]'
+              : item.value,
+            tipo: typeof item.value
+          }))
+        );
 
         const submitResponse = await submitForm(data.button_id, fields, data.token);
         const nextToken = submitResponse.data.token ?? data.token;
@@ -1476,7 +1496,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'enem-codpolo-submit-v15' });
+    return res.status(200).json({ status: 'ok', version: 'enem-codpolo-nextfields-fallback-v16' });
   }
 
   if (req.method !== 'POST') {
