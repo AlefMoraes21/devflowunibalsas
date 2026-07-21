@@ -1441,7 +1441,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'rubeus-process-target-enem-v13' });
+    return res.status(200).json({ status: 'ok', version: 'flow-process-propagation-v14' });
   }
 
   if (req.method !== 'POST') {
