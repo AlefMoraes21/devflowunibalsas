@@ -44,7 +44,10 @@ function isNotaEnemProcess(processId) {
 }
 
 function isNotaEnemContext(data = {}) {
-  return isNotaEnemProcess(data.processo_seletivo_id);
+  return (
+    isNotaEnemProcess(data.processo_seletivo_id) &&
+    Number(data.target) === 270232
+  );
 }
 
 function enemFieldId(value, fallback) {
@@ -429,7 +432,6 @@ function buildBasicScreenData(formResponse, processId) {
     'Gênero Rubeus'
   );
   const button = findButton(form, ['Avançar']);
-  const notaEnem = isNotaEnemProcess(processId);
 
   return {
     token: String(token),
@@ -483,7 +485,9 @@ async function buildCourseScreenData(formResponse, processId) {
     throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   }
 
-  const notaEnem = isNotaEnemProcess(processId);
+  const notaEnem =
+    isNotaEnemProcess(processId) &&
+    Number(form.id) === 270232;
 
   const enemNumero = notaEnem
     ? requireInput(
@@ -1033,7 +1037,6 @@ async function routeFlowRequest(requestData) {
       try {
         const possuiNomeSocial = toBoolean(data.possui_nome_social);
         const genero = toStringValue(data.genero);
-        const notaEnem = isNotaEnemContext(data);
 
         const fields = compactFields([
           fieldItem(data.campo_nome_id, toStringValue(data.nome).trim()),
@@ -1191,6 +1194,14 @@ async function routeFlowRequest(requestData) {
     case 'enviar_curso': {
       try {
         const notaEnem = isNotaEnemContext(data);
+
+        console.log('CONTEXTO ENVIAR CURSO:', {
+          processo_seletivo_id: toStringValue(data.processo_seletivo_id),
+          target: toStringValue(data.target),
+          button_id: toStringValue(data.button_id),
+          eh_nota_enem_recebido: toBoolean(data.eh_nota_enem),
+          nota_enem_calculado: notaEnem
+        });
 
         const fields = compactFields([
           fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
@@ -1428,7 +1439,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'strict-enem-process-id-v11' });
+    return res.status(200).json({ status: 'ok', version: 'rubeus-process-target-enem-v12' });
   }
 
   if (req.method !== 'POST') {
