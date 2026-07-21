@@ -1278,9 +1278,8 @@ async function routeFlowRequest(requestData) {
                   enemFieldId(data.campo_enem_redacao_id, 38559),
                   normalizeEnemScore(data.nota_redacao_enem, 'Nota da redação')
                 ),
-                fieldItem(
-                  enemFieldId(data.campo_enem_media_id, 38558),
-                  normalizeEnemScore(data.media_enem, 'Média das notas do ENEM')
+                const calcMedia = Math.round((Number(data.nota_natureza_enem) + Number(data.nota_humanas_enem) + Number(data.nota_matematica_enem) + Number(data.nota_linguagens_enem) + Number(data.nota_redacao_enem)) / 5);
+fieldItem(enemFieldId(data.campo_enem_media_id, 38558), calcMedia)
                 )
               ]
             : []),
