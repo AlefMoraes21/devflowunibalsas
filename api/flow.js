@@ -458,7 +458,7 @@ function buildBasicScreenData(formResponse, processId) {
     campo_lgpd_assinatura_id: String(lgpdAssinatura.field_id),
     campo_lgpd_base_legal_id: String(lgpdBaseLegal.field_id),
     campo_genero_rubeus_id: String(generoRubeus.field_id),
-    idps_valor: toStringValue(idps.value, '217'),
+    idps_valor: toStringValue(idps.value, isNotaEnemProcess(processId) ? '220' : '217'),
     lgpd_assinatura_valor: toStringValue(lgpdAssinatura.value, '1'),
     lgpd_base_legal_valor: toStringValue(lgpdBaseLegal.value, '4'),
     data_maxima_nascimento: currentIsoDate(),
