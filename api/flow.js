@@ -434,6 +434,7 @@ function buildBasicScreenData(formResponse, processId) {
     'Gênero Rubeus'
   );
   const button = findButton(form, ['Avançar']);
+  const notaEnem = isNotaEnemProcess(processId);
 
   return {
     token: String(token),
@@ -1037,6 +1038,7 @@ async function routeFlowRequest(requestData) {
       try {
         const possuiNomeSocial = toBoolean(data.possui_nome_social);
         const genero = toStringValue(data.genero);
+        const notaEnem = isNotaEnemContext(data);
 
         const fields = compactFields([
           fieldItem(data.campo_nome_id, toStringValue(data.nome).trim()),
@@ -1431,7 +1433,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'nota-enem-flow-target-v9' });
+    return res.status(200).json({ status: 'ok', version: 'nota-enem-undefined-fix-v10' });
   }
 
   if (req.method !== 'POST') {
