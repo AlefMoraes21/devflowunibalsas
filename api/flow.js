@@ -44,12 +44,7 @@ function isNotaEnemProcess(processId) {
 }
 
 function isNotaEnemContext(data = {}) {
-  return (
-    isNotaEnemProcess(data.processo_seletivo_id) ||
-    toBoolean(data.eh_nota_enem) ||
-    Number(data.target) === 270232 ||
-    Number(data.button_id) === 3590272
-  );
+  return isNotaEnemProcess(data.processo_seletivo_id);
 }
 
 function enemFieldId(value, fallback) {
@@ -488,7 +483,7 @@ async function buildCourseScreenData(formResponse, processId) {
     throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   }
 
-  const notaEnem = isNotaEnemProcess(processId) || Number(form.id) === 270232;
+  const notaEnem = isNotaEnemProcess(processId);
 
   const enemNumero = notaEnem
     ? requireInput(
@@ -1433,7 +1428,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'nota-enem-undefined-fix-v10' });
+    return res.status(200).json({ status: 'ok', version: 'strict-enem-process-id-v11' });
   }
 
   if (req.method !== 'POST') {
