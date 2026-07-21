@@ -32,6 +32,56 @@ const FALLBACK_PROCESSES = [
   { id: '18714', title: 'Nota do ENEM - 2026/2' }
 ];
 
+const PROCESSO_NOTA_ENEM_ID = '18714';
+
+const ANOS_ENEM = [
+  '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018',
+  '2017', '2016', '2015', '2014', '2013', '2012', '2011', '2010'
+].map((ano) => ({ id: ano, title: ano }));
+
+function isNotaEnemProcess(processId) {
+  return toStringValue(processId) === PROCESSO_NOTA_ENEM_ID;
+}
+
+function isNotaEnemContext(data = {}) {
+  return (
+    isNotaEnemProcess(data.processo_seletivo_id) ||
+    toBoolean(data.eh_nota_enem) ||
+    Number(data.target) === 270232 ||
+    Number(data.button_id) === 3590272
+  );
+}
+
+function enemFieldId(value, fallback) {
+  return toStringValue(value, String(fallback));
+}
+
+function normalizeEnemRegistration(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+
+  if (digits.length < 12 || digits.length > 15) {
+    throw new Error('O número de inscrição do ENEM deve conter de 12 a 15 números.');
+  }
+
+  return digits;
+}
+
+function normalizeEnemScore(value, fieldName) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    throw new Error(`${fieldName} deve conter somente números.`);
+  }
+
+  const score = Number(normalized);
+
+  if (!Number.isFinite(score) || score < 0 || score > 1000) {
+    throw new Error(`${fieldName} deve estar entre 0 e 1000.`);
+  }
+
+  return score;
+}
+
 function requirePrivateKey() {
   if (!process.env.FLOW_PRIVATE_KEY) {
     throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.');
@@ -345,7 +395,7 @@ async function getDataSource({ datasource, target, filter = [], nextFields = [],
   });
 }
 
-function buildBasicScreenData(formResponse) {
+function buildBasicScreenData(formResponse, processId) {
   const form = formResponse?.data?.form;
   const token = formResponse?.token;
 
@@ -409,11 +459,13 @@ function buildBasicScreenData(formResponse) {
     titulo_etapa: String(formResponse?.data?.stage?.steps?.find(
       (step) => Number(step.id) === Number(form.id)
     )?.name ?? 'Dados básicos'),
+    processo_seletivo_id: notaEnem ? PROCESSO_NOTA_ENEM_ID : toStringValue(processId),
+    eh_nota_enem: isNotaEnemProcess(processId),
     erro: ''
   };
 }
 
-async function buildCourseScreenData(formResponse) {
+async function buildCourseScreenData(formResponse, processId) {
   const form = formResponse?.data?.form;
   const token = formResponse?.token;
 
@@ -434,6 +486,45 @@ async function buildCourseScreenData(formResponse) {
   if (!query?.query_data) {
     throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   }
+
+  const notaEnem = isNotaEnemProcess(processId) || Number(form.id) === 270232;
+
+  const enemNumero = notaEnem
+    ? requireInput(
+        findInput(form, ['Número de inscrição do ENEM', 'Numero de inscrição do ENEM'], 38556),
+        'Número de inscrição do ENEM'
+      )
+    : null;
+  const enemAno = notaEnem
+    ? requireInput(
+        findInput(form, ['Ano de realização do ENEM', 'Ano de realizacao do ENEM'], 38557),
+        'Ano de realização do ENEM'
+      )
+    : null;
+  const enemNatureza = notaEnem
+    ? requireInput(
+        findInput(form, ['Nota de ciências da natureza do ENEM', 'Nota de ciencias da natureza do ENEM'], 38563),
+        'Nota de ciências da natureza do ENEM'
+      )
+    : null;
+  const enemHumanas = notaEnem
+    ? requireInput(
+        findInput(form, ['Nota de ciências humanas do ENEM', 'Nota de ciencias humanas do ENEM'], 38562),
+        'Nota de ciências humanas do ENEM'
+      )
+    : null;
+  const enemMatematica = notaEnem
+    ? requireInput(findInput(form, ['Nota de matemática do ENEM', 'Nota de matematica do ENEM'], 38561), 'Nota de matemática do ENEM')
+    : null;
+  const enemLinguagens = notaEnem
+    ? requireInput(findInput(form, ['Nota de linguagens do ENEM'], 38560), 'Nota de linguagens do ENEM')
+    : null;
+  const enemRedacao = notaEnem
+    ? requireInput(findInput(form, ['Nota da redação do ENEM', 'Nota da redacao do ENEM'], 38559), 'Nota da redação do ENEM')
+    : null;
+  const enemMedia = notaEnem
+    ? requireInput(findInput(form, ['Média de notas do ENEM', 'Media de notas do ENEM'], 38558), 'Média de notas do ENEM')
+    : null;
 
   const nextFields = (query.fields ?? [])
     .map((item) => Number(item.field))
@@ -470,6 +561,24 @@ async function buildCourseScreenData(formResponse) {
     coligada_valor: '',
     filial_valor: '',
     tipo_curso_valor: '',
+    processo_seletivo_id: toStringValue(processId),
+    eh_nota_enem: notaEnem,
+    campo_enem_numero_id: toStringValue(enemNumero?.field_id),
+    campo_enem_ano_id: toStringValue(enemAno?.field_id),
+    campo_enem_natureza_id: toStringValue(enemNatureza?.field_id),
+    campo_enem_humanas_id: toStringValue(enemHumanas?.field_id),
+    campo_enem_matematica_id: toStringValue(enemMatematica?.field_id),
+    campo_enem_linguagens_id: toStringValue(enemLinguagens?.field_id),
+    campo_enem_redacao_id: toStringValue(enemRedacao?.field_id),
+    campo_enem_media_id: toStringValue(enemMedia?.field_id),
+    anos_enem: notaEnem
+      ? (Array.isArray(enemAno?.data) && enemAno.data.length > 0
+          ? enemAno.data.map((item) => ({
+              id: toStringValue(item.value),
+              title: toStringValue(item.display)
+            }))
+          : ANOS_ENEM)
+      : [],
     erro: ''
   };
 }
@@ -591,6 +700,8 @@ function basicRetryData(data, message) {
     lgpd_base_legal_valor: toStringValue(data.lgpd_base_legal_valor, '4'),
     data_maxima_nascimento: currentIsoDate(),
     titulo_etapa: 'Dados básicos',
+    processo_seletivo_id: toStringValue(data.processo_seletivo_id),
+    eh_nota_enem: toBoolean(data.eh_nota_enem) || isNotaEnemProcess(data.processo_seletivo_id),
     erro: message
   };
 }
@@ -686,6 +797,19 @@ async function courseRetryData(data, message) {
       data.campo_tipo_curso_id,
       data.tipo_curso_valor
     ),
+    processo_seletivo_id: isNotaEnemContext(data)
+      ? PROCESSO_NOTA_ENEM_ID
+      : toStringValue(data.processo_seletivo_id),
+    eh_nota_enem: isNotaEnemContext(data),
+    campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
+    campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
+    campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563),
+    campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
+    campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561),
+    campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
+    campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559),
+    campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
+    anos_enem: ANOS_ENEM,
     erro: message
   };
 }
@@ -755,6 +879,19 @@ async function shiftRetryData(data, message) {
       data.campo_tipo_curso_id,
       data.tipo_curso_valor
     ),
+    processo_seletivo_id: isNotaEnemContext(data)
+      ? PROCESSO_NOTA_ENEM_ID
+      : toStringValue(data.processo_seletivo_id),
+    eh_nota_enem: isNotaEnemContext(data),
+    campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
+    campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
+    campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563),
+    campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
+    campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561),
+    campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
+    campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559),
+    campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
+    anos_enem: ANOS_ENEM,
     erro: message
   };
 }
@@ -881,7 +1018,7 @@ async function routeFlowRequest(requestData) {
           startResponse.token
         );
 
-        return responseForScreen('DADOS_BASICOS', buildBasicScreenData(formResponse));
+        return responseForScreen('DADOS_BASICOS', buildBasicScreenData(formResponse, rawProcessId));
       } catch (error) {
         console.error('Erro ao iniciar inscrição:', error);
         let processes = FALLBACK_PROCESSES;
@@ -925,6 +1062,14 @@ async function routeFlowRequest(requestData) {
           fieldItem(data.campo_genero_rubeus_id, genero)
         ]);
 
+        console.log('CURSO SUBMIT:', {
+          processo_seletivo_id: toStringValue(data.processo_seletivo_id),
+          target: toStringValue(data.target),
+          button_id: toStringValue(data.button_id),
+          nota_enem: notaEnem,
+          campos_enviados: fields.map((item) => item.field_id)
+        });
+
         const submitResponse = await submitForm(data.button_id, fields, data.token);
         const nextFormResponse = await getForm(
           submitResponse.data.next,
@@ -934,7 +1079,7 @@ async function routeFlowRequest(requestData) {
 
         return responseForScreen(
           'CURSO_INTERESSE',
-          await buildCourseScreenData(nextFormResponse)
+          await buildCourseScreenData(nextFormResponse, data.processo_seletivo_id)
         );
       } catch (error) {
         console.error('Erro ao enviar dados básicos:', error);
@@ -1022,6 +1167,19 @@ async function routeFlowRequest(requestData) {
           tipo_curso_valor: toStringValue(
             nextOptions[toStringValue(data.campo_tipo_curso_id)]?.value
           ),
+          processo_seletivo_id: isNotaEnemContext(data)
+            ? PROCESSO_NOTA_ENEM_ID
+            : toStringValue(data.processo_seletivo_id),
+          eh_nota_enem: isNotaEnemContext(data),
+          campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
+          campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
+          campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563),
+          campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
+          campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561),
+          campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
+          campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559),
+          campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
+          anos_enem: ANOS_ENEM,
           erro: ''
         });
       } catch (error) {
@@ -1035,9 +1193,44 @@ async function routeFlowRequest(requestData) {
 
     case 'enviar_curso': {
       try {
+        const notaEnem = isNotaEnemContext(data);
+
         const fields = compactFields([
           fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
           fieldItem(data.campo_turno_id, toStringValue(data.turno_id)),
+          ...(notaEnem
+            ? [
+                fieldItem(
+                  enemFieldId(data.campo_enem_numero_id, 38556),
+                  normalizeEnemRegistration(data.numero_inscricao_enem)
+                ),
+                fieldItem(enemFieldId(data.campo_enem_ano_id, 38557), toStringValue(data.ano_enem)),
+                fieldItem(
+                  enemFieldId(data.campo_enem_natureza_id, 38563),
+                  normalizeEnemScore(data.nota_natureza_enem, 'Nota de ciências da natureza')
+                ),
+                fieldItem(
+                  enemFieldId(data.campo_enem_humanas_id, 38562),
+                  normalizeEnemScore(data.nota_humanas_enem, 'Nota de ciências humanas')
+                ),
+                fieldItem(
+                  enemFieldId(data.campo_enem_matematica_id, 38561),
+                  normalizeEnemScore(data.nota_matematica_enem, 'Nota de matemática')
+                ),
+                fieldItem(
+                  enemFieldId(data.campo_enem_linguagens_id, 38560),
+                  normalizeEnemScore(data.nota_linguagens_enem, 'Nota de linguagens')
+                ),
+                fieldItem(
+                  enemFieldId(data.campo_enem_redacao_id, 38559),
+                  normalizeEnemScore(data.nota_redacao_enem, 'Nota da redação')
+                ),
+                fieldItem(
+                  enemFieldId(data.campo_enem_media_id, 38558),
+                  normalizeEnemScore(data.media_enem, 'Média das notas do ENEM')
+                )
+              ]
+            : []),
           fieldItem(
             data.campo_area_interesse_id,
             toStringValue(data.area_interesse_valor)
@@ -1238,7 +1431,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ status: 'ok', version: 'quase-la-diagnostic-logs-v6' });
+    return res.status(200).json({ status: 'ok', version: 'nota-enem-flow-target-v9' });
   }
 
   if (req.method !== 'POST') {
