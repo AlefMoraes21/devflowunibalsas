@@ -26,21 +26,11 @@ const FALLBACK_ORIGINS = [
 ];
 
 const PROCESSO_NOTA_ENEM_ID = '18714';
+const ANOS_ENEM = ['2025','2024','2023','2022','2021','2020','2019','2018','2017','2016','2015','2014','2013','2012','2011','2010'].map((ano) => ({ id: ano, title: ano }));
 
-const ANOS_ENEM = [
-  '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018',
-  '2017', '2016', '2015', '2014', '2013', '2012', '2011', '2010'
-].map((ano) => ({ id: ano, title: ano }));
-
-function isNotaEnemProcess(processId) {
-  return toStringValue(processId) === PROCESSO_NOTA_ENEM_ID;
-}
-function isNotaEnemContext(data = {}) {
-  return isNotaEnemProcess(data.processo_seletivo_id) && Number(data.target) === 270185;
-}
-function enemFieldId(value, fallback) {
-  return toStringValue(value, String(fallback));
-}
+function isNotaEnemProcess(processId) { return toStringValue(processId) === PROCESSO_NOTA_ENEM_ID; }
+function isNotaEnemContext(data = {}) { return isNotaEnemProcess(data.processo_seletivo_id) && Number(data.target) === 270185; }
+function enemFieldId(value, fallback) { return toStringValue(value, String(fallback)); }
 function normalizeEnemRegistration(value) {
   const digits = String(value ?? '').replace(/\D/g, '');
   if (digits.length < 12 || digits.length > 15) throw new Error('O número de inscrição do ENEM deve conter de 12 a 15 números.');
@@ -61,12 +51,8 @@ function calculateEnemAverage(scores) {
   const average = Math.round(((total / 5) + Number.EPSILON) * 100) / 100;
   return String(average);
 }
-function requirePrivateKey() {
-  if (!process.env.FLOW_PRIVATE_KEY) throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.');
-}
-function normalizeText(value = '') {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-}
+function requirePrivateKey() { if (!process.env.FLOW_PRIVATE_KEY) throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.'); }
+function normalizeText(value = '') { return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(); }
 function toBoolean(value) { return value === true || value === 'true' || value === 1 || value === '1'; }
 function toStringValue(value, fallback = '') { if (value === null || value === undefined) return fallback; return String(value); }
 function normalizeNationality(value) {
@@ -92,10 +78,7 @@ function formatBrazilianPhone(value) {
   if (digits.length === 10) return digits.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
   return String(value ?? '');
 }
-function fieldItem(fieldId, value) {
-  if (fieldId === null || fieldId === undefined || fieldId === '') return null;
-  return { field_id: toInteger(fieldId, 'field_id'), value };
-}
+function fieldItem(fieldId, value) { if (fieldId === null || fieldId === undefined || fieldId === '') return null; return { field_id: toInteger(fieldId, 'field_id'), value }; }
 function compactFields(fields) { return fields.filter(Boolean); }
 function getFormInputs(form) { return form?.content?.inputs ?? []; }
 function getFormButtons(form) { return form?.content?.buttons ?? []; }
@@ -114,73 +97,39 @@ function findButton(form, preferredLabels = ['Avançar', 'Concluir']) {
   if (!button?.button) throw new Error('A Rubeus não retornou o botão de avanço do formulário.');
   return button;
 }
-function findQueryForField(form, fieldId) {
-  return (form?.querys ?? []).find((query) => (query.fields ?? []).some((item) => Number(item.field) === Number(fieldId))) ?? null;
-}
-function requireInput(input, name) {
-  if (!input?.field_id) throw new Error(`O campo "${name}" não foi localizado no formulário da Rubeus.`);
-  return input;
-}
-function flowOptions(options = []) {
-  return options.map((option) => ({ id: toStringValue(option.value), title: toStringValue(option.label).replace(/-+$/g, '').trim() }));
-}
-function extractDataSourceOptions(response) {
-  if (Array.isArray(response?.data)) return response.data;
-  if (Array.isArray(response?.data?.options)) return response.data.options;
-  return [];
-}
+function findQueryForField(form, fieldId) { return (form?.querys ?? []).find((query) => (query.fields ?? []).some((item) => Number(item.field) === Number(fieldId))) ?? null; }
+function requireInput(input, name) { if (!input?.field_id) throw new Error(`O campo "${name}" não foi localizado no formulário da Rubeus.`); return input; }
+function flowOptions(options = []) { return options.map((option) => ({ id: toStringValue(option.value), title: toStringValue(option.label).replace(/-+$/g, '').trim() })); }
+function extractDataSourceOptions(response) { if (Array.isArray(response?.data)) return response.data; if (Array.isArray(response?.data?.options)) return response.data.options; return []; }
 function currentIsoDate() { return new Date().toISOString().slice(0, 10); }
 
 async function rubeusRequest(path, { method = 'GET', body, timeoutMs = RUBEUS_TIMEOUT_MS } = {}) {
   if (!process.env.RBS_TOKEN) throw new Error('A variável RBS_TOKEN não foi configurada.');
-  let rawToken = String(process.env.RBS_TOKEN || '').trim();
-  rawToken = rawToken.replace(/^Bearer\s+/i, '');
-  rawToken = rawToken.replace(/[\r\n\s'"]+/g, '');
+  let rawToken = String(process.env.RBS_TOKEN || '').trim().replace(/^Bearer\s+/i, '').replace(/[\r\n\s'"]+/g, '');
   if (rawToken.length > 128 && /^[a-f0-9]+$/i.test(rawToken)) rawToken = rawToken.slice(0, 64);
   if (!rawToken) throw new Error('RBS_TOKEN está vazio após saneamento.');
   const headers = { Authorization: `Bearer ${rawToken}` };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const startedAt = Date.now();
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
-  try {
-    response = await fetch(`${RUBEUS_BASE_URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw new Error(`A Rubeus demorou mais de ${timeoutMs / 1000} segundos em ${path}.`);
-    throw error;
-  } finally { clearTimeout(timeout); }
-  console.log('RUBEUS RESPONSE:', { path, status: response.status, duration_ms: Date.now() - startedAt });
-  const raw = await response.text();
-  let json;
+  try { response = await fetch(`${RUBEUS_BASE_URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal }); }
+  catch (error) { if (error?.name === 'AbortError') throw new Error(`A Rubeus demorou mais de ${timeoutMs / 1000} segundos em ${path}.`); throw error; }
+  finally { clearTimeout(timeout); }
+  const raw = await response.text(); let json;
   try { json = raw ? JSON.parse(raw) : {}; } catch { json = { message: raw || 'Resposta inválida da Rubeus.' }; }
-  if (!response.ok || json?.success === false) {
-    console.error('RUBEUS ERROR BODY:', { path, status: response.status, body: json });
-  }
+  if (!response.ok || json?.success === false) console.error('RUBEUS ERROR:', { path, status: response.status, body: json });
   if (!response.ok) throw new Error(json?.message || `A Rubeus respondeu com status HTTP ${response.status}.`);
   if (json?.success === false) throw new Error(json?.message || 'A operação não pôde ser concluída na Rubeus.');
   return json;
 }
-
 async function listProcesses() {
   const response = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
-  return (response.data ?? []).map((process) => ({
-    id: String(process.id),
-    title: String(process.name)
-  }));
+  return (response.data ?? []).map((p) => ({ id: String(p.id), title: String(p.name) }));
 }
-async function startApplication(processId) {
-  return rubeusRequest('/start', { method: 'POST', body: { process: toInteger(processId, 'processo_seletivo_id') } });
-}
-async function getForm(target, local, token) {
-  return rubeusRequest('/form', { method: 'POST', body: { target: toInteger(target, 'target'), local: toStringValue(local, 'step'), token: toStringValue(token) } });
-}
-async function submitForm(button, data, token, timeoutMs = RUBEUS_TIMEOUT_MS) {
-  return rubeusRequest('/submit', { method: 'POST', timeoutMs, body: { button: toInteger(button, 'button_id'), validate_on_server: true, data, token: toStringValue(token) } });
-}
-async function getDataSource({ datasource, target, filter = [], nextFields = [], token }) {
-  return rubeusRequest('/data-source', { method: 'POST', body: { datasource: toStringValue(datasource), target: toInteger(target, 'target do data-source'), filter, nextFields: nextFields.map((item) => toInteger(item, 'nextFields')), token: toStringValue(token) } });
-}
+async function startApplication(processId) { return rubeusRequest('/start', { method: 'POST', body: { process: toInteger(processId, 'processo_seletivo_id') } }); }
+async function getForm(target, local, token) { return rubeusRequest('/form', { method: 'POST', body: { target: toInteger(target, 'target'), local: toStringValue(local, 'step'), token: toStringValue(token) } }); }
+async function submitForm(button, data, token, timeoutMs = RUBEUS_TIMEOUT_MS) { return rubeusRequest('/submit', { method: 'POST', timeoutMs, body: { button: toInteger(button, 'button_id'), validate_on_server: true, data, token: toStringValue(token) } }); }
+async function getDataSource({ datasource, target, filter = [], nextFields = [], token }) { return rubeusRequest('/data-source', { method: 'POST', body: { datasource: toStringValue(datasource), target: toInteger(target, 'target do data-source'), filter, nextFields: nextFields.map((item) => toInteger(item, 'nextFields')), token: toStringValue(token) } }); }
 
 function buildBasicScreenData(formResponse, processId) {
   const form = formResponse?.data?.form; const token = formResponse?.token;
@@ -227,14 +176,6 @@ async function buildCourseScreenData(formResponse, processId) {
   if (!query?.query_data) throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   const notaEnem = isNotaEnemProcess(processId) && Number(form.id) === 270232;
   const polo = notaEnem ? requireInput(findInput(form, ['CODPOLO'], 38550), 'CODPOLO') : findInput(form, ['CODPOLO'], 38550);
-  const enemNumero = notaEnem ? requireInput(findInput(form, ['Número de inscrição do ENEM'], 38556), 'Número de inscrição do ENEM') : null;
-  const enemAno = notaEnem ? requireInput(findInput(form, ['Ano de realização do ENEM'], 38557), 'Ano de realização do ENEM') : null;
-  const enemNatureza = notaEnem ? requireInput(findInput(form, ['Nota de ciências da natureza do ENEM'], 38563), 'Nota de ciências da natureza do ENEM') : null;
-  const enemHumanas = notaEnem ? requireInput(findInput(form, ['Nota de ciências humanas do ENEM'], 38562), 'Nota de ciências humanas do ENEM') : null;
-  const enemMatematica = notaEnem ? requireInput(findInput(form, ['Nota de matemática do ENEM'], 38561), 'Nota de matemática do ENEM') : null;
-  const enemLinguagens = notaEnem ? requireInput(findInput(form, ['Nota de linguagens do ENEM'], 38560), 'Nota de linguagens do ENEM') : null;
-  const enemRedacao = notaEnem ? requireInput(findInput(form, ['Nota da redação do ENEM'], 38559), 'Nota da redação do ENEM') : null;
-  const enemMedia = notaEnem ? requireInput(findInput(form, ['Média de notas do ENEM'], 38558), 'Média de notas do ENEM') : null;
   const nextFields = (query.fields ?? []).map((item) => Number(item.field)).filter((fieldId) => fieldId !== Number(curso.field_id));
   const courseOptionsResponse = await getDataSource({ datasource: query.query_data, target: curso.field_id, filter: [], nextFields, token });
   return {
@@ -245,11 +186,8 @@ async function buildCourseScreenData(formResponse, processId) {
     cursos: flowOptions(extractDataSourceOptions(courseOptionsResponse)), turnos: [], turno_visivel: false,
     curso_selecionado: '', turno_selecionado: '', area_interesse_valor: '', oferta_valor: '', polo_valor: '', coligada_valor: '', filial_valor: '', tipo_curso_valor: '',
     processo_seletivo_id: toStringValue(processId), eh_nota_enem: notaEnem,
-    campo_enem_numero_id: toStringValue(enemNumero?.field_id), campo_enem_ano_id: toStringValue(enemAno?.field_id),
-    campo_enem_natureza_id: toStringValue(enemNatureza?.field_id), campo_enem_humanas_id: toStringValue(enemHumanas?.field_id),
-    campo_enem_matematica_id: toStringValue(enemMatematica?.field_id), campo_enem_linguagens_id: toStringValue(enemLinguagens?.field_id),
-    campo_enem_redacao_id: toStringValue(enemRedacao?.field_id), campo_enem_media_id: toStringValue(enemMedia?.field_id),
-    anos_enem: notaEnem ? (Array.isArray(enemAno?.data) && enemAno.data.length > 0 ? enemAno.data.map((item) => ({ id: toStringValue(item.value), title: toStringValue(item.display) })) : ANOS_ENEM) : [], erro: ''
+    campo_enem_numero_id: '', campo_enem_ano_id: '', campo_enem_natureza_id: '', campo_enem_humanas_id: '', campo_enem_matematica_id: '', campo_enem_linguagens_id: '', campo_enem_redacao_id: '', campo_enem_media_id: '',
+    anos_enem: ANOS_ENEM, erro: ''
   };
 }
 async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) {
@@ -277,7 +215,7 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
       const originsResponse = await getDataSource({ datasource: originQuery.query_data, target: origem.field_id, filter: [], nextFields: [], token });
       const dynamicOrigins = flowOptions(extractDataSourceOptions(originsResponse));
       if (dynamicOrigins.length > 0) origens = dynamicOrigins;
-    } catch (error) { console.error('Não foi possível carregar as origens; usando lista estática:', error.message); }
+    } catch {}
   }
   const redirect = previousSubmitResponse?.data?.redirect ?? {};
   return {
@@ -318,7 +256,7 @@ async function courseRetryData(data, message) {
     const [coursesResponse, shiftsResponse] = await Promise.all(requests);
     courses = flowOptions(extractDataSourceOptions(coursesResponse));
     if (shiftsResponse) { shifts = flowOptions(extractDataSourceOptions(shiftsResponse)); nextOptions = shiftsResponse?.data?.nextOptions ?? {}; }
-  } catch (error) { console.error('Não foi possível recarregar cursos/turnos:', error); }
+  } catch {}
   const optionValue = (fieldId, existingValue) => toStringValue(nextOptions[toStringValue(fieldId)]?.value, toStringValue(existingValue));
   return {
     token: toStringValue(data.token), target: toStringValue(data.target), local: toStringValue(data.local, 'step'),
@@ -335,42 +273,7 @@ async function courseRetryData(data, message) {
     coligada_valor: optionValue(data.campo_coligada_id, data.coligada_valor), filial_valor: optionValue(data.campo_filial_id, data.filial_valor),
     tipo_curso_valor: optionValue(data.campo_tipo_curso_id, data.tipo_curso_valor),
     processo_seletivo_id: isNotaEnemContext(data) ? PROCESSO_NOTA_ENEM_ID : toStringValue(data.processo_seletivo_id),
-    eh_nota_enem: isNotaEnemContext(data),
-    campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556), campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
-    campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563), campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
-    campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561), campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
-    campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559), campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
-    anos_enem: ANOS_ENEM, erro: message
-  };
-}
-async function shiftRetryData(data, message) {
-  let shifts = []; let nextOptions = {};
-  try {
-    const technicalFields = [data.campo_area_interesse_id, data.campo_oferta_id, data.campo_polo_id, data.campo_coligada_id, data.campo_filial_id, data.campo_tipo_curso_id].filter(Boolean);
-    const shiftsResponse = await getDataSource({ datasource: data.datasource, target: data.campo_turno_id, filter: [{ field: toInteger(data.campo_curso_id, 'campo_curso_id'), values: toStringValue(data.curso_id) }], nextFields: technicalFields, token: data.token });
-    shifts = flowOptions(extractDataSourceOptions(shiftsResponse)); nextOptions = shiftsResponse?.data?.nextOptions ?? {};
-  } catch (error) { console.error('Não foi possível recarregar os turnos:', error); }
-  const optionValue = (fieldId, existingValue) => toStringValue(nextOptions[toStringValue(fieldId)]?.value, toStringValue(existingValue));
-  return {
-    token: toStringValue(data.token), target: toStringValue(data.target), local: toStringValue(data.local, 'step'),
-    button_id: toStringValue(data.button_id), datasource: toStringValue(data.datasource),
-    campo_curso_id: toStringValue(data.campo_curso_id), campo_turno_id: toStringValue(data.campo_turno_id),
-    campo_area_interesse_id: toStringValue(data.campo_area_interesse_id), campo_oferta_id: toStringValue(data.campo_oferta_id),
-    campo_polo_id: toStringValue(data.campo_polo_id), campo_coligada_id: toStringValue(data.campo_coligada_id),
-    campo_filial_id: toStringValue(data.campo_filial_id), campo_tipo_curso_id: toStringValue(data.campo_tipo_curso_id),
-    curso_id: toStringValue(data.curso_id), curso_nome: toStringValue(data.curso_nome, 'Curso selecionado'), turnos: shifts,
-    area_interesse_valor: optionValue(data.campo_area_interesse_id, data.area_interesse_valor),
-    oferta_valor: optionValue(data.campo_oferta_id, data.oferta_valor),
-    polo_valor: toStringValue(nextOptions[toStringValue(data.campo_polo_id)]?.value, isNotaEnemContext(data) ? toStringValue(data.polo_valor, '01') : toStringValue(data.polo_valor)),
-    coligada_valor: optionValue(data.campo_coligada_id, data.coligada_valor), filial_valor: optionValue(data.campo_filial_id, data.filial_valor),
-    tipo_curso_valor: optionValue(data.campo_tipo_curso_id, data.tipo_curso_valor),
-    processo_seletivo_id: isNotaEnemContext(data) ? PROCESSO_NOTA_ENEM_ID : toStringValue(data.processo_seletivo_id),
-    eh_nota_enem: isNotaEnemContext(data),
-    campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556), campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
-    campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563), campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
-    campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561), campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
-    campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559), campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
-    anos_enem: ANOS_ENEM, erro: message
+    eh_nota_enem: isNotaEnemContext(data), campo_enem_numero_id: '', campo_enem_ano_id: '', campo_enem_natureza_id: '', campo_enem_humanas_id: '', campo_enem_matematica_id: '', campo_enem_linguagens_id: '', campo_enem_redacao_id: '', campo_enem_media_id: '', anos_enem: ANOS_ENEM, erro: message
   };
 }
 function fastAlmostThereRetryData(data, message) {
@@ -388,28 +291,6 @@ function fastAlmostThereRetryData(data, message) {
     erro: message || 'Não foi possível concluir a inscrição. Revise os dados e tente novamente.'
   };
 }
-async function almostThereRetryData(data, message) {
-  let origens = FALLBACK_ORIGINS;
-  if (data.datasource_origem) {
-    try {
-      const originsResponse = await getDataSource({ datasource: data.datasource_origem, target: data.campo_origem_id, filter: [], nextFields: [], token: data.token });
-      const dynamicOrigins = flowOptions(extractDataSourceOptions(originsResponse));
-      if (dynamicOrigins.length > 0) origens = dynamicOrigins;
-    } catch (error) { console.error('Não foi possível recarregar as origens:', error.message); }
-  }
-  return {
-    token: toStringValue(data.token), target: toStringValue(data.target), local: toStringValue(data.local, 'step'),
-    button_id: toStringValue(data.button_id), person_id: toStringValue(data.person_id), applyment_id: toStringValue(data.applyment_id),
-    campo_cpf_id: toStringValue(data.campo_cpf_id), campo_nacionalidade_id: toStringValue(data.campo_nacionalidade_id),
-    campo_ensino_medio_id: toStringValue(data.campo_ensino_medio_id), campo_deficiencia_id: toStringValue(data.campo_deficiencia_id),
-    campo_def_auditiva_id: toStringValue(data.campo_def_auditiva_id), campo_def_fala_id: toStringValue(data.campo_def_fala_id),
-    campo_def_fisica_id: toStringValue(data.campo_def_fisica_id), campo_def_intelectual_id: toStringValue(data.campo_def_intelectual_id),
-    campo_def_visual_id: toStringValue(data.campo_def_visual_id), campo_def_mental_id: toStringValue(data.campo_def_mental_id),
-    campo_def_outras_id: toStringValue(data.campo_def_outras_id), campo_def_outras_texto_id: toStringValue(data.campo_def_outras_texto_id),
-    campo_origem_id: toStringValue(data.campo_origem_id), campo_origem_outro_id: toStringValue(data.campo_origem_outro_id),
-    datasource_origem: toStringValue(data.datasource_origem), origens, erro: message
-  };
-}
 
 async function routeFlowRequest(requestData) {
   const action = requestData?.action; const data = requestData?.data ?? {}; const customAction = data?.acao;
@@ -419,23 +300,18 @@ async function routeFlowRequest(requestData) {
       const processes = await listProcesses();
       if (processes.length === 0) {
         return responseForScreen('ESCOLHA_PROCESSO', {
-          processo_seletivo_id: [],
-          tem_processos: false,
+          processo_seletivo_id: [], tem_processos: false,
           mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento. Em breve abriremos novas turmas.',
           erro: ''
         });
       }
       return responseForScreen('ESCOLHA_PROCESSO', {
-        processo_seletivo_id: processes,
-        tem_processos: true,
-        mensagem_vazio: '',
-        erro: ''
+        processo_seletivo_id: processes, tem_processos: true, mensagem_vazio: '', erro: ''
       });
     } catch (error) {
       console.error('Falha ao listar processos:', error);
       return responseForScreen('ESCOLHA_PROCESSO', {
-        processo_seletivo_id: [],
-        tem_processos: false,
+        processo_seletivo_id: [], tem_processos: false,
         mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.',
         erro: ''
       });
@@ -445,35 +321,35 @@ async function routeFlowRequest(requestData) {
   if (action !== 'data_exchange') return { data: { status: 'active' } };
 
   switch (customAction) {
+    case 'encerrar_sem_processos': {
+      return responseForScreen('SEM_PROCESSOS', {
+        mensagem: 'Não há nenhum processo seletivo disponível para inscrição no momento. Em breve abriremos novas turmas.'
+      });
+    }
     case 'selecionar_processo': {
       try {
-        const rawProcessId = data.processo_seletivo_id ?? data.processo_id ?? data.form?.processo_id ?? data.form?.processo_seletivo_id;
-        if (!rawProcessId || String(rawProcessId).trim() === '') throw new Error('Selecione um processo seletivo antes de continuar.');
+        const rawProcessId = data.processo_seletivo_id ?? data.processo_id;
+        if (!rawProcessId) throw new Error('Selecione um processo seletivo antes de continuar.');
         const startResponse = await startApplication(rawProcessId);
         const formResponse = await getForm(startResponse.data.next, startResponse.data.local, startResponse.token);
         return responseForScreen('DADOS_BASICOS', buildBasicScreenData(formResponse, rawProcessId));
       } catch (error) {
-        console.error('Erro ao iniciar inscrição:', error);
+        console.error('Erro ao iniciar:', error);
         const processes = await listProcesses();
         if (processes.length === 0) {
           return responseForScreen('ESCOLHA_PROCESSO', {
-            processo_seletivo_id: [],
-            tem_processos: false,
-            mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.',
-            erro: ''
+            processo_seletivo_id: [], tem_processos: false,
+            mensagem_vazio: 'Não há nenhum processo seletivo disponível no momento.', erro: ''
           });
         }
         return responseForScreen('ESCOLHA_PROCESSO', {
-          processo_seletivo_id: processes,
-          tem_processos: true,
-          mensagem_vazio: '',
-          erro: error.message
+          processo_seletivo_id: processes, tem_processos: true, mensagem_vazio: '', erro: error.message
         });
       }
     }
     case 'enviar_dados_basicos': {
       try {
-        const possuiNomeSocial = toBoolean(data.possui_nome_social); const genero = toStringValue(data.genero); const notaEnem = isNotaEnemContext(data);
+        const possuiNomeSocial = toBoolean(data.possui_nome_social); const genero = toStringValue(data.genero);
         const fields = compactFields([
           fieldItem(data.campo_nome_id, toStringValue(data.nome).trim()),
           fieldItem(data.campo_possui_nome_social_id, possuiNomeSocial),
@@ -491,7 +367,6 @@ async function routeFlowRequest(requestData) {
         const nextFormResponse = await getForm(submitResponse.data.next, submitResponse.data.local, submitResponse.data.token ?? data.token);
         return responseForScreen('CURSO_INTERESSE', await buildCourseScreenData(nextFormResponse, data.processo_seletivo_id));
       } catch (error) {
-        console.error('Erro ao enviar dados básicos:', error);
         return responseForScreen('DADOS_BASICOS', basicRetryData(data, error.message));
       }
     }
@@ -505,7 +380,6 @@ async function routeFlowRequest(requestData) {
         const courseOptions = flowOptions(extractDataSourceOptions(coursesResponse));
         const shifts = flowOptions(extractDataSourceOptions(shiftsResponse));
         const nextOptions = shiftsResponse?.data?.nextOptions ?? {};
-        const selectedCourseId = toStringValue(data.curso_id);
         if (shifts.length === 0) throw new Error('Nenhum turno foi encontrado para o curso selecionado.');
         return responseForScreen('CURSO_INTERESSE', {
           token: toStringValue(data.token), target: toStringValue(data.target), local: toStringValue(data.local, 'step'),
@@ -514,7 +388,7 @@ async function routeFlowRequest(requestData) {
           campo_area_interesse_id: toStringValue(data.campo_area_interesse_id), campo_oferta_id: toStringValue(data.campo_oferta_id),
           campo_polo_id: toStringValue(data.campo_polo_id), campo_coligada_id: toStringValue(data.campo_coligada_id),
           campo_filial_id: toStringValue(data.campo_filial_id), campo_tipo_curso_id: toStringValue(data.campo_tipo_curso_id),
-          cursos: courseOptions, turnos: shifts, turno_visivel: true, curso_selecionado: selectedCourseId,
+          cursos: courseOptions, turnos: shifts, turno_visivel: true, curso_selecionado: toStringValue(data.curso_id),
           turno_selecionado: shifts.length === 1 ? shifts[0].id : '',
           area_interesse_valor: toStringValue(nextOptions[toStringValue(data.campo_area_interesse_id)]?.value),
           oferta_valor: toStringValue(nextOptions[toStringValue(data.campo_oferta_id)]?.value),
@@ -524,14 +398,9 @@ async function routeFlowRequest(requestData) {
           tipo_curso_valor: toStringValue(nextOptions[toStringValue(data.campo_tipo_curso_id)]?.value),
           processo_seletivo_id: isNotaEnemContext(data) ? PROCESSO_NOTA_ENEM_ID : toStringValue(data.processo_seletivo_id),
           eh_nota_enem: isNotaEnemContext(data),
-          campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556), campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
-          campo_enem_natureza_id: enemFieldId(data.campo_enem_natureza_id, 38563), campo_enem_humanas_id: enemFieldId(data.campo_enem_humanas_id, 38562),
-          campo_enem_matematica_id: enemFieldId(data.campo_enem_matematica_id, 38561), campo_enem_linguagens_id: enemFieldId(data.campo_enem_linguagens_id, 38560),
-          campo_enem_redacao_id: enemFieldId(data.campo_enem_redacao_id, 38559), campo_enem_media_id: enemFieldId(data.campo_enem_media_id, 38558),
           anos_enem: ANOS_ENEM, erro: ''
         });
       } catch (error) {
-        console.error('Erro ao buscar turnos:', error);
         return responseForScreen('CURSO_INTERESSE', await courseRetryData(data, error.message));
       }
     }
@@ -540,27 +409,9 @@ async function routeFlowRequest(requestData) {
         const notaEnem = isNotaEnemContext(data);
         const campoPoloId = notaEnem ? toStringValue(data.campo_polo_id, '38550') : toStringValue(data.campo_polo_id);
         const poloValor = notaEnem ? toStringValue(data.polo_valor, '01') : toStringValue(data.polo_valor);
-        const notasEnem = notaEnem ? {
-          natureza: normalizeEnemScore(data.nota_natureza_enem, 'Nota de ciências da natureza'),
-          humanas: normalizeEnemScore(data.nota_humanas_enem, 'Nota de ciências humanas'),
-          matematica: normalizeEnemScore(data.nota_matematica_enem, 'Nota de matemática'),
-          linguagens: normalizeEnemScore(data.nota_linguagens_enem, 'Nota de linguagens'),
-          redacao: normalizeEnemScore(data.nota_redacao_enem, 'Nota da redação')
-        } : null;
-        const mediaEnem = notaEnem ? calculateEnemAverage([notasEnem.natureza, notasEnem.humanas, notasEnem.matematica, notasEnem.linguagens, notasEnem.redacao]) : '';
         const fields = compactFields([
           fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
           fieldItem(data.campo_turno_id, toStringValue(data.turno_id)),
-          ...(notaEnem ? [
-            fieldItem(enemFieldId(data.campo_enem_numero_id, 38556), normalizeEnemRegistration(data.numero_inscricao_enem)),
-            fieldItem(enemFieldId(data.campo_enem_ano_id, 38557), toStringValue(data.ano_enem)),
-            fieldItem(enemFieldId(data.campo_enem_natureza_id, 38563), notasEnem.natureza),
-            fieldItem(enemFieldId(data.campo_enem_humanas_id, 38562), notasEnem.humanas),
-            fieldItem(enemFieldId(data.campo_enem_matematica_id, 38561), notasEnem.matematica),
-            fieldItem(enemFieldId(data.campo_enem_linguagens_id, 38560), notasEnem.linguagens),
-            fieldItem(enemFieldId(data.campo_enem_redacao_id, 38559), notasEnem.redacao),
-            fieldItem(enemFieldId(data.campo_enem_media_id, 38558), mediaEnem)
-          ] : []),
           fieldItem(data.campo_area_interesse_id, toStringValue(data.area_interesse_valor)),
           fieldItem(data.campo_oferta_id, toStringValue(data.oferta_valor)),
           fieldItem(campoPoloId, poloValor),
@@ -573,7 +424,6 @@ async function routeFlowRequest(requestData) {
         const nextFormResponse = await getForm(submitResponse.data.next, submitResponse.data.local, nextToken);
         return responseForScreen('QUASE_LA', await buildAlmostThereScreenData(nextFormResponse, submitResponse));
       } catch (error) {
-        console.error('Erro ao enviar curso:', error);
         return responseForScreen('CURSO_INTERESSE', await courseRetryData(data, error.message));
       }
     }
@@ -582,7 +432,6 @@ async function routeFlowRequest(requestData) {
         const hasDisability = toStringValue(data.possui_deficiencia) === 'T';
         const selectedTypes = Array.isArray(data.tipos_deficiencia) ? data.tipos_deficiencia.map(String) : [];
         const selected = (type) => hasDisability && selectedTypes.includes(type);
-        const selectedOther = selected('outras');
         const fields = compactFields([
           fieldItem(data.campo_cpf_id, normalizeCpf(data.cpf)),
           fieldItem(data.campo_nacionalidade_id, normalizeNationality(data.nacionalidade)),
@@ -591,17 +440,15 @@ async function routeFlowRequest(requestData) {
           fieldItem(data.campo_def_auditiva_id, selected('auditiva')), fieldItem(data.campo_def_fala_id, selected('fala')),
           fieldItem(data.campo_def_fisica_id, selected('fisica')), fieldItem(data.campo_def_intelectual_id, selected('intelectual')),
           fieldItem(data.campo_def_visual_id, selected('visual')), fieldItem(data.campo_def_mental_id, selected('mental')),
-          fieldItem(data.campo_def_outras_id, selectedOther),
-          fieldItem(data.campo_def_outras_texto_id, selectedOther ? toStringValue(data.deficiencia_outra).trim() : ''),
+          fieldItem(data.campo_def_outras_id, selected('outras')),
+          fieldItem(data.campo_def_outras_texto_id, selected('outras') ? toStringValue(data.deficiencia_outra).trim() : ''),
           fieldItem(data.campo_origem_id, toStringValue(data.como_conheceu)),
           fieldItem(data.campo_origem_outro_id, toStringValue(data.como_conheceu) === '10' ? toStringValue(data.como_conheceu_outro).trim() : '')
         ]);
         const submitResponse = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
         const redirect = submitResponse?.data?.redirect ?? {};
-        const applicationId = toStringValue(redirect.applyment_id ?? data.applyment_id, 'não informado');
-        return responseForScreen('CONFIRMACAO', { titulo: 'Inscrição concluída!', mensagem: 'Seus dados foram enviados com sucesso para a UniBalsas.', inscricao_id: applicationId });
+        return responseForScreen('CONFIRMACAO', { titulo: 'Inscrição concluída!', mensagem: 'Seus dados foram enviados com sucesso para a UniBalsas.', inscricao_id: toStringValue(redirect.applyment_id ?? data.applyment_id, 'não informado') });
       } catch (error) {
-        console.error('Erro ao concluir inscrição:', { message: error.message, applyment_id: toStringValue(data.applyment_id), person_id: toStringValue(data.person_id) });
         return responseForScreen('QUASE_LA', fastAlmostThereRetryData(data, error.message));
       }
     }
@@ -630,7 +477,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 }
 
 export default async function handler(req, res) {
-  if (req.method === 'GET') return res.status(200).json({ status: 'ok', version: 'final-v3-sem-processo-fix' });
+  if (req.method === 'GET') return res.status(200).json({ status: 'ok', version: 'final-v4-fix-complete' });
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
   let aesKey; let iv; let requestData;
   try {
@@ -638,7 +485,6 @@ export default async function handler(req, res) {
     const privateKey = process.env.FLOW_PRIVATE_KEY.replace(/\\n/g, '\n');
     const decrypted = decryptRequest(req.body, privateKey);
     requestData = decrypted.requestData; aesKey = decrypted.aesKey; iv = decrypted.iv;
-    console.log('FLOW REQUEST:', { action: requestData?.action, screen: requestData?.screen, customAction: requestData?.data?.acao });
     const responsePayload = await routeFlowRequest(requestData);
     const encryptedResponse = encryptResponse(responsePayload, aesKey, iv);
     res.setHeader('Content-Type', 'text/plain');
@@ -646,7 +492,8 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('FLOW ERROR:', error);
     if (aesKey && iv) {
-      const data = requestData?.data ?? {}; const screen = requestData?.screen; let responsePayload;
+      const data = requestData?.data ?? {}; const screen = requestData?.screen;
+      let responsePayload;
       if (screen === 'QUASE_LA') responsePayload = responseForScreen('QUASE_LA', fastAlmostThereRetryData(data, error.message));
       else responsePayload = { data: { status: 'active' } };
       const encryptedResponse = encryptResponse(responsePayload, aesKey, iv);
