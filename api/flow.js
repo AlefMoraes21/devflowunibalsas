@@ -25,13 +25,6 @@ const FALLBACK_ORIGINS = [
   { id: '10', title: 'Outro' }
 ];
 
-const FALLBACK_PROCESSES = [
-  { id: '18713', title: 'Vestibular Online - Cursos presenciais - 2026/2' },
-  { id: '18716', title: 'Transferência - 2026/2' },
-  { id: '18715', title: 'Portador de Diploma - 2026/2' },
-  { id: '18714', title: 'Nota do ENEM - 2026/2' }
-];
-
 const PROCESSO_NOTA_ENEM_ID = '18714';
 
 const ANOS_ENEM = [
@@ -42,57 +35,35 @@ const ANOS_ENEM = [
 function isNotaEnemProcess(processId) {
   return toStringValue(processId) === PROCESSO_NOTA_ENEM_ID;
 }
-
 function isNotaEnemContext(data = {}) {
-  return (
-    isNotaEnemProcess(data.processo_seletivo_id) &&
-    Number(data.target) === 270185
-  );
+  return isNotaEnemProcess(data.processo_seletivo_id) && Number(data.target) === 270185;
 }
-
 function enemFieldId(value, fallback) {
   return toStringValue(value, String(fallback));
 }
-
 function normalizeEnemRegistration(value) {
   const digits = String(value ?? '').replace(/\D/g, '');
-  if (digits.length < 12 || digits.length > 15) {
-    throw new Error('O número de inscrição do ENEM deve conter de 12 a 15 números.');
-  }
+  if (digits.length < 12 || digits.length > 15) throw new Error('O número de inscrição do ENEM deve conter de 12 a 15 números.');
   return digits;
 }
-
 function normalizeEnemScore(value, fieldName) {
   const normalized = String(value ?? '').trim().replace(',', '.');
-  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
-    throw new Error(`${fieldName} deve conter somente números.`);
-  }
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) throw new Error(`${fieldName} deve conter somente números.`);
   const score = Number(normalized);
-  if (!Number.isFinite(score) || score < 0 || score > 1000) {
-    throw new Error(`${fieldName} deve estar entre 0 e 1000.`);
-  }
+  if (!Number.isFinite(score) || score < 0 || score > 1000) throw new Error(`${fieldName} deve estar entre 0 e 1000.`);
   return normalized;
 }
-
 function calculateEnemAverage(scores) {
-  if (!Array.isArray(scores) || scores.length !== 5) {
-    throw new Error('São necessárias exatamente cinco notas para calcular a média do ENEM.');
-  }
+  if (!Array.isArray(scores) || scores.length !== 5) throw new Error('São necessárias exatamente cinco notas para calcular a média do ENEM.');
   const numericScores = scores.map((score) => Number(score));
-  if (numericScores.some((score) => !Number.isFinite(score))) {
-    throw new Error('Não foi possível calcular a média das notas do ENEM.');
-  }
+  if (numericScores.some((score) => !Number.isFinite(score))) throw new Error('Não foi possível calcular a média das notas do ENEM.');
   const total = numericScores.reduce((sum, score) => sum + score, 0);
   const average = Math.round(((total / 5) + Number.EPSILON) * 100) / 100;
   return String(average);
 }
-
 function requirePrivateKey() {
-  if (!process.env.FLOW_PRIVATE_KEY) {
-    throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.');
-  }
+  if (!process.env.FLOW_PRIVATE_KEY) throw new Error('A variável FLOW_PRIVATE_KEY não foi configurada.');
 }
-
 function normalizeText(value = '') {
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 }
@@ -166,7 +137,7 @@ async function rubeusRequest(path, { method = 'GET', body, timeoutMs = RUBEUS_TI
   rawToken = rawToken.replace(/^Bearer\s+/i, '');
   rawToken = rawToken.replace(/[\r\n\s'"]+/g, '');
   if (rawToken.length > 128 && /^[a-f0-9]+$/i.test(rawToken)) rawToken = rawToken.slice(0, 64);
-  if (!rawToken) throw new Error('RBS_TOKEN está vazio após saneamento. Verifique a variável de ambiente.');
+  if (!rawToken) throw new Error('RBS_TOKEN está vazio após saneamento.');
   const headers = { Authorization: `Bearer ${rawToken}` };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const controller = new AbortController();
@@ -185,14 +156,12 @@ async function rubeusRequest(path, { method = 'GET', body, timeoutMs = RUBEUS_TI
   try { json = raw ? JSON.parse(raw) : {}; } catch { json = { message: raw || 'Resposta inválida da Rubeus.' }; }
   if (!response.ok || json?.success === false) {
     console.error('RUBEUS ERROR BODY:', { path, status: response.status, body: json });
-    if (Array.isArray(json?.errors) && json.errors.length > 0) console.error('RUBEUS ERROR DETAILS:', JSON.stringify(json.errors, null, 2));
   }
   if (!response.ok) throw new Error(json?.message || `A Rubeus respondeu com status HTTP ${response.status}.`);
   if (json?.success === false) throw new Error(json?.message || 'A operação não pôde ser concluída na Rubeus.');
   return json;
 }
 
-// CORRIGIDO: não joga mais throw quando volta vazio, deixa o INIT decidir
 async function listProcesses() {
   const response = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
   return (response.data ?? []).map((process) => ({
@@ -200,7 +169,6 @@ async function listProcesses() {
     title: String(process.name)
   }));
 }
-
 async function startApplication(processId) {
   return rubeusRequest('/start', { method: 'POST', body: { process: toInteger(processId, 'processo_seletivo_id') } });
 }
@@ -244,7 +212,6 @@ function buildBasicScreenData(formResponse, processId) {
     processo_seletivo_id: toStringValue(processId), eh_nota_enem: isNotaEnemProcess(processId), erro: ''
   };
 }
-
 async function buildCourseScreenData(formResponse, processId) {
   const form = formResponse?.data?.form; const token = formResponse?.token;
   if (!form || !token) throw new Error('A Rubeus não retornou o formulário de curso de interesse.');
@@ -260,14 +227,14 @@ async function buildCourseScreenData(formResponse, processId) {
   if (!query?.query_data) throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   const notaEnem = isNotaEnemProcess(processId) && Number(form.id) === 270232;
   const polo = notaEnem ? requireInput(findInput(form, ['CODPOLO'], 38550), 'CODPOLO') : findInput(form, ['CODPOLO'], 38550);
-  const enemNumero = notaEnem ? requireInput(findInput(form, ['Número de inscrição do ENEM', 'Numero de inscrição do ENEM'], 38556), 'Número de inscrição do ENEM') : null;
-  const enemAno = notaEnem ? requireInput(findInput(form, ['Ano de realização do ENEM', 'Ano de realizacao do ENEM'], 38557), 'Ano de realização do ENEM') : null;
-  const enemNatureza = notaEnem ? requireInput(findInput(form, ['Nota de ciências da natureza do ENEM', 'Nota de ciencias da natureza do ENEM'], 38563), 'Nota de ciências da natureza do ENEM') : null;
-  const enemHumanas = notaEnem ? requireInput(findInput(form, ['Nota de ciências humanas do ENEM', 'Nota de ciencias humanas do ENEM'], 38562), 'Nota de ciências humanas do ENEM') : null;
-  const enemMatematica = notaEnem ? requireInput(findInput(form, ['Nota de matemática do ENEM', 'Nota de matematica do ENEM'], 38561), 'Nota de matemática do ENEM') : null;
+  const enemNumero = notaEnem ? requireInput(findInput(form, ['Número de inscrição do ENEM'], 38556), 'Número de inscrição do ENEM') : null;
+  const enemAno = notaEnem ? requireInput(findInput(form, ['Ano de realização do ENEM'], 38557), 'Ano de realização do ENEM') : null;
+  const enemNatureza = notaEnem ? requireInput(findInput(form, ['Nota de ciências da natureza do ENEM'], 38563), 'Nota de ciências da natureza do ENEM') : null;
+  const enemHumanas = notaEnem ? requireInput(findInput(form, ['Nota de ciências humanas do ENEM'], 38562), 'Nota de ciências humanas do ENEM') : null;
+  const enemMatematica = notaEnem ? requireInput(findInput(form, ['Nota de matemática do ENEM'], 38561), 'Nota de matemática do ENEM') : null;
   const enemLinguagens = notaEnem ? requireInput(findInput(form, ['Nota de linguagens do ENEM'], 38560), 'Nota de linguagens do ENEM') : null;
-  const enemRedacao = notaEnem ? requireInput(findInput(form, ['Nota da redação do ENEM', 'Nota da redacao do ENEM'], 38559), 'Nota da redação do ENEM') : null;
-  const enemMedia = notaEnem ? requireInput(findInput(form, ['Média de notas do ENEM', 'Media de notas do ENEM'], 38558), 'Média de notas do ENEM') : null;
+  const enemRedacao = notaEnem ? requireInput(findInput(form, ['Nota da redação do ENEM'], 38559), 'Nota da redação do ENEM') : null;
+  const enemMedia = notaEnem ? requireInput(findInput(form, ['Média de notas do ENEM'], 38558), 'Média de notas do ENEM') : null;
   const nextFields = (query.fields ?? []).map((item) => Number(item.field)).filter((fieldId) => fieldId !== Number(curso.field_id));
   const courseOptionsResponse = await getDataSource({ datasource: query.query_data, target: curso.field_id, filter: [], nextFields, token });
   return {
@@ -285,7 +252,6 @@ async function buildCourseScreenData(formResponse, processId) {
     anos_enem: notaEnem ? (Array.isArray(enemAno?.data) && enemAno.data.length > 0 ? enemAno.data.map((item) => ({ id: toStringValue(item.value), title: toStringValue(item.display) })) : ANOS_ENEM) : [], erro: ''
   };
 }
-
 async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) {
   const form = formResponse?.data?.form; const token = formResponse?.token;
   if (!form || !token) throw new Error('A Rubeus não retornou o formulário final da inscrição.');
@@ -295,12 +261,12 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
   const deficiencia = requireInput(findInput(form, ['Possui alguma deficiência?'], 38575), 'Possui alguma deficiência?');
   const auditiva = requireInput(findInput(form, ['Auditiva'], 38577), 'Auditiva');
   const fala = requireInput(findInput(form, ['Fala'], 38578), 'Fala');
-  const fisica = requireInput(findInput(form, ['Física', 'Fisica'], 38576), 'Física');
+  const fisica = requireInput(findInput(form, ['Física'], 38576), 'Física');
   const intelectual = requireInput(findInput(form, ['Intelectual'], 38580), 'Intelectual');
   const visual = requireInput(findInput(form, ['Visual'], 38579), 'Visual');
   const mental = requireInput(findInput(form, ['Mental'], 38581), 'Mental');
-  const outras = requireInput(findInput(form, ['Outras deficiências', 'Outras deficiencias'], 38582), 'Outras deficiências');
-  const outrasTexto = requireInput(findInput(form, ['Deficiência motivo outras 【entity-TOTVS¦canonical_name=TOTVS】', 'Deficiencia motivo outras 【entity-TOTVS¦canonical_name=TOTVS】'], 38583), 'Descrição de outra deficiência');
+  const outras = requireInput(findInput(form, ['Outras deficiências'], 38582), 'Outras deficiências');
+  const outrasTexto = requireInput(findInput(form, ['Deficiência motivo outras 【entity-TOTVS¦canonical_name=TOTVS】'], 38583), 'Descrição de outra deficiência');
   const origem = requireInput(findInput(form, ['Como você ficou sabendo sobre este processo seletivo?'], 319427), 'Como ficou sabendo');
   const origemOutro = requireInput(findInput(form, ['Outro:'], 319428), 'Outro canal');
   const button = findButton(form, ['Concluir']);
@@ -327,7 +293,6 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
     datasource_origem: toStringValue(originQuery?.query_data), origens, erro: ''
   };
 }
-
 function responseForScreen(screen, data) { return { screen, data }; }
 function basicRetryData(data, message) {
   return {
@@ -446,7 +411,6 @@ async function almostThereRetryData(data, message) {
   };
 }
 
-// CORRIGIDO - INIT agora respeita API vazia igual o site vestibular.unibalsas.edu.br/presencial
 async function routeFlowRequest(requestData) {
   const action = requestData?.action; const data = requestData?.data ?? {}; const customAction = data?.acao;
   if (action === 'ping') return { data: { status: 'active' } };
@@ -454,15 +418,26 @@ async function routeFlowRequest(requestData) {
     try {
       const processes = await listProcesses();
       if (processes.length === 0) {
-        return responseForScreen('SEM_PROCESSOS', {
-          mensagem: 'Não há nenhum processo seletivo disponível para inscrição no momento. Em breve abriremos novas turmas.'
+        return responseForScreen('ESCOLHA_PROCESSO', {
+          processo_seletivo_id: [],
+          tem_processos: false,
+          mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento. Em breve abriremos novas turmas.',
+          erro: ''
         });
       }
-      return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes, erro: '' });
+      return responseForScreen('ESCOLHA_PROCESSO', {
+        processo_seletivo_id: processes,
+        tem_processos: true,
+        mensagem_vazio: '',
+        erro: ''
+      });
     } catch (error) {
-      console.error('Falha ao listar processos na Rubeus:', error);
-      return responseForScreen('SEM_PROCESSOS', {
-        mensagem: 'Não há nenhum processo seletivo disponível para inscrição no momento.'
+      console.error('Falha ao listar processos:', error);
+      return responseForScreen('ESCOLHA_PROCESSO', {
+        processo_seletivo_id: [],
+        tem_processos: false,
+        mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.',
+        erro: ''
       });
     }
   }
@@ -481,9 +456,19 @@ async function routeFlowRequest(requestData) {
         console.error('Erro ao iniciar inscrição:', error);
         const processes = await listProcesses();
         if (processes.length === 0) {
-          return responseForScreen('SEM_PROCESSOS', { mensagem: 'Não há nenhum processo seletivo disponível para inscrição no momento.' });
+          return responseForScreen('ESCOLHA_PROCESSO', {
+            processo_seletivo_id: [],
+            tem_processos: false,
+            mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.',
+            erro: ''
+          });
         }
-        return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes.length > 0 ? processes : FALLBACK_PROCESSES, erro: error.message });
+        return responseForScreen('ESCOLHA_PROCESSO', {
+          processo_seletivo_id: processes,
+          tem_processos: true,
+          mensagem_vazio: '',
+          erro: error.message
+        });
       }
     }
     case 'enviar_dados_basicos': {
@@ -645,7 +630,7 @@ function encryptResponse(responsePayload, aesKey, iv) {
 }
 
 export default async function handler(req, res) {
-  if (req.method === 'GET') return res.status(200).json({ status: 'ok', version: 'sem-processo-v1' });
+  if (req.method === 'GET') return res.status(200).json({ status: 'ok', version: 'final-v3-sem-processo-fix' });
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
   let aesKey; let iv; let requestData;
   try {
