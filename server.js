@@ -9,6 +9,6 @@ app.all('/api/flow', flowHandler);
 
 const PORT = process.env.PORT || 8080;
 
-app.get('/', (req, res) => {
-  res.send('Bot do DevFlow Unibalsas está a funcionar corretamente! 🚀');
+app.listen(PORT, () => {
+  console.log(`Servidor a correr na porta ${PORT}`);
 });
