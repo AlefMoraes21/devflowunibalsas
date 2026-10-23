@@ -9,6 +9,6 @@ app.all('/api/flow', flowHandler);
 
 const PORT = process.env.PORT || 8080;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`WhatsApp Flow ativo na porta ${PORT}`);
+app.get('/', (req, res) => {
+  res.send('Bot do DevFlow Unibalsas está a funcionar corretamente! 🚀');
 });
