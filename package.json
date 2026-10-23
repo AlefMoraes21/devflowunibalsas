@@ -5,7 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node api/flow.js"
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
   },
   "engines": {
     "node": ">=22"
