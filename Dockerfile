@@ -2,13 +2,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copia as dependências da pasta api
-COPY api/package*.json ./
+# Copia os ficheiros de dependências diretamente
+COPY package*.json ./
 
 RUN npm install
 
-# Copia todo o código da pasta api
-COPY api/ .
+# Copia o resto do código da pasta
+COPY . .
 
 ENV PORT=8080
 EXPOSE 8080
