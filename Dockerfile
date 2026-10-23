@@ -1,16 +1,16 @@
-FROM node:18-alpine
+
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Copia os ficheiros de dependências diretamente
 COPY package*.json ./
 
-RUN npm install
+RUN npm install --omit=dev
 
-# Copia o resto do código da pasta
 COPY . .
 
-ENV PORT=8080
+ENV NODE_ENV=production
+
 EXPOSE 8080
 
 CMD ["npm", "start"]
