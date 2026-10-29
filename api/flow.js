@@ -33,13 +33,21 @@ const ANOS_ENEM = [
 ].map((ano) => ({ id: ano, title: ano }));
 
 function isNotaEnemProcess(processId) {
-  return toStringValue(processId) === PROCESSO_NOTA_ENEM_ID;
+  // Compatibilidade com os processos antigos e com o processo identificado nos logs.
+  // Para futuras campanhas, a detecção principal ocorre pelos campos do formulário da Rubeus.
+  return [PROCESSO_NOTA_ENEM_ID, '20386'].includes(toStringValue(processId));
+}
+
+function hasEnemFields(form) {
+  // Os identificadores e rótulos são fornecidos pelo próprio formulário atual da Rubeus.
+  const numero = findInput(form, ['Número de inscrição do ENEM', 'Numero de inscrição do ENEM'], 38556);
+  const ano = findInput(form, ['Ano de realização do ENEM', 'Ano de realizacao do ENEM'], 38557);
+  const media = findInput(form, ['Média de notas do ENEM', 'Media de notas do ENEM'], 38558);
+  return Boolean(numero?.field_id && ano?.field_id && media?.field_id);
 }
 
 function isNotaEnemContext(data = {}) {
-  return (
-    isNotaEnemProcess(data.processo_seletivo_id)
-  );
+  return toBoolean(data.eh_nota_enem) || isNotaEnemProcess(data.processo_seletivo_id);
 }
 
 function enemFieldId(value, fallback) {
@@ -471,7 +479,7 @@ function buildBasicScreenData(formResponse, processId) {
     titulo_etapa: String(formResponse?.data?.stage?.steps?.find(
       (step) => Number(step.id) === Number(form.id)
     )?.name ?? 'Dados básicos'),
-    processo_seletivo_id: notaEnem ? PROCESSO_NOTA_ENEM_ID : toStringValue(processId),
+    processo_seletivo_id: toStringValue(processId),
     eh_nota_enem: isNotaEnemProcess(processId),
     erro: ''
   };
@@ -499,8 +507,13 @@ async function buildCourseScreenData(formResponse, processId) {
     throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   }
 
-  const notaEnem =
-    isNotaEnemProcess(processId);
+  const notaEnem = isNotaEnemProcess(processId) || hasEnemFields(form);
+  console.log('DETECCAO ENEM CURSO:', {
+    processo_seletivo_id: toStringValue(processId),
+    formulario_id: String(form.id),
+    campos_enem_no_formulario: hasEnemFields(form),
+    eh_nota_enem: notaEnem
+  });
 
   const polo = notaEnem
     ? requireInput(findInput(form, ['CODPOLO'], 38550), 'CODPOLO')
@@ -824,9 +837,7 @@ async function courseRetryData(data, message) {
       data.campo_tipo_curso_id,
       data.tipo_curso_valor
     ),
-    processo_seletivo_id: isNotaEnemContext(data)
-      ? PROCESSO_NOTA_ENEM_ID
-      : toStringValue(data.processo_seletivo_id),
+    processo_seletivo_id: toStringValue(data.processo_seletivo_id),
     eh_nota_enem: isNotaEnemContext(data),
     campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
     campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
@@ -914,9 +925,7 @@ async function shiftRetryData(data, message) {
       data.campo_tipo_curso_id,
       data.tipo_curso_valor
     ),
-    processo_seletivo_id: isNotaEnemContext(data)
-      ? PROCESSO_NOTA_ENEM_ID
-      : toStringValue(data.processo_seletivo_id),
+    processo_seletivo_id: toStringValue(data.processo_seletivo_id),
     eh_nota_enem: isNotaEnemContext(data),
     campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
     campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
@@ -1228,9 +1237,7 @@ async function routeFlowRequest(requestData) {
           tipo_curso_valor: toStringValue(
             nextOptions[toStringValue(data.campo_tipo_curso_id)]?.value
           ),
-          processo_seletivo_id: isNotaEnemContext(data)
-            ? PROCESSO_NOTA_ENEM_ID
-            : toStringValue(data.processo_seletivo_id),
+          processo_seletivo_id: toStringValue(data.processo_seletivo_id),
           eh_nota_enem: isNotaEnemContext(data),
           campo_enem_numero_id: enemFieldId(data.campo_enem_numero_id, 38556),
           campo_enem_ano_id: enemFieldId(data.campo_enem_ano_id, 38557),
@@ -1364,8 +1371,8 @@ async function routeFlowRequest(requestData) {
           'CAMPOS ENVIAR CURSO:',
           fields.map((item) => ({
             field_id: item.field_id,
-            value: Number(item.field_id) === 38556
-              ? '[INSCRIÇÃO ENEM OCULTADA]'
+            value: [38556, 38557, 38563, 38562, 38561, 38560, 38559, 38558].includes(Number(item.field_id))
+              ? '[DADO ENEM OCULTADO]'
               : item.value,
             tipo: typeof item.value
           }))
