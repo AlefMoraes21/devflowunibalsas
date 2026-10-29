@@ -658,24 +658,9 @@ async function buildAlmostThereScreenData(formResponse, previousSubmitResponse) 
   const button = findButton(form, ['Concluir']);
   const originQuery = findQueryForField(form, origem.field_id);
 
-  let origens = FALLBACK_ORIGINS;
-
-  if (originQuery?.query_data) {
-    try {
-      const originsResponse = await getDataSource({
-        datasource: originQuery.query_data,
-        target: origem.field_id,
-        filter: [],
-        nextFields: [],
-        token
-      });
-
-      const dynamicOrigins = flowOptions(extractDataSourceOptions(originsResponse));
-      if (dynamicOrigins.length > 0) origens = dynamicOrigins;
-    } catch (error) {
-      console.error('Não foi possível carregar as origens; usando lista estática:', error.message);
-    }
-  }
+  // Evita consulta adicional à Rubeus na transição crítica do WhatsApp Flow.
+  // Os IDs estáticos devem ser conferidos com os valores válidos no processo.
+  const origens = FALLBACK_ORIGINS;
 
   const redirect = previousSubmitResponse?.data?.redirect ?? {};
 
