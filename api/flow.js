@@ -739,10 +739,10 @@ async function routeFlowRequest(requestData) {
   if (action === 'INIT') {
     try {
       const processes = await listProcesses();
-      return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes, erro: '' });
+      return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes, tem_processos: processes.length > 0, mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.', erro: '' });
     } catch (error) {
       console.error('Falha ao listar processos na Rubeus:', error);
-      return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: FALLBACK_PROCESSES, erro: '' });
+      return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: FALLBACK_PROCESSES, tem_processos: FALLBACK_PROCESSES.length > 0, mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.', erro: '' });
     }
   }
 
@@ -755,6 +755,10 @@ async function routeFlowRequest(requestData) {
   }
 
   switch (customAction) {
+    case 'encerrar_sem_processos': {
+      return responseForScreen('SEM_PROCESSOS', { mensagem: 'Não há nenhum processo seletivo disponível para inscrição no momento.' });
+    }
+
     case 'selecionar_processo': {
       try {
         const rawProcessId = data.processo_seletivo_id ?? data.processo_id ?? data.form?.processo_id ?? data.form?.processo_seletivo_id;
@@ -768,7 +772,7 @@ async function routeFlowRequest(requestData) {
         console.error('Erro ao iniciar inscrição:', error);
         let processes = FALLBACK_PROCESSES;
         try { processes = await listProcesses(); } catch {}
-        return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes, erro: error.message });
+        return responseForScreen('ESCOLHA_PROCESSO', { processo_seletivo_id: processes, tem_processos: processes.length > 0, mensagem_vazio: 'Não há nenhum processo seletivo disponível para inscrição no momento.', erro: error.message });
       }
     }
 
