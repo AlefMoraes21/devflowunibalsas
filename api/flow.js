@@ -26,13 +26,13 @@ const FALLBACK_ORIGINS = [
 ];
 
 const FALLBACK_PROCESSES = [
-  { id: '18713', title: 'Vestibular Online - Cursos presenciais - 2026/2' },
-  { id: '18716', title: 'Transferência - 2026/2' },
-  { id: '18715', title: 'Portador de Diploma - 2026/2' },
-  { id: '18714', title: 'Nota do ENEM - 2026/2' }
+  { id: '20383', title: 'Vestibular Online - Cursos presenciais - 2027/1' },
+  { id: '20385', title: 'Transferência - 2027/1' },
+  { id: '20384', title: 'Portador de Diploma - 2027/1' },
+  { id: '20386', title: 'Nota do ENEM - 2027/1' }
 ];
 
-const PROCESSO_NOTA_ENEM_ID = '18714';
+const PROCESSO_NOTA_ENEM_ID = '20386';
 
 const ANOS_ENEM = [
   '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018',
@@ -46,7 +46,7 @@ function isNotaEnemProcess(processId) {
 function isNotaEnemContext(data = {}) {
   return (
     isNotaEnemProcess(data.processo_seletivo_id) &&
-    Number(data.target) === 270232
+    Number(data.target) === 300708
   );
 }
 
@@ -371,8 +371,8 @@ function buildBasicScreenData(formResponse, processId) {
     campo_lgpd_assinatura_id: String(lgpdAssinatura.field_id),
     campo_lgpd_base_legal_id: String(lgpdBaseLegal.field_id),
     campo_genero_rubeus_id: String(generoRubeus.field_id),
-    // FIX: usa 220 para ENEM, 217 para os demais - conforme sua doc
-    idps_valor: toStringValue(idps.value, isNotaEnemProcess(processId) ? '220' : '217'),
+    // Fallback IDPS 2027/1; o valor retornado pelo /form tem prioridade.
+    idps_valor: toStringValue(idps.value, isNotaEnemProcess(processId) ? '226' : '223'),
     lgpd_assinatura_valor: toStringValue(lgpdAssinatura.value, '1'),
     lgpd_base_legal_valor: toStringValue(lgpdBaseLegal.value, '4'),
     data_maxima_nascimento: currentIsoDate(),
@@ -401,7 +401,7 @@ async function buildCourseScreenData(formResponse, processId) {
   if (!query?.query_data) {
     throw new Error('A fonte de dados de cursos não foi localizada na Rubeus.');
   }
-  const notaEnem = isNotaEnemProcess(processId) && Number(form.id) === 270232;
+  const notaEnem = isNotaEnemProcess(processId) && Number(form.id) === 300708;
   const polo = notaEnem ? requireInput(findInput(form, ['CODPOLO'], 38550), 'CODPOLO') : findInput(form, ['CODPOLO'], 38550);
   const enemNumero = notaEnem ? requireInput(findInput(form, ['Número de inscrição do ENEM', 'Numero de inscrição do ENEM'], 38556), 'Número de inscrição do ENEM') : null;
   const enemAno = notaEnem ? requireInput(findInput(form, ['Ano de realização do ENEM', 'Ano de realizacao do ENEM'], 38557), 'Ano de realização do ENEM') : null;
@@ -535,8 +535,8 @@ function basicRetryData(data, message) {
     campo_lgpd_assinatura_id: toStringValue(data.campo_lgpd_assinatura_id),
     campo_lgpd_base_legal_id: toStringValue(data.campo_lgpd_base_legal_id),
     campo_genero_rubeus_id: toStringValue(data.campo_genero_rubeus_id),
-    // FIX: IDPS correto por processo
-    idps_valor: toStringValue(data.idps_valor, isNotaEnemProcess(data.processo_seletivo_id) ? '220' : '217'),
+    // Fallback IDPS atualizado para 2027/1; prioriza valor do formulário.
+    idps_valor: toStringValue(data.idps_valor, isNotaEnemProcess(data.processo_seletivo_id) ? '226' : '223'),
     lgpd_assinatura_valor: toStringValue(data.lgpd_assinatura_valor, '1'),
     lgpd_base_legal_valor: toStringValue(data.lgpd_base_legal_valor, '4'),
     data_maxima_nascimento: currentIsoDate(),
@@ -785,7 +785,7 @@ async function routeFlowRequest(requestData) {
           fieldItem(data.campo_celular_id, formatBrazilianPhone(data.celular)),
           fieldItem(data.campo_genero_id, genero),
           fieldItem(data.campo_consentimento_id, toBoolean(data.aceite_privacidade)),
-          fieldItem(data.campo_idps_id, toStringValue(data.idps_valor, isNotaEnemProcess(data.processo_seletivo_id) ? '220' : '217')),
+          fieldItem(data.campo_idps_id, toStringValue(data.idps_valor, isNotaEnemProcess(data.processo_seletivo_id) ? '226' : '223')),
           fieldItem(data.campo_lgpd_assinatura_id, toStringValue(data.lgpd_assinatura_valor, '1')),
           fieldItem(data.campo_lgpd_base_legal_id, toStringValue(data.lgpd_base_legal_valor, '4')),
           fieldItem(data.campo_genero_rubeus_id, genero)
