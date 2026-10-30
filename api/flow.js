@@ -98,7 +98,7 @@ const SCREEN_KEYS = {
     "valor_como_conheceu_outro",
   ],
   CONFIRMACAO: ["titulo", "mensagem", "inscricao_id"],
-  PENDENTE: ["mensagem", "inscricao_id"],
+  PENDENTE: ["mensagem", "inscricao_id", "titulo"],
 };
 const USER_FIELDS = new Set([
   "aceite_privacidade",
@@ -463,15 +463,8 @@ async function listProcesses() {
   );
   const processes = (response.data ?? []).map((process) => ({
     id: String(process.id),
-    title: (() => {
-      const name = String(process.name);
-      const year = name.match(/(\d{4}\/\d)\s*$/)?.[1];
-      return name.length <= 30
-        ? name
-        : year
-          ? name.slice(0, 22) + "… " + year
-          : name.slice(0, 30);
-    })(),
+    title: String(process.name).slice(0, 30),
+    description: String(process.name),
   }));
   return processes;
 }
@@ -947,6 +940,7 @@ function responseForScreen(screen, data) {
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
   const next = { ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
+  if (screen === "PENDENTE") next.titulo ??= "Vamos conferir sua inscrição";
   for (const [name, fallback] of Object.entries(FORM_DEFAULTS[screen] ?? {}))
     next["valor_" + name] = values[name] ?? fallback;
   if (screen === "CURSO_INTERESSE") {
@@ -984,9 +978,14 @@ function responseForScreen(screen, data) {
 function pendingAfterWrite(data) {
   const write = flowContext.getStore()?.write;
   if (!write) return null;
+  const finalStep = data.acao === "enviar_informacoes_complementares";
   return responseForScreen("PENDENTE", {
-    mensagem:
-      write.status === "received"
+    titulo: finalStep
+      ? "Obrigado por preencher seus dados!"
+      : "Vamos conferir sua inscrição",
+    mensagem: finalStep
+      ? "Aguarde a confirmação da sua inscrição pela UniBalsas. Nossos consultores orientarão você sobre os próximos passos."
+      : write.status === "received"
         ? "O Rubeus recebeu o envio, mas não foi possível confirmar a próxima etapa nesta tela. Entre em contato com a UniBalsas para conferir e continuar sua inscrição."
         : "O Rubeus demorou para responder. O envio pode ter sido recebido. Entre em contato com a UniBalsas para conferir sua inscrição antes de tentar novamente.",
     inscricao_id: toStringValue(
@@ -1873,8 +1872,8 @@ async function routeFlowRequest(requestData) {
           );
         const applicationId = String(redirect.applyment_id);
         return responseForScreen("CONFIRMACAO", {
-          titulo: "Inscrição concluída!",
-          mensagem: "Seus dados foram enviados com sucesso para a UniBalsas.",
+          titulo: "Obrigado pelo seu cadastro!",
+          mensagem: "Nossos consultores entrarão em contato com você em breve.",
           inscricao_id: applicationId,
         });
       } catch (error) {
