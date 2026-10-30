@@ -463,8 +463,7 @@ async function listProcesses() {
   );
   const processes = (response.data ?? []).map((process) => ({
     id: String(process.id),
-    title: String(process.name).slice(0, 30),
-    description: String(process.name),
+    title: String(process.name),
   }));
   return processes;
 }
