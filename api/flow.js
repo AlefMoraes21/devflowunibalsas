@@ -141,19 +141,6 @@ const NACIONALIDADES_ESTATICAS = [
   { id: "50", title: "Outros" },
 ];
 
-const FALLBACK_ORIGINS = [
-  { id: "01", title: "Site oficial da instituição" },
-  { id: "02", title: "Pesquisa no próprio Google" },
-  { id: "03", title: "Redes sociais" },
-  { id: "04", title: "Anúncios patrocinados" },
-  { id: "05", title: "Indicação de amigos ou familiares" },
-  { id: "06", title: "Divulgação na escola ou empresa" },
-  { id: "07", title: "Feiras, palestras ou eventos" },
-  { id: "08", title: "Contato do time comercial" },
-  { id: "09", title: "Materiais impressos" },
-  { id: "10", title: "Outro" },
-];
-
 const PROCESSO_NOTA_ENEM_ID = "20386";
 
 const ANOS_ENEM = [
@@ -852,22 +839,25 @@ async function buildAlmostThereScreenData(
   );
   const button = findButton(form, ["Concluir"]);
   const originQuery = findQueryForField(form, origem.field_id);
-  let origens = FALLBACK_ORIGINS;
-  if (originQuery?.query_data) {
-    try {
-      const originsResponse = await getDataSource({
-        datasource: originQuery.query_data,
-        target: origem.field_id,
-        filter: [],
-        nextFields: [],
-        token,
-      });
-      const dynamicOrigins = flowOptions(
-        extractDataSourceOptions(originsResponse),
-      );
-      if (dynamicOrigins.length > 0) origens = dynamicOrigins;
-    } catch (error) {}
-  }
+  if (!originQuery?.query_data)
+    throw new Error(
+      "A fonte de Como nos conheceu não foi retornada pelo formulário.",
+    );
+  const originsResponse = await getDataSource({
+    datasource: originQuery.query_data,
+    target: origem.field_id,
+    filter: [],
+    nextFields: [],
+    token,
+  });
+  const origens = extractDataSourceOptions(originsResponse).map((option) => ({
+    id: String(option.value),
+    title: String(option.label),
+  }));
+  if (!origens.length)
+    throw new Error(
+      "Nenhuma opção de Como nos conheceu está disponível no momento.",
+    );
   const redirect = previousSubmitResponse?.data?.redirect ?? {};
   return {
     token: String(token),
@@ -1031,9 +1021,7 @@ function validateFinal(data) {
     throw new Error("Informe se concluiu o ensino médio.");
   if (!["T", "F"].includes(data.possui_deficiencia))
     throw new Error("Informe se possui deficiência.");
-  if (
-    !(data.origens ?? FALLBACK_ORIGINS).some((o) => o.id === data.como_conheceu)
-  )
+  if (!(data.origens ?? []).some((o) => o.id === data.como_conheceu))
     throw new Error("Selecione como conheceu a instituição.");
   if (
     data.como_conheceu === "10" &&
@@ -1317,7 +1305,7 @@ function fastAlmostThereRetryData(data, message) {
     campo_origem_id: toStringValue(data.campo_origem_id),
     campo_origem_outro_id: toStringValue(data.campo_origem_outro_id),
     datasource_origem: toStringValue(data.datasource_origem),
-    origens: FALLBACK_ORIGINS,
+    origens: Array.isArray(data.origens) ? data.origens : [],
     erro:
       message ||
       "Não foi possível concluir a inscrição. Revise os dados e tente novamente.",
@@ -1325,7 +1313,7 @@ function fastAlmostThereRetryData(data, message) {
 }
 
 async function almostThereRetryData(data, message) {
-  let origens = FALLBACK_ORIGINS;
+  let origens = Array.isArray(data.origens) ? data.origens : [];
   if (data.datasource_origem) {
     try {
       const originsResponse = await getDataSource({
@@ -1335,8 +1323,8 @@ async function almostThereRetryData(data, message) {
         nextFields: [],
         token: data.token,
       });
-      const dynamicOrigins = flowOptions(
-        extractDataSourceOptions(originsResponse),
+      const dynamicOrigins = extractDataSourceOptions(originsResponse).map(
+        (option) => ({ id: String(option.value), title: String(option.label) }),
       );
       if (dynamicOrigins.length > 0) origens = dynamicOrigins;
     } catch (error) {}
