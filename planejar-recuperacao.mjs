@@ -36,7 +36,7 @@ function inputs(node,out=[]){
  if(Array.isArray(node))node.forEach(x=>inputs(x,out));
  else if(node&&typeof node==='object'){
   if(node.field_id&&node.label)out.push(node);
-  for(const k of ['content','children','components','columns','rows'])if(node[k])inputs(node[k],out);
+  for(const k of ['content','container_content','children','components','columns','rows'])if(node[k])inputs(node[k],out);
  }
  return out;
 }
@@ -83,7 +83,7 @@ if(matched.length===1){
   const current=site.json?.data?.steps?.currentStep;
   report.siteForm={http:site.http,success:site.success,stepMatches:Number(current?.id)===step,...snapshot(inputs(current?.content))};
   if(site.success&&current){
-   function buttons(node,out=[]){if(Array.isArray(node))node.forEach(v=>buttons(v,out));else if(node&&typeof node==='object'){if(node.type==='button')out.push(node);for(const k of ['content','children','components','columns','rows'])if(node[k])buttons(node[k],out)}return out}
+   function buttons(node,out=[]){if(Array.isArray(node))node.forEach(v=>buttons(v,out));else if(node&&typeof node==='object'){if(node.type==='button')out.push(node);for(const k of ['content','container_content','children','components','columns','rows'])if(node[k])buttons(node[k],out)}return out}
    const found=buttons(current.content).filter(b=>norm(b.label)==='iniciar prova');
    if(found.length===1)try{targetProof=buildCanonicalProof(current,data,{button:found[0].id,label:found[0].label},'')}catch{report.observations.push('Os parâmetros atuais da prova não foram suficientes para produzir um plano de recuperação.');}
   }

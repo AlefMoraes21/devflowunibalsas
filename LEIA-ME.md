@@ -1,4 +1,13 @@
-# Flow 1.2.0 — vínculo da execução com a inscrição
+# Flow 1.2.1 — contêineres reais e retomada da preparação
+
+## Falha corrigida nesta versão
+
+O erro PROVA_VINCULO / Não foi possível identificar os parâmetros atuais da prova ocorreu porque o leitor não percorria container_content. Os botões do formulário real ficam em dois contêineres aninhados. A fixture da versão anterior tinha sido achatada e não expunha esse erro. Esta versão preserva a hierarquia capturada na fixture e corrige os leitores do servidor e dos scripts de auditoria.
+
+Uma tarefa de iniciar_redacao já encerrada como PENDENTE deixa de exibir processamento infinito. Na mesma sessão, ao consultar a tarefa antiga, o servidor oferece Conferir prova existente. Essa ação usa apenas leituras: etapas, passo com execute_stage_query=0 e portal. Não chama /submit, button-click, linkProva, create nem salve. Se houver uma execução distribuída válida e não finalizada, prepara o vínculo assinado e oferece Continuar para redação. Só esse próximo clique abre a sessão da avaliação, verifica o vínculo e mostra o editor, sem repetir /submit.
+
+Se a sessão/tarefa tiver expirado, a retomada não é autorizada. Não se deve criar outra inscrição só para contornar essa expiração. A retomada descrita aqui é da preparação da prova; não migra a redação antiga já finalizada em outra execução.
+
 
 ## Diagnóstico real da inscrição 13948467
 
@@ -22,7 +31,7 @@ As operações lentas continuam usando a fila e o Firestore já instalados. Não
 
 ## Validação
 
-58 testes locais passaram, incluindo o caminho de preparação, entrega e confirmação do portal com uma única gravação, redirecionamento desatualizado, valores de applicantData, rejeição de vínculo alterado, rotação de cookies, códigos numéricos e leitura de recibo sem reenvio. Um teste usa estrutura sanitizada do formulário capturado no REA.
+60 testes locais passaram, incluindo o caminho de preparação, entrega e confirmação do portal com uma única gravação, redirecionamento desatualizado, valores de applicantData, rejeição de vínculo alterado, rotação de cookies, códigos numéricos e leitura de recibo sem reenvio. Um teste usa estrutura sanitizada do formulário capturado no REA.
 
 O planejador de recuperação também foi executado com respostas simuladas e verificado para não imprimir credenciais ou texto da redação. Nada desta versão foi executado contra os registros reais pela assistência. O teste no Cloud Run/Rubeus e a validação do novo JSON no editor da Meta ainda são necessários; esses testes locais não são homologação de produção.
 
@@ -32,11 +41,11 @@ Envie o ZIP ao Cloud Shell. A fila e o banco da 1.1.0 devem continuar configurad
 
 ```bash
 flow_dir=$(mktemp -d /tmp/unibalsas-deploy-XXXXXX)
-unzip "$HOME/cloud-run-flow-1.2.0.zip" -d "$flow_dir" &&
+unzip "$HOME/cloud-run-flow-1.2.1.zip" -d "$flow_dir" &&
 gcloud run deploy devflowunibalsas-git --project=talks-servidor --region=southamerica-east1 --source="$flow_dir"
 ```
 
-Atualize também flow-waba.json na Meta. Ele declara titulo_processamento para as três telas dinâmicas. O botão de verificação de entrega usa as ações dinâmicas já existentes. Versão esperada do endpoint: unibalsas-cloudrun-binding-1.2.0.
+Se já usa o JSON da 1.2.0, não precisa atualizar a Meta: o arquivo é idêntico. Para versões anteriores, atualize flow-waba.json. Ele declara titulo_processamento para as três telas dinâmicas. O botão de verificação de entrega usa as ações dinâmicas já existentes. Versão esperada do endpoint: unibalsas-cloudrun-binding-1.2.1.
 
 Sincronize api/, server.js, package.json e os arquivos de implantação no GitHub. O upload ao Cloud Shell não altera o repositório. Testes e documentação são opcionais no runtime; são úteis no controle de versão. O JSON funciona na Meta e pode ser versionado no Git opcionalmente.
 
@@ -57,7 +66,7 @@ A recuperação de uma redação já entregue entre duas execuções é uma oper
 ## Logs para uma tentativa nova
 
 ```bash
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="proof_binding" OR jsonPayload.event="proof_receipt" OR jsonPayload.event="proof_portal_check" OR jsonPayload.event="flow_job" OR jsonPayload.event="flow_error")' --project=talks-servidor --freshness=30m --limit=40 --format=json
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="proof_binding" OR jsonPayload.event="proof_resume" OR jsonPayload.event="proof_receipt" OR jsonPayload.event="proof_portal_check" OR jsonPayload.event="flow_job" OR jsonPayload.event="flow_error")' --project=talks-servidor --freshness=30m --limit=40 --format=json
 ```
 
 proof_binding registra o código atual usado na abertura. proof_receipt registra a execução e o código efetivamente finalizados. proof_portal_check registra se o portal confirmou a atualização. Esses dados devem coincidir para a mesma inscrição.
