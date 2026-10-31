@@ -105,7 +105,7 @@ const SCREEN_KEYS = {
     "valor_como_conheceu",
     "valor_como_conheceu_outro"
   ],
-  TELA_ORIENTACAO_PROVA: ["tema_redacao", "texto_motivador", "estado"],
+  TELA_ORIENTACAO_PROVA: ["tema_redacao", "texto_motivador", "estado", "erro", "tem_erro"],
   TELA_REDACAO: ["tema_redacao", "erro", "tem_erro", "estado", "valor_texto_redacao"],
   CONFIRMACAO: ["titulo", "mensagem", "inscricao_id"],
   PENDENTE: ["mensagem", "inscricao_id", "titulo"],
@@ -396,6 +396,8 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
     throw new Error("A consulta demorou.");
   }
 
+  const began=Date.now();
+  console.info(JSON.stringify({event:"rubeus_begin",path:path.split("?")[0]}));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(timeoutMs, remaining));
   const mutation = path === "/start" || path === "/submit";
@@ -411,6 +413,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
       signal: controller.signal
     });
     const json = JSON.parse(await response.text());
+    console.info(JSON.stringify({event:"rubeus_end",path:path.split("?")[0],http:response.status,success:json?.success===true,ms:Date.now()-began}));
     if (!response.ok || json?.success !== true) {
       if (mutation && context) {
         context.write = null;
@@ -422,6 +425,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
     }
     return json;
   } catch (e) {
+    console.warn(JSON.stringify({event:"rubeus_error",path:path.split("?")[0],kind:e.name,ms:Date.now()-began}));
     if (e.name === "AbortError") {
       throw new Error("O Rubeus não respondeu no prazo.");
     }
@@ -435,22 +439,22 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // INTEGRAÇÃO DINÂMICA COM O MÓDULO DE AVALIAÇÃO DA UNIBALSAS
 // -----------------------------------------------------------------------------
 
-function assessmentClient(){return createAssessment({remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
+function assessmentClient(){return createAssessment({observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
 async function linkDaInscricao(data){
-  if(!data.token||!data.applyment_id)throw new Error("Inscrição não confirmada. Consulte o portal.");
+  if(!data.token||!data.applyment_id)throw new Error("[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.");
   const p=await rubeusRequest("/login/portal",{method:"POST",body:{portal:PORTAL_ID,token:data.token,applyment_id:Number(data.applyment_id)}});
   const current=p.data?.current_process;
-  if(String(current?.applyment_information?.selective_process_id)!==String(data.processo_seletivo_id))throw new Error("O portal retornou outro processo seletivo.");
+  if(String(current?.applyment_information?.selective_process_id)!==String(data.processo_seletivo_id))throw new Error("[PROVA_PROCESSO] O portal não confirmou o processo seletivo desta inscrição.");
   const stages=(current.stages??[]).filter(x=>/avaliação|avaliacao|prova|redação|redacao/i.test(x.title??""));
-  if(stages.length!==1||!stages[0].cta_link)throw new Error("A prova não está disponível para iniciar. Confira o portal.");
+  if(stages.length!==1||!stages[0].cta_link)throw new Error("[PROVA_ETAPA] O portal não retornou uma etapa de prova disponível. Confira o portal.");
   const step=String(stages[0].cta_link).match(/\/passo\/(\d+)(?:[/?#]|$)/)?.[1];
-  if(!step)throw new Error("Etapa de prova não reconhecida.");
+  if(!step)throw new Error("[PROVA_LINK_ETAPA] O endereço da etapa de prova não foi reconhecido.");
   const form=await getForm(step,"step",data.token);
-  const buttons=(form.data?.form?.content?.buttons??[]).filter(x=>/^(iniciar prova|continuar prova)$/i.test(x.label??""));
-  if(buttons.length!==1)throw new Error("Abra a prova pelo portal para conferir sua situação.");
+  const buttons=(form.data?.form?.content?.buttons??[]).filter(x=>x.visible!==false&&x.hidden!==true&&x.disabled!==true&&/^(iniciar prova|continuar prova)$/i.test(String(x.label??"").trim()));
+  if(buttons.length!==1)throw new Error("[PROVA_BOTAO] O formulário não retornou um único botão de prova disponível.");
   const result=await submitForm(buttons[0].button,[],form.token??form.data?.token??data.token);
   const link=result.data?.redirect?.link;
-  if(!link)throw new Error("O Rubeus não retornou o link da prova.");
+  if(!link)throw new Error("[PROVA_LINK] O Rubeus não retornou o link da prova.");
   return link;
 }
 
@@ -973,10 +977,11 @@ async function routeFlowRequest(requestData) {
       }
     }
 
+    case "buscar_turnos":
     case "avancar_curso_interesse": {
       try {
-        if (!toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
-          if (!data.curso_id) {
+        if (customAction === "buscar_turnos" || data.curso_id !== data.curso_selecionado || !toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
+          if (!(data.cursos??[]).some(c=>c.id===data.curso_id)) {
             throw new Error("Selecione um curso para ver os turnos.");
           }
           const tech = [
@@ -1016,20 +1021,6 @@ async function routeFlowRequest(requestData) {
             filial_valor: toStringValue(nextOptions[toStringValue(data.campo_filial_id)]?.value),
             tipo_curso_valor: toStringValue(nextOptions[toStringValue(data.campo_tipo_curso_id)]?.value),
             anos_enem: ANOS_ENEM,
-            erro: ""
-          });
-        }
-
-        if (isNotaEnemContext(data) && !data.media_enem) {
-          const media = calcMediaEnemAuto(data);
-          if (media === null) {
-            throw new Error("Preencha todas as 5 notas do ENEM.");
-          }
-          return responseForScreen("CURSO_INTERESSE", {
-            ...data,
-            curso_selecionado: toStringValue(data.curso_selecionado ?? data.curso_id),
-            turno_selecionado: toStringValue(data.turno_selecionado ?? data.turno_id),
-            values: { media_enem: String(media) },
             erro: ""
           });
         }
@@ -1161,6 +1152,7 @@ async function routeFlowRequest(requestData) {
         const tema=String(sessao.exam.questoes[0].enunciado??"").replace(/<[^>]*>/g," ").replace(/&nbsp;/g," ");
         return responseForScreen("TELA_REDACAO",{...data,sessao_avaliacao:sessao,tema_redacao:tema,erro:"",tem_erro:false});
       }catch(e){
+        console.warn(JSON.stringify({event:"flow_error",action:"iniciar_redacao",message:e.message,write:flowContext.getStore()?.write?.status??null}));
         const uncertain=pendingAfterWrite(data);if(uncertain)return uncertain;
         return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,erro:e.message,tem_erro:true});
       }
@@ -1221,7 +1213,7 @@ function encryptResponse(payload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.2" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.3" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

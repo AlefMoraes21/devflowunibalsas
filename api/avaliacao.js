@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
 const BASE='https://avaliacao.apprubeus.com.br';
 export class ResultadoIncerto extends Error {}
-export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=>{}}={}) {
+export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=>{},observe=()=>{}}={}) {
   async function call(path,{body,cookie,method=body?'POST':'GET',manual=false}={}) {
     const budget=Math.min(4500,remaining()-150);
     if(budget<250)throw new Error('Tempo insuficiente. Reabra esta etapa pelo portal.');
+    const started=Date.now();observe({phase:path.startsWith("/api/avaliacao/consulta/")?"consulta":path.split("?")[0],state:"begin"});
     const r=await fetcher(BASE+path,{method,redirect:manual?'manual':'error',headers:{...(body?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(budget)});
+    observe({phase:path.startsWith("/api/avaliacao/consulta/")?"consulta":path.split("?")[0],state:"end",http:r.status,ms:Date.now()-started});
     const cookies=r.headers.getSetCookie?.()??[];
     const nextCookie=[...(cookie??'').split('; ').filter(Boolean),...cookies.map(x=>x.split(';')[0])];
     const merged=[...new Map(nextCookie.map(x=>[x.split('=')[0],x])).values()].join('; ');
