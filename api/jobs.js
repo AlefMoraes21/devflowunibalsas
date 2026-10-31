@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {createStore,enqueueJob,validWorkerSignature} from './cloud-store.js';
 const screens={enviar_informacoes_complementares:'QUASE_LA',iniciar_redacao:'TELA_ORIENTACAO_PROVA',enviar_redacao:'TELA_REDACAO'};
+const actions=Object.fromEntries(Object.entries(screens).map(([action,screen])=>[screen,action]));
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,openState,render,clock=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),waitMs=5500}){
   function processing(job,extra={}){
@@ -13,7 +14,15 @@ export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,open
     while(true){
       if(current.result){
         if(current.result.screen==='PENDENTE')return processing(current,{erro:current.result.data.mensagem,tem_erro:true,mensagem_processamento:'O resultado precisa de conferência no Portal do candidato. Não reenviamos esta operação.'});
-        return current.result;
+        const result=current.result;
+        // Refresh results persisted by 1.1.0 so its inherited footer cannot leak
+        // the previous screen's action into a completed transition.
+        if(actions[result.screen]&&result.data?.estado){
+          const trusted=openState(result.data.estado,result.screen);
+          const values=Object.fromEntries(Object.entries(result.data).filter(([k])=>k.startsWith('valor_')).map(([k,v])=>[k.slice(6),v]));
+          return render(result.screen,{...trusted,...result.data,processando:false,values});
+        }
+        return result;
       }
       if(clock()-current.created>180000)return processing(current,{erro:'O processamento está demorando além do esperado. Confira a situação no Portal do candidato.',mensagem_processamento:'Esta operação continua protegida contra reenvio.'});
       if(clock()+2400>=until)return processing(current);
@@ -25,7 +34,15 @@ export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,open
     const began=clock();
     const remainingWait=()=>Math.max(0,Math.min(waitMs,8000-(clock()-began)));
     if(req.action!=='data_exchange')return run(req);
-    const action=req.data?.acao;
+    let action=req.data?.acao;
+    if(screens[action]&&screens[action]!==req.screen&&actions[req.screen]){
+      const trusted=openState(req.data.estado,req.screen);
+      // Recover only the exact inherited action authenticated in an old state.
+      if(trusted.acao_rodape===action&&!trusted.processando){
+        action=actions[req.screen];req={...req,data:{...req.data,acao:action}};
+        console.info(JSON.stringify({event:'flow_navigation_recovered',screen:req.screen}));
+      }
+    }
     if(action==='consultar_tarefa'){
       const state=openState(req.data.estado,req.screen);
       if(!/^[a-f0-9]{64}$/.test(state.job_id??''))throw new Error('Processamento não identificado.');

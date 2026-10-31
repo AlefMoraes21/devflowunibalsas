@@ -715,6 +715,11 @@ function responseForScreen(screen, data) {
   const actionByScreen={QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
   const labelByScreen={QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
+  // Navigation belongs to the destination screen, never to the previous form.
+  if(actionByScreen[screen]){
+    if(next.processando&&next.job_id){next.acao_rodape="consultar_tarefa";next.rotulo_rodape="Verificar andamento";next.editavel=false}
+    else{next.processando=false;next.editavel=true;next.job_id="";next.acao_rodape=actionByScreen[screen];next.rotulo_rodape=labelByScreen[screen]}
+  }
   if (screen === "PENDENTE") {
     next.titulo ??= "Vamos conferir";
   }
@@ -1215,7 +1220,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-durable-1.1.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-durable-1.1.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1272,4 +1277,4 @@ export default async function handler(req, res) {
     return res.status(421).send("Erro na descriptografia do payload.");
   }
 }
-export {routeFlowRequest,flowContext,sealState,openState};
+export {routeFlowRequest,flowContext,sealState,openState,responseForScreen};
