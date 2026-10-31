@@ -759,6 +759,10 @@
         "job_id": {
           "type": "string",
           "__example__": ""
+        },
+        "titulo_processamento": {
+          "type": "string",
+          "__example__": "Estamos preparando sua próxima etapa"
         }
       },
       "layout": {
@@ -920,7 +924,7 @@
                 "else": [
                   {
                     "type": "TextHeading",
-                    "text": "Estamos preparando sua próxima etapa"
+                    "text": "${data.titulo_processamento}"
                   },
                   {
                     "type": "TextBody",
@@ -1022,6 +1026,10 @@
         "job_id": {
           "type": "string",
           "__example__": ""
+        },
+        "titulo_processamento": {
+          "type": "string",
+          "__example__": "Estamos preparando sua próxima etapa"
         }
       },
       "layout": {
@@ -1060,7 +1068,7 @@
                 "else": [
                   {
                     "type": "TextHeading",
-                    "text": "Estamos preparando sua próxima etapa"
+                    "text": "${data.titulo_processamento}"
                   },
                   {
                     "type": "TextBody",
@@ -1144,6 +1152,10 @@
         "job_id": {
           "type": "string",
           "__example__": ""
+        },
+        "titulo_processamento": {
+          "type": "string",
+          "__example__": "Estamos preparando sua próxima etapa"
         }
       },
       "layout": {
@@ -1181,7 +1193,7 @@
                 "else": [
                   {
                     "type": "TextHeading",
-                    "text": "Estamos preparando sua próxima etapa"
+                    "text": "${data.titulo_processamento}"
                   },
                   {
                     "type": "TextBody",

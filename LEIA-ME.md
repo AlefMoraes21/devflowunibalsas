@@ -1,84 +1,77 @@
-# Flow 1.1.0 — operações lentas com acompanhamento na mesma tela
+# Flow 1.2.0 — vínculo da execução com a inscrição
 
-Esta versão muda a arquitetura da conclusão de inscrição, abertura da redação e entrega da redação. O objetivo é deixar o processamento remoto continuar sem manter o webhook da Meta esperando nem fechar o Flow.
+## Diagnóstico real da inscrição 13948467
 
-## O que o candidato vê
+A auditoria executada pelo proprietário do projeto confirmou que o portal e o Flow se referem à mesma inscrição. A redação foi entregue na execução de avaliação 701942, com IDEXECPROVA 0A14C822CD. O formulário oficial e o formulário do site apontam IDEXECPROVA 79E0602B66, IDPROVAINSCRITO 45287. Essa divergência é suficiente para explicar o portal consultar uma execução diferente daquela que recebeu o texto. Ainda não foi identificado em qual ponto exato do servidor os dois códigos divergiram.
 
-Ao concluir a inscrição, QUASE_LA pode mostrar “Estamos concluindo sua inscrição e preparando sua próxima etapa”. Os campos ficam ocultos e o botão vira “Verificar andamento”. A consulta recupera o resultado da mesma operação; não submete novamente. Após confirmação, a resposta leva a TELA_ORIENTACAO_PROVA. Ao iniciar a redação, o mesmo comportamento ocorre na orientação até o resultado levar a TELA_REDACAO.
+A configuração capturada do site mostra que o botão Iniciar prova distribui o caderno via ações TOTVS, consulta os dados e monta o link de avaliação. O campo Status da prova consulta o endpoint de status da avaliação usando a chave e IDEXECPROVA. Não basta obter finalizada=1 de uma execução sem conferir que o portal consulta o mesmo código.
 
-O endpoint espera brevemente pelo resultado; se a fila e o worker terminarem rápido, a próxima tela já é retornada. Se ainda estiver processando, o usuário consulta pelo botão. Os componentes usados não implementam um temporizador de atualização automática. Não há promessa de troca espontânea da tela depois que uma resposta já foi entregue.
+## Correção implementada
 
-## Mudança no servidor
+1. Confirma no portal, com o token atual, o número da inscrição e o processo antes de abrir a prova.
+2. Executa uma única ação do botão, com os campos recebidos no formulário.
+3. Relê o passo pelo endpoint do site com execute_stage_query=0, sem executar novamente a distribuição.
+4. Reconstrói o link a partir do forwardData do próprio formulário e dos valores atuais de content/applicantData. O código do redirecionamento anterior não é reutilizado quando diverge do código atual. Chave, candidato, oferta e execução precisam estar presentes; não há fallback para dados de outra inscrição.
+5. Confere o ID da execução retornado pelo módulo de avaliação contra o vínculo confirmado e relê o vínculo antes de mostrar o editor.
+6. Confere outra vez o vínculo antes de entregar. Se ele mudou, bloqueia a entrega; não transfere o texto automaticamente para outra execução.
+7. Preserva cookies desde linkProva até a consulta, trata o código numérico conforme o cliente publicado do site e corrige as entidades HTML no enunciado.
+8. Guarda o recibo de finalização e a auditoria no registro criptografado da tarefa. Não imprime chaves, cookies ou redação nos logs.
+9. Só mostra a confirmação final após o portal da mesma inscrição reconhecer a entrega/correção. Enquanto a avaliação confirmou recebimento, mas o portal não confirmou a atualização, mostra Redação recebida com Verificar atualização. Essa ação faz consultas; não reenvia o texto.
 
-- Cloud Tasks entrega a operação ao endpoint /internal/flow-worker. O corpo da tarefa contém apenas um identificador; a autenticação da aplicação usa assinatura HMAC derivada da chave privada do Flow.
-- Firestore persiste requisição e resultado com criptografia adicional AES-GCM. Apenas o servidor acessa os documentos via OAuth da conta de serviço do Cloud Run; não há acesso do cliente ao banco.
-- A criação da tarefa usa um nome determinístico. O registro da operação e a aquisição pelo worker usam criação exclusiva e precondição de versão. Repetições do mesmo clique e entregas duplicadas não executam novamente a mesma operação.
-- O worker mantém uma requisição HTTP ativa enquanto processa. Tem orçamento de 120 segundos; uma chamada ao Rubeus pode aguardar até 60 segundos, respeitando o tempo restante. O Cloud Tasks e o Cloud Run permitem até 180 segundos nesta configuração.
-- Depois que um worker adquiriu uma operação, ela não é executada automaticamente outra vez se o processo morrer. Isso evita uma segunda gravação após resultado incerto, mas exige conferência manual no portal se a instância falhar entre gravar no Rubeus e persistir o resultado. Não é garantia de execução exatamente uma vez no sistema externo.
-- Uma falha incerta é mostrada na tela original com acesso ao portal, sem botão de concluir/fechar. Consultar novamente não reenvia a operação.
-- Rejeição de validação devolve o formulário para correção e mostra o erro. Uma correção enviada com novo estado pode gerar uma nova operação.
-- A proteção da entrega da prova agora usa um documento exclusivo no Firestore. Redis não é necessário para esta versão.
+As operações lentas continuam usando a fila e o Firestore já instalados. Não há nova infraestrutura nem dependências npm adicionais.
 
-## Antes de executar implantar.sh
+## Validação
 
-O script configura recursos no projeto talks-servidor:
+58 testes locais passaram, incluindo o caminho de preparação, entrega e confirmação do portal com uma única gravação, redirecionamento desatualizado, valores de applicantData, rejeição de vínculo alterado, rotação de cookies, códigos numéricos e leitura de recibo sem reenvio. Um teste usa estrutura sanitizada do formulário capturado no REA.
 
-1. Habilita Cloud Tasks e Firestore.
-2. Cria o banco nomeado unibalsas-flow, em southamerica-east1, com proteção contra exclusão, se ainda não existir.
-3. Cria a fila unibalsas-flow na mesma região, se ainda não existir.
-4. Concede roles/cloudtasks.enqueuer e roles/datastore.user à conta de serviço atual do Cloud Run, no projeto. O papel de dados permite acesso aos bancos Firestore do projeto, não apenas a esse banco nomeado.
-5. Ativa remoção por TTL de operações após duas horas e travas de entrega após sete dias. A remoção física por TTL não é imediata; a aplicação verifica a validade na consulta.
-6. Publica o código, preservando os segredos existentes. Acrescenta apenas as variáveis FLOW_PROJECT_ID, FLOW_DATABASE_ID, FLOW_TASKS_REGION, FLOW_TASKS_QUEUE e FLOW_WORKER_ORIGIN.
-7. Configura uma instância mínima aquecida, startup CPU boost, concorrência 20 e timeout HTTP 180s. A instância mínima e os novos serviços podem gerar cobrança. A instância aquecida reduz partida a frio; não torna a API Rubeus mais rápida.
+O planejador de recuperação também foi executado com respostas simuladas e verificado para não imprimir credenciais ou texto da redação. Nada desta versão foi executado contra os registros reais pela assistência. O teste no Cloud Run/Rubeus e a validação do novo JSON no editor da Meta ainda são necessários; esses testes locais não são homologação de produção.
 
-O endpoint do serviço já é público no ambiente atual. O worker valida a assinatura HMAC antes de consultar ou executar uma tarefa. Se a política de acesso do Cloud Run mudar para exigir IAM, a configuração de autenticação das tarefas também precisará ser atualizada.
+## Implantar o servidor
 
-As chaves FLOW_PRIVATE_KEY/FLOW_PASSPHRASE, RBS_TOKEN e META_APP_SECRET existentes devem continuar configuradas. Não rotacione FLOW_PRIVATE_KEY enquanto houver operações pendentes: ela também protege os dados armazenados.
-
-## Implantação pelo Cloud Shell
-
-Envie cloud-run-flow-1.1.0.zip pelo menu Upload. Em uma aba livre:
+Envie o ZIP ao Cloud Shell. A fila e o banco da 1.1.0 devem continuar configurados. Para atualizar apenas código, preservando configuração existente:
 
 ```bash
 flow_dir=$(mktemp -d /tmp/unibalsas-deploy-XXXXXX)
-unzip "$HOME/cloud-run-flow-1.1.0.zip" -d "$flow_dir" &&
-bash "$flow_dir/implantar.sh"
+unzip "$HOME/cloud-run-flow-1.2.0.zip" -d "$flow_dir" &&
+gcloud run deploy devflowunibalsas-git --project=talks-servidor --region=southamerica-east1 --source="$flow_dir"
 ```
 
-O script precisa de permissões administrativas para habilitar APIs, criar banco/fila e conceder os dois papéis. Se falhar, ele interrompe antes dos passos seguintes. Compartilhe a mensagem de erro, sem valores de segredos.
+Atualize também flow-waba.json na Meta. Ele declara titulo_processamento para as três telas dinâmicas. O botão de verificação de entrega usa as ações dinâmicas já existentes. Versão esperada do endpoint: unibalsas-cloudrun-binding-1.2.0.
 
-Esta versão EXIGE o novo flow-waba.json. Valide esse arquivo no editor da Meta e use-o com o novo backend. As três telas passam a declarar dados e ações de acompanhamento. Não misture o JSON antigo com este endpoint. Abra uma nova sessão de teste depois de atualizar ambos.
+Sincronize api/, server.js, package.json e os arquivos de implantação no GitHub. O upload ao Cloud Shell não altera o repositório. Testes e documentação são opcionais no runtime; são úteis no controle de versão. O JSON funciona na Meta e pode ser versionado no Git opcionalmente.
 
-Confirme a implantação:
+## Entrega antiga: planejar antes de recuperar
+
+Atualizar o servidor não migra a redação da execução antiga 701942. Não sobrescreve o código da prova no TOTVS, não altera manualmente o status e não cria uma segunda entrega para esse registro.
+
+Antes de qualquer recuperação, execute o planejador somente de leitura, na pasta extraída:
 
 ```bash
-curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api/flow
+node "$flow_dir/planejar-recuperacao.mjs"
 ```
 
-Versão esperada: unibalsas-cloudrun-durable-1.1.0.
+O padrão aponta para a tarefa já entregue informada no chat. Para outra tarefa, passe o ID como primeiro argumento. O script consulta a configuração do serviço e a tarefa criptografada com as permissões do proprietário; as chaves ficam apenas em memória. O plano inclui origem, destino, número da inscrição, tamanho/hash do texto, hash do enunciado, chave de definição compatível (somente booleano) e se a entrega original ocorreu dentro do prazo. Ele NÃO chama submit, linkProva, create ou salve.
 
-Para logs estruturados:
+A recuperação de uma redação já entregue entre duas execuções é uma operação separada e precisa ser revisada/autorizada com esses dados. O mecanismo de recuperação que efetivamente grava não está incluído neste pacote. Não se deve reaproveitar o texto em uma questão/enunciado diferente nem sobrescrever uma execução já finalizada. Os registros das tarefas têm retenção e podem ser removidos por TTL; por isso, o plano pode ficar indisponível se a tarefa expirar.
+
+## Logs para uma tentativa nova
 
 ```bash
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="flow_job" OR jsonPayload.event="flow_worker_error" OR jsonPayload.event="rubeus_rejected" OR jsonPayload.event="flow_error")' --project=talks-servidor --freshness=30m --limit=30 --format=json
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="proof_binding" OR jsonPayload.event="proof_receipt" OR jsonPayload.event="proof_portal_check" OR jsonPayload.event="flow_job" OR jsonPayload.event="flow_error")' --project=talks-servidor --freshness=30m --limit=40 --format=json
 ```
 
-Após validar a implantação manual, sincronize também o GitHub com todos os arquivos api/, server.js, package.json, Dockerfile e o novo JSON. O upload ao Shell não altera o repositório.
+proof_binding registra o código atual usado na abertura. proof_receipt registra a execução e o código efetivamente finalizados. proof_portal_check registra se o portal confirmou a atualização. Esses dados devem coincidir para a mesma inscrição.
 
-## Validação realizada
+## Limites
 
-36 testes locais passaram, incluindo webhook com assinatura e criptografia, APIs de Firestore/Tasks simuladas, aquisição concorrente, repetição de clique, retomada em outra instância, recusa de assinatura inválida, isolamento por flow_token, preservação de estado, worker que termina após 12 segundos sem novo submit e comparação de campos técnicos da abertura da prova.
+A rel leitura usa o estado que o servidor devolve; não é uma transação distribuída com o TOTVS. Se um sistema externo redistribuir a prova durante o processo, a versão bloqueia o vínculo divergente e pede conferência. O worker não repete automaticamente uma gravação de resultado incerto. A recuperação de falha entre gravar no Rubeus e guardar o recibo segue exigindo conferência manual.
 
-Esses testes não são um teste no projeto Google real nem uma validação oficial do compilador WABA. A configuração do script foi conferida com a documentação Google; o script não foi executado na sua conta e a execução Bash não foi validada neste ambiente Windows. A integração real Rubeus, inclusive os erros 422 já vistos, continua dependendo da validação de ponta a ponta. A fila resolve a espera e o reenvio do mesmo pedido, não corrige por si só uma regra acadêmica ou validação rejeitada pelo servidor.
+A integração de documentos ENEM permanece pendente. As tarefas usam a configuração de TTL de duas horas, a trava de entrega dura sete dias e o estado do Flow é autenticado por até três horas, respeitando o prazo efetivo da avaliação para a entrega. Uma instância mínima continua aquecida, com custos correspondentes.
 
-Persistem dois limites: a consulta de situação da prova pode depender da compatibilidade do token com a rota de leitura do site; a entrega de documentos ENEM ainda não está integrada. Não há promessa de sincronização imediata do feedback avaliação → CRM após entrega: deve ser conferida no portal.
+## Fontes e evidência
 
-## Fontes
+O passo capturado do site mapeia IDEXECPROVA para BEXECPROVA e Status da prova para https://avaliacao.apprubeus.com.br/api/avaliacao/status. O JavaScript público de execução foi relido com REA: https://avaliacao.apprubeus.com.br/17-es2015.913b512825323118bce3.js (SHA-256 6e15cef6f0dcb2dc6e8781d87878870fb5a7755326c9beff9874f0348081bb6d). Não foi encontrado nesse trecho um callback separado do frontend que pudesse substituir a conferência de vínculo.
 
-- Cloud Tasks HTTP targets: https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks
-- Firestore createDocument: https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/createDocument
-- Firestore patch/precondition: https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/patch
-- Cloud Run minimum instances: https://docs.cloud.google.com/run/docs/configuring/min-instances
-- Cloud Run development tips: https://docs.cloud.google.com/run/docs/tips/general
-- Rubeus listagem: https://docs.rubeus.com.br/api_im/listagem/
-- Rubeus métodos de inscrição: https://docs.rubeus.com.br/api_im/metodosdeinscricao/
+API oficial de metadados: https://docs.rubeus.com.br/api_im/listagem/
+Métodos de formulário: https://docs.rubeus.com.br/api_im/metodosdeinscricao/
+Fila: https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks
