@@ -1,3 +1,5 @@
+import {portalConfirmsDelivery} from "./proof-binding.js";
+import {promptText} from "./prompt-text.js";
 import {createJobEngine} from "./jobs.js";
 import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
@@ -114,7 +116,7 @@ const SCREEN_KEYS = {
   PENDENTE: ["mensagem", "inscricao_id", "titulo"],
 };
 
-for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_KEYS[screen].push("processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id")}
+for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_KEYS[screen].push("processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento")}
 
 const USER_FIELDS = new Set([
   "aceite_privacidade",
@@ -453,8 +455,8 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // -----------------------------------------------------------------------------
 
 function assessmentClient(){return createAssessment({maxRequestMs:flowContext.getStore()?.worker?30000:4500,observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
-const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm});
-async function linkDaInscricao(data){return proofRouter.resolve(data)}
+const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
+async function linkDaInscricao(data){return proofRouter.prepare(data)}
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -720,6 +722,12 @@ function responseForScreen(screen, data) {
     if(next.processando&&next.job_id){next.acao_rodape="consultar_tarefa";next.rotulo_rodape="Verificar andamento";next.editavel=false}
     else{next.processando=false;next.editavel=true;next.job_id="";next.acao_rodape=actionByScreen[screen];next.rotulo_rodape=labelByScreen[screen]}
   }
+  next.titulo_processamento=screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
+  if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
+  if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
+    next.processando=true;next.editavel=false;next.job_id="";next.acao_rodape="verificar_entrega";next.rotulo_rodape="Verificar atualização";next.titulo_processamento="Redação recebida";
+    next.mensagem_processamento=data.mensagem_processamento||"A avaliação recebeu sua redação. Estamos conferindo a atualização da mesma inscrição no portal. Este botão não reenvia o texto.";
+  }
   if (screen === "PENDENTE") {
     next.titulo ??= "Vamos conferir";
   }
@@ -868,7 +876,8 @@ async function routeFlowRequest(requestData) {
       "enviar_documento_enem",
       "enviar_informacoes_complementares",
       "iniciar_redacao",
-      "enviar_redacao"
+      "enviar_redacao",
+      "verificar_entrega"
     ].includes(customAction)) {
       const trusted = openState(data.estado, requestData.screen);
       const user = Object.fromEntries(Object.entries(data).filter(([k]) => USER_FIELDS.has(k)));
@@ -1145,9 +1154,13 @@ async function routeFlowRequest(requestData) {
 
     case "iniciar_redacao": {
       try {
-        const link=await linkDaInscricao(data);
-        const sessao=await assessmentClient().init(link);
-        const tema=String(sessao.exam.questoes[0].enunciado??"").replace(/<[^>]*>/g," ").replace(/&nbsp;/g," ");
+        const prepared=await linkDaInscricao(data);
+        data.token=prepared.token??data.token;
+        const sessao=await assessmentClient().init(prepared.link);
+        if(String(sessao.exam.IDEXECPROVA).toUpperCase()!==prepared.binding.executionCode.toUpperCase())throw new Error("[PROVA_VINCULO] A avaliação abriu uma execução diferente da execução atual da inscrição.");
+        sessao.binding=prepared.binding;
+        await proofRouter.verify(data,sessao.binding);
+        const tema=promptText(sessao.exam.questoes[0].enunciado);
         return responseForScreen("TELA_REDACAO",{...data,sessao_avaliacao:sessao,tema_redacao:tema,erro:"",tem_erro:false});
       }catch(e){
         console.warn(JSON.stringify({event:"flow_error",action:"iniciar_redacao",message:e.message,write:flowContext.getStore()?.write?.status??null}));
@@ -1156,22 +1169,45 @@ async function routeFlowRequest(requestData) {
       }
     }
     case "enviar_redacao": {
+      let receipt=data.recibo_avaliacao;
       try {
+        if(receipt)return await followReceipt(data,receipt);
         const texto=String(data.texto_redacao??"").trim();
         if(texto.length<50)throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
-        if(!data.sessao_avaliacao?.exam)throw new Error("Inicie uma nova sessão pelo portal para continuar.");
+        if(!data.sessao_avaliacao?.exam)throw new Error("Sessão de prova não encontrada.");
+        await proofRouter.verify(data,data.sessao_avaliacao.binding);
         await claimDelivery(data.sessao_avaliacao);
-        await assessmentClient().send(data.sessao_avaliacao,texto);
-        return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada",mensagem:"O módulo de avaliação confirmou o envio da sua redação. Acompanhe a situação no Portal do candidato.",inscricao_id:toStringValue(data.applyment_id)});
+        receipt=await assessmentClient().send(data.sessao_avaliacao,texto);
+        flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt};
+        console.info(JSON.stringify({event:"proof_receipt",applicationId:String(data.applyment_id),executionId:receipt.id,executionCode:receipt.IDEXECPROVA,finalized:receipt.finalizada,sentAt:receipt.data_envio}));
+        return await followReceipt(data,receipt);
       }catch(e){
+        if(receipt)return receiptScreen(data,receipt,e.message);
         if(e instanceof ResultadoIncerto)return responseForScreen("PENDENTE",{titulo:"Conferir entrega",mensagem:e.message,inscricao_id:toStringValue(data.applyment_id)});
         return responseForScreen("TELA_REDACAO",{...data,erro:e.message,tem_erro:true});
       }
+    }
+    case "verificar_entrega":{
+      if(!data.recibo_avaliacao)throw new Error("Recibo de entrega não encontrado.");
+      return followReceipt(data,data.recibo_avaliacao);
     }
 
     default:
       return { data: { status: "active" } };
   }
+}
+
+function receiptScreen(data,receipt,error=""){
+ return responseForScreen("TELA_REDACAO",{...data,recibo_avaliacao:receipt,processando:false,job_id:"",erro:error,mensagem_processamento:"A avaliação confirmou o recebimento. Estamos conferindo a atualização da mesma inscrição no portal. Verificar a atualização não envia a redação novamente."});
+}
+async function followReceipt(data,receipt){
+ try{
+  const checked=await proofRouter.verify(data,data.sessao_avaliacao?.binding);
+  flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt??data.recibo_avaliacao,portal:checked.portal};
+  console.info(JSON.stringify({event:"proof_portal_check",applicationId:String(data.applyment_id),confirmed:portalConfirmsDelivery(checked.portal)}));
+  if(portalConfirmsDelivery(checked.portal))return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}`,inscricao_id:String(data.applyment_id)});
+  return receiptScreen(data,receipt);
+ }catch(e){return receiptScreen(data,receipt,e.message)}
 }
 
 function decryptRequest(body, privateKey) {
@@ -1211,7 +1247,10 @@ function encryptResponse(payload, aesKey, iv) {
 
 const jobEngine=createJobEngine({
   openState,render:responseForScreen,
-  run:(request,worker=false)=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+(worker?120000:FLOW_RESPONSE_BUDGET_MS),request,write:null,worker},()=>routeFlowRequest(request))
+  run:(request,worker=false)=>{
+    const context={request_id:crypto.randomUUID(),deadline:Date.now()+(worker?120000:FLOW_RESPONSE_BUDGET_MS),request,write:null,worker};
+    return flowContext.run(context,async()=>{const response=await routeFlowRequest(request);return worker?{response,audit:{...context.audit,...(context.write?.receipt?{receipt:context.write.receipt}:{})}}:response})
+  }
 });
 export async function workerHandler(req,res){
   try{return res.status(await jobEngine.worker(req.body?.id,req.headers["x-flow-worker-signature"])).send("")}
@@ -1220,7 +1259,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-durable-1.1.1" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-binding-1.2.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

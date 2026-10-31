@@ -20,23 +20,25 @@ export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=
   async function init(link) {
     const url=new URL(link);
     if(url.origin!==BASE||url.pathname!=='/api/avaliacao/linkProva')throw new Error('Link de avaliação inválido.');
-    const {response}=await call(url.pathname+url.search,{manual:true});
+    const {response,cookie:linkCookie}=await call(url.pathname+url.search,{manual:true});
     if(![301,302,303,307,308].includes(response.status))throw new Error('A avaliação não retornou a execução.');
     const to=new URL(response.headers.get('location'),BASE);
-    const m=to.pathname.match(/^\/execucao\/inicio\/([^/]+)\/(\d+)\/(\d+)\/([^/]+)\/?$/);
+    const m=to.pathname.match(/^\/execucao\/inicio\/([^/]+)\/(\d+)\/(\d+)\/([^/]+)(?:\/([^/]+))?\/?$/);
     if(to.origin!==BASE||!m)throw new Error('Execução da avaliação inválida.');
-    const params={chave:decodeURIComponent(m[1]),crm_contato_id:m[2],crm_curso_id:m[3],IDEXECPROVA:decodeURIComponent(m[4]),crm_processoseletivo_id:null,codUsuarioPS:null};
-    const config=await call('/api/avaliacao/configuracao/execucao/',{body:params});
+    const code=decodeURIComponent(m[4]);
+    // The shipped client maps numeric route codes to codUsuarioPS, not IDEXECPROVA.
+    const params={chave:decodeURIComponent(m[1]),crm_contato_id:m[2],crm_curso_id:m[3],IDEXECPROVA:/^\d+$/.test(code)?null:code,crm_processoseletivo_id:null,codUsuarioPS:/^\d+$/.test(code)?code:m[5]?decodeURIComponent(m[5]):null};
+    const config=await call('/api/avaliacao/configuracao/execucao/',{body:params,cookie:linkCookie});
     const created=await call('/api/avaliacao/create/',{body:params,cookie:config.cookie});
     if(!created.data?.token)throw new Error('Token de execução ausente.');
     const session={token:created.data.token,cookie:created.cookie,params};
     const read=await call('/api/avaliacao/consulta/'+encodeURIComponent(session.token),{cookie:session.cookie});
     const exam=read.data;
     if(!exam?.id||!exam.avaliacao_id||!exam.crm_id||Number(exam.finalizada)!==0||exam.questoes?.length!==1)throw new Error('Prova indisponível ou formato não suportado. Abra o portal.');
-    for(const key of ['crm_contato_id','crm_curso_id','IDEXECPROVA'])if(String(exam[key])!==String(params[key]))throw new Error('A execução retornada não corresponde à inscrição.');
+    for(const key of ['crm_contato_id','crm_curso_id',...['IDEXECPROVA','codUsuarioPS'].filter(k=>params[k]!=null)])if(String(exam[key])!==String(params[key]))throw new Error('A execução retornada não corresponde à inscrição.');
     const minutes=Number(exam.tempoRestante??exam.tempo);
     if(!Number.isFinite(minutes)||minutes<=0)throw new Error('Prazo da avaliação indisponível.');
-    return {...session,exam,startedAt:Date.now(),deadline:Date.now()+minutes*60000};
+    return {...session,cookie:read.cookie,exam,startedAt:Date.now(),deadline:Date.now()+minutes*60000};
   }
   async function send(session,text) {
     if(!session?.exam||!session.cookie)throw new Error('Sessão incompleta. Inicie a prova novamente pelo portal.');
@@ -50,8 +52,10 @@ export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=
     markWrite({status:'sending',path:'/avaliacao/salve'});
     try {
       const r=await call('/api/avaliacao/salve/',{body:payload,cookie:session.cookie});
+      const receipt=Object.fromEntries(['id','avaliacao_id','crm_contato_id','crm_curso_id','crm_id','crm_processoseletivo_id','IDEXECPROVA','codUsuarioPS','finalizada','data_envio'].map(k=>[k,r.data?.[k]??null]));
+      markWrite({status:'received',path:'/avaliacao/salve',receipt});
       if(String(r.data?.id)!==String(e.id)||Number(r.data?.finalizada)!==1||!r.data?.data_envio)throw new Error('Resposta sem confirmação de finalização.');
-      markWrite({status:'received',path:'/avaliacao/salve'});
+      for(const key of ['crm_contato_id','crm_curso_id','IDEXECPROVA','codUsuarioPS'])if(r.data[key]!=null&&String(r.data[key])!==String(e[key]))throw new Error('Recibo pertence a outro vínculo.');
       return r.data;
     }catch{throw new ResultadoIncerto('Não foi possível confirmar a entrega. Consulte o Portal do candidato antes de reenviar.');}
   }

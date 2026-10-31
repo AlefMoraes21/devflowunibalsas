@@ -1,3 +1,4 @@
+import {loadProofSnapshot,loadPortal,buildCanonicalProof,assertCurrentBinding} from './proof-binding.js';
 // Only public process metadata is cached. Candidate tokens/forms are never shared.
 const cache=new Map();
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
@@ -32,7 +33,7 @@ async function readSiteStatus(step,data){
   if(!r.ok||j.success!==true||Number(j.data?.steps?.currentStep?.id)!==Number(step))throw new Error('[PROVA_STATUS] Não foi possível confirmar a situação da prova nesta sessão.');
   return collectInputs(j.data.steps.currentStep.content);
 }
-export function createProofRouter({api,getForm,submitForm,readStatus=readSiteStatus}){
+export function createProofRouter({api,getForm,submitForm,readStatus=readSiteStatus,remaining=()=>120000,readSnapshot=(step,data)=>loadProofSnapshot(step,data,{remaining}),readPortal=data=>loadPortal(data,{remaining})}){
   async function discover(process){
     const id=Number(process);
     if(!Number.isSafeInteger(id)||id<=0)throw new Error('[PROVA_PROCESSO] Processo inválido.');
@@ -45,7 +46,7 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     if(rows.length!==1||!Number.isSafeInteger(Number(rows[0].id))||Number(rows[0].id)<=0)throw new Error('[PROVA_PASSO] A etapa precisa de um mapeamento adicional de passos.');
     const step=Number(rows[0].id);cache.set(id,{step,expires:Date.now()+300000});return step;
   }
-  async function resolve(data){
+  async function dispatch(data){
     if(!data.token||!data.applyment_id)throw new Error('[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.');
     const step=await discover(data.processo_seletivo_id);
     const form=await getForm(step,'step',data.token);
@@ -61,7 +62,22 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     const result=await submitForm(button.button,fields,form.token??form.data?.token??data.token,9500);
     const link=result.data?.redirect?.link;
     if(!link)throw new Error('[PROVA_LINK] O Rubeus não retornou o link da prova.');
-    return link;
+    return {link,step,button,token:result.token??result.data?.token??form.token??form.data?.token??data.token};
   }
-  return {resolve};
+  async function prepare(data){
+    if(!data.token||!data.applyment_id)throw new Error('[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.');
+    await discover(data.processo_seletivo_id);
+    await readPortal(data);
+    const sent=await dispatch(data);
+    const snapshot=await readSnapshot(sent.step,{...data,token:sent.token});
+    const prepared=buildCanonicalProof(snapshot,data,sent.button,sent.link);
+    console.info(JSON.stringify({event:'proof_binding',applicationId:prepared.binding.applicationId,step:prepared.binding.step,proofId:prepared.binding.proofId,executionCode:prepared.binding.executionCode,redirectMatched:prepared.binding.redirectMatched}));
+    return {...prepared,token:sent.token};
+  }
+  async function verify(data,binding){
+    if(!binding)throw new Error('[PROVA_VINCULO] Esta sessão foi criada antes da verificação de vínculo. Confira a situação no portal.');
+    const [snapshot,portal]=await Promise.all([readSnapshot(binding.step,data),readPortal(data)]);
+    assertCurrentBinding(snapshot,data,binding);return {snapshot,portal};
+  }
+  return {resolve:async data=>(await dispatch(data)).link,prepare,verify};
 }
