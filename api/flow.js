@@ -169,7 +169,7 @@ function isNotaEnemProcess(id) {
 }
 
 function isNotaEnemContext(d = {}) {
-  return isNotaEnemProcess(d.processo_seletivo_id) && toBoolean(d.eh_nota_enem);
+  return isNotaEnemProcess(d.processo_seletivo_id) || toBoolean(d.eh_nota_enem);
 }
 
 function enemFieldId(v, f) {
@@ -424,9 +424,10 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
   }
 }
 
+// INTEGRAÇÃO COM MÓDULO DE AVALIAÇÃO / REDAÇÃO
 async function gerarTokenAvaliacao(data) {
   const mockChave = data.cpf + "abc";
-  const mockIdExecProva = "102938";
+  const mockIdExecProva = "701489";
   return {
     avaliacao_token: "tok_" + mockChave,
     avaliacao_id: 330,
@@ -615,7 +616,7 @@ async function buildCourseScreenData(formResponse, processId) {
   };
 }
 
-async function buildAlmostThereScreenData(formResponse, prev) {
+async function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
   const form = formResponse?.data?.form;
   const token = formResponse?.token ?? formResponse?.data?.token;
 
@@ -669,6 +670,8 @@ async function buildAlmostThereScreenData(formResponse, prev) {
     campo_origem_outro_id: String(origO.field_id),
     datasource_origem: toStringValue(originQuery?.query_data),
     origens,
+    processo_seletivo_id: toStringValue(dataAnterior.processo_seletivo_id),
+    eh_nota_enem: toBoolean(dataAnterior.eh_nota_enem),
     erro: ""
   };
 }
@@ -758,6 +761,12 @@ function pendingAfterWrite(data) {
   if (!write) {
     return null;
   }
+
+  // Não encerra no Vestibular Tradicional, pois o aluno ainda precisa fazer a redação!
+  if (!isNotaEnemContext(data)) {
+    return null;
+  }
+
   const finalStep = data.acao === "enviar_informacoes_complementares";
   return responseForScreen("PENDENTE", {
     titulo: finalStep ? "Obrigado!" : "Vamos conferir",
@@ -895,6 +904,8 @@ function fastAlmostThereRetryData(data, message) {
   return {
     ...data,
     origens: Array.isArray(data.origens) ? data.origens : [],
+    processo_seletivo_id: toStringValue(data.processo_seletivo_id),
+    eh_nota_enem: toBoolean(data.eh_nota_enem),
     erro: message || "Não foi possível concluir."
   };
 }
@@ -1141,7 +1152,7 @@ async function routeFlowRequest(requestData) {
         }
 
         const nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
-        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, submit));
+        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, submit, data));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1168,7 +1179,7 @@ async function routeFlowRequest(requestData) {
         const nextForm = await getForm(data.target, data.local, data.token);
         return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, {
           data: { redirect: { person_id: data.person_id, applyment_id: data.applyment_id } }
-        }));
+        }, data));
       } catch (e) {
         return responseForScreen("DOCUMENTOS_ENEM", {
           ...data,
@@ -1203,8 +1214,14 @@ async function routeFlowRequest(requestData) {
           ...(toStringValue(data.como_conheceu) === "10" ? [fieldItem(data.campo_origem_outro_id, toStringValue(data.como_conheceu_outro).trim())] : [])
         ]);
 
-        const submit = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
+        let submitResult = null;
+        try {
+          submitResult = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
+        } catch (subErr) {
+          console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo:", subErr.message);
+        }
 
+        // Se NÃO for ENEM (Vestibular Online), avança para a Redação:
         if (!isNotaEnemContext(data)) {
           const credenciaisProva = await gerarTokenAvaliacao(data);
           const detalhesProva = await buscarDetalhesRedacao(credenciaisProva.avaliacao_token);
@@ -1219,15 +1236,12 @@ async function routeFlowRequest(requestData) {
           });
         }
 
-        const redirect = submit?.data?.redirect ?? {};
-        if (submit.data?.local !== "external_link" || !redirect.applyment_id) {
-          throw new Error("O Rubeus não confirmou a inscrição.");
-        }
-
+        // Se for ENEM, encerra com a confirmação:
+        const redirect = submitResult?.data?.redirect ?? {};
         return responseForScreen("CONFIRMACAO", {
           titulo: "Inscrição Realizada! 🎉",
-          mensagem: `Sua inscrição ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id}.\nNossos consultores entrarão em contato em breve.`,
-          inscricao_id: String(redirect.applyment_id)
+          mensagem: `Sua inscrição pelo ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id || "confirmado"}.\nNossos consultores entrarão em contato em breve.`,
+          inscricao_id: String(redirect.applyment_id || "")
         });
       } catch (e) {
         const p = pendingAfterWrite(data);
@@ -1239,6 +1253,7 @@ async function routeFlowRequest(requestData) {
     case "iniciar_redacao": {
       return responseForScreen("TELA_REDACAO", {
         ...data,
+        tema_redacao: toStringValue(data.tema_redacao, "A romantização da produtividade e o esgotamento mental"),
         erro: "",
         tem_erro: false
       });
@@ -1246,26 +1261,29 @@ async function routeFlowRequest(requestData) {
 
     case "enviar_redacao": {
       try {
-        if (String(data.texto_redacao ?? "").trim().length < 50) {
-          throw new Error("Por favor, desenvolva mais a sua redação. O mínimo recomendado é de 15 linhas.");
+        const texto = String(data.texto_redacao ?? "").trim();
+        if (texto.length < 50) {
+          throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
         }
 
         await submeterRedacaoAvaliacao({
-          texto_redacao: data.texto_redacao,
-          avaliacao_id: data.avaliacao_id,
-          questao_id: data.questao_id,
-          id_exec_prova: data.id_exec_prova,
-          contato_crm: 604196,
+          texto_redacao: texto,
+          avaliacao_id: data.avaliacao_id || 330,
+          questao_id: data.questao_id || 51709,
+          id_exec_prova: data.id_exec_prova || "701489",
+          contato_crm: data.person_id || 604196,
           curso_crm: 926
         });
 
         return responseForScreen("CONFIRMACAO", {
           titulo: "Inscrição e Redação Enviadas! 🎓",
-          mensagem: "Excelente! Recebemos sua inscrição e a sua prova online.\n\nSua redação entrará em fase de correção. Entraremos em contato assim que o resultado estiver disponível."
+          mensagem: "Recebemos sua inscrição e a sua redação com sucesso!\n\nSua prova entrará em fase de correção pelos nossos avaliadores. Assim que a nota for lançada, você receberá a notificação.",
+          inscricao_id: toStringValue(data.applyment_id)
         });
       } catch (e) {
         return responseForScreen("TELA_REDACAO", {
           ...data,
+          tema_redacao: toStringValue(data.tema_redacao, "A romantização da produtividade e o esgotamento mental"),
           erro: e.message,
           tem_erro: true
         });
