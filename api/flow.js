@@ -722,6 +722,10 @@ function responseForScreen(screen, data) {
     if(next.processando&&next.job_id){next.acao_rodape="consultar_tarefa";next.rotulo_rodape="Verificar andamento";next.editavel=false}
     else{next.processando=false;next.editavel=true;next.job_id="";next.acao_rodape=actionByScreen[screen];next.rotulo_rodape=labelByScreen[screen]}
   }
+  if(screen==="TELA_ORIENTACAO_PROVA"&&data.proof_resume_required&&!(next.processando&&next.job_id)){
+    next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
+  }
+  if(screen==="TELA_ORIENTACAO_PROVA"&&data.prepared_existing&&!(next.processando&&next.job_id))next.rotulo_rodape="Continuar para redação";
   next.titulo_processamento=screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
@@ -876,6 +880,7 @@ async function routeFlowRequest(requestData) {
       "enviar_documento_enem",
       "enviar_informacoes_complementares",
       "iniciar_redacao",
+      "conferir_prova_existente",
       "enviar_redacao",
       "verificar_entrega"
     ].includes(customAction)) {
@@ -1152,9 +1157,21 @@ async function routeFlowRequest(requestData) {
       }
     }
 
+    case "conferir_prova_existente": {
+      if(!data.proof_resume_required)throw new Error("Conferência não autorizada nesta etapa.");
+      try{
+        const prepared=await proofRouter.resume(data);
+        return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,token:prepared.token,prepared_existing:prepared,proof_resume_required:false,erro:"",tem_erro:false});
+      }catch(e){
+        console.warn(JSON.stringify({event:"flow_error",action:"conferir_prova_existente",message:e.message,write:null}));
+        return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,erro:e.message,proof_resume_required:true});
+      }
+    }
     case "iniciar_redacao": {
       try {
-        const prepared=await linkDaInscricao(data);
+        if(data.proof_resume_required)throw new Error("Confira a prova existente antes de continuar.");
+        const prepared=data.prepared_existing??await linkDaInscricao(data);
+        if(data.prepared_existing)await proofRouter.verify(data,prepared.binding);
         data.token=prepared.token??data.token;
         const sessao=await assessmentClient().init(prepared.link);
         if(String(sessao.exam.IDEXECPROVA).toUpperCase()!==prepared.binding.executionCode.toUpperCase())throw new Error("[PROVA_VINCULO] A avaliação abriu uma execução diferente da execução atual da inscrição.");
@@ -1259,7 +1276,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-binding-1.2.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-binding-1.2.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

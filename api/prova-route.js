@@ -22,7 +22,7 @@ function collectInputs(node,out=[]){
   if(Array.isArray(node))for(const x of node)collectInputs(x,out);
   else if(node&&typeof node==='object'){
     if(node.field_id&&node.label)out.push(node);
-    for(const key of ['content','children','components','columns','rows'])if(node[key])collectInputs(node[key],out);
+    for(const key of ['content','container_content','children','components','columns','rows'])if(node[key])collectInputs(node[key],out);
   }
   return out;
 }
@@ -74,10 +74,22 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     console.info(JSON.stringify({event:'proof_binding',applicationId:prepared.binding.applicationId,step:prepared.binding.step,proofId:prepared.binding.proofId,executionCode:prepared.binding.executionCode,redirectMatched:prepared.binding.redirectMatched}));
     return {...prepared,token:sent.token};
   }
+  async function resume(data){
+    if(!data.token||!data.applyment_id)throw new Error('[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.');
+    const step=await discover(data.processo_seletivo_id);
+    await readPortal(data);
+    const snapshot=await readSnapshot(step,data);
+    // Only read the already distributed execution. Never submit/distribute here.
+    chooseProofButton([{label:'Iniciar prova'}],collectInputs(snapshot.content));
+    const prepared=buildCanonicalProof(snapshot,data,{label:'Iniciar prova'},'');
+    assertCurrentBinding(snapshot,data,prepared.binding);
+    console.info(JSON.stringify({event:'proof_resume',applicationId:prepared.binding.applicationId,step,proofId:prepared.binding.proofId,executionCode:prepared.binding.executionCode}));
+    return {...prepared,token:data.token};
+  }
   async function verify(data,binding){
     if(!binding)throw new Error('[PROVA_VINCULO] Esta sessão foi criada antes da verificação de vínculo. Confira a situação no portal.');
     const [snapshot,portal]=await Promise.all([readSnapshot(binding.step,data),readPortal(data)]);
     assertCurrentBinding(snapshot,data,binding);return {snapshot,portal};
   }
-  return {resolve:async data=>(await dispatch(data)).link,prepare,verify};
+  return {resolve:async data=>(await dispatch(data)).link,prepare,resume,verify};
 }

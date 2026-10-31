@@ -1,7 +1,7 @@
 const SITE='https://vestibular.unibalsas.edu.br';
 const ASSESSMENT='https://avaliacao.apprubeus.com.br';
 export const normalize=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
-function nodes(node,out=[]){if(Array.isArray(node))node.forEach(n=>nodes(n,out));else if(node&&typeof node==='object'){if(node.type)out.push(node);for(const k of ['content','children','components','columns','rows'])if(node[k])nodes(node[k],out)}return out}
+function nodes(node,out=[]){if(Array.isArray(node))node.forEach(n=>nodes(n,out));else if(node&&typeof node==='object'){if(node.type)out.push(node);for(const k of ['content','container_content','children','components','columns','rows'])if(node[k])nodes(node[k],out)}return out}
 export function snapshotValues(snapshot){
  const values=new Map();for(const row of snapshot.applicantData??[])if(row.field_id)values.set(Number(row.field_id),row.value);
  for(const row of nodes(snapshot.content))if(row.field_id){

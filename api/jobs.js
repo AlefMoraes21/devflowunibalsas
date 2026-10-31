@@ -1,18 +1,22 @@
 import crypto from 'node:crypto';
 import {createStore,enqueueJob,validWorkerSignature} from './cloud-store.js';
-const screens={enviar_informacoes_complementares:'QUASE_LA',iniciar_redacao:'TELA_ORIENTACAO_PROVA',enviar_redacao:'TELA_REDACAO',verificar_entrega:'TELA_REDACAO'};
+const screens={conferir_prova_existente:'TELA_ORIENTACAO_PROVA',enviar_informacoes_complementares:'QUASE_LA',iniciar_redacao:'TELA_ORIENTACAO_PROVA',enviar_redacao:'TELA_REDACAO',verificar_entrega:'TELA_REDACAO'};
 const actions={QUASE_LA:'enviar_informacoes_complementares',TELA_ORIENTACAO_PROVA:'iniciar_redacao',TELA_REDACAO:'enviar_redacao'};
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,openState,render,clock=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),waitMs=5500}){
   function processing(job,extra={}){
     const trusted=openState(job.request.data.estado,job.request.screen);
-    const messages={enviar_informacoes_complementares:'Estamos concluindo sua inscrição e preparando sua próxima etapa.',iniciar_redacao:'Estamos abrindo o ambiente de redação. Aguarde a preparação da sua prova.',enviar_redacao:'Estamos enviando sua redação. Não é necessário enviar novamente.',verificar_entrega:'Estamos conferindo a atualização da sua redação no portal. O texto não será reenviado.'};
+    const messages={conferir_prova_existente:'Estamos conferindo a prova já distribuída, sem repetir a inscrição.',enviar_informacoes_complementares:'Estamos concluindo sua inscrição e preparando sua próxima etapa.',iniciar_redacao:'Estamos abrindo o ambiente de redação. Aguarde a preparação da sua prova.',enviar_redacao:'Estamos enviando sua redação. Não é necessário enviar novamente.',verificar_entrega:'Estamos conferindo a atualização da sua redação no portal. O texto não será reenviado.'};
     return render(job.request.screen,{...trusted,values:job.request.data,erro:'',job_id:job.id,processando:true,editavel:false,acao_rodape:'consultar_tarefa',rotulo_rodape:'Verificar andamento',mensagem_processamento:messages[job.request.data.acao]??'Estamos processando seus dados.',...extra});
   }
   async function poll(job,wait=waitMs){
     const until=clock()+wait;let current=job;
     while(true){
       if(current.result){
+        if(current.result.screen==='PENDENTE'&&current.request.data.acao==='iniciar_redacao'){
+          const trusted=openState(current.request.data.estado,current.request.screen);
+          return render('TELA_ORIENTACAO_PROVA',{...trusted,proof_resume_required:true,processando:false,job_id:'',erro:'A preparação não foi confirmada. Confira a prova já distribuída para continuar sem reenviar a operação.',mensagem_processamento:''});
+        }
         if(current.result.screen==='PENDENTE')return processing(current,{erro:current.result.data.mensagem,tem_erro:true,mensagem_processamento:'O resultado precisa de conferência no Portal do candidato. Não reenviamos esta operação.'});
         const result=current.result;
         // Refresh results persisted by 1.1.0 so its inherited footer cannot leak
