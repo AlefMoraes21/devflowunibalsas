@@ -55,7 +55,10 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     if(recognized.length!==1&&!inputs.some(i=>norm(i.label)==='status da prova'))inputs=await readStatus(step,{...data,token:form.token??form.data?.token??data.token});
     console.info(JSON.stringify({event:'proof_buttons',recognized:recognized.length,total:buttons.length,hasStatus:inputs.some(i=>norm(i.label)==='status da prova')}));
     const button=chooseProofButton(buttons,inputs);
-    const result=await submitForm(button.button,[],form.token??form.data?.token??data.token);
+    // Match the site's current form submission. Never use values from the caller
+    // to populate technical assessment fields, and do not send a blind empty form.
+    const fields=(form.data?.form?.content?.inputs??[]).filter(i=>Number.isSafeInteger(Number(i.field_id))&&Number(i.field_id)>0).map(i=>({field_id:Number(i.field_id),value:i.value??i.value_now??i.data_value??null}));
+    const result=await submitForm(button.button,fields,form.token??form.data?.token??data.token,9500);
     const link=result.data?.redirect?.link;
     if(!link)throw new Error('[PROVA_LINK] O Rubeus não retornou o link da prova.');
     return link;

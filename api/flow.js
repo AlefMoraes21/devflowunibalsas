@@ -1,3 +1,4 @@
+import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import crypto from "crypto";
@@ -419,19 +420,21 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
       console.warn(JSON.stringify({event:"rubeus_non_json",path:path.split("?")[0],http:response.status,contentType:response.headers.get("content-type"),redirected:response.redirected,ms:Date.now()-began}));
       throw new Error(`[RUBEUS_RESPOSTA] ${path.split("?")[0]} retornou resposta não JSON (HTTP ${response.status}).`);
     }
-    console.info(JSON.stringify({event:"rubeus_end",path:path.split("?")[0],http:response.status,success:json?.success===true,ms:Date.now()-began}));
+    console.info(JSON.stringify({event:"rubeus_end",request_id:context?.request_id,action:context?.request?.data?.acao,path:path.split("?")[0],http:response.status,success:json?.success===true,ms:Date.now()-began}));
     if (!response.ok || json?.success !== true) {
-      if (mutation && context) {
+      const explanation=response.status===422?validationSummary(json,body):"Sem confirmação da operação.";
+      console.warn(JSON.stringify({event:"rubeus_rejected",request_id:context?.request_id,action:context?.request?.data?.acao,path:path.split("?")[0],http:response.status,details:explanation}));
+      if (mutation && context && response.status===422) {
         context.write = null;
       }
-      throw new Error(mutation && response.ok ? "Confira os dados." : "Erro na Rubeus.");
+      throw new Error(`[RUBEUS_ERRO] ${path.split("?")[0]} não confirmou a operação (HTTP ${response.status}). ${response.status===422?explanation:""}`);
     }
     if (mutation && context) {
       context.write = { status: "received", path, result: json };
     }
     return json;
   } catch (e) {
-    console.warn(JSON.stringify({event:"rubeus_error",path:path.split("?")[0],kind:e.name,ms:Date.now()-began}));
+    console.warn(JSON.stringify({event:"rubeus_error",request_id:context?.request_id,action:context?.request?.data?.acao,path:path.split("?")[0],kind:e.name,ms:Date.now()-began}));
     if (e.name === "AbortError") {
       throw new Error("O Rubeus não respondeu no prazo.");
     }
@@ -754,18 +757,11 @@ function pendingAfterWrite(data) {
     return null;
   }
 
-  if (!isNotaEnemContext(data)) {
-    return null;
-  }
-
-  const finalStep = data.acao === "enviar_informacoes_complementares";
   return responseForScreen("PENDENTE", {
-    titulo: finalStep ? "Obrigado!" : "Vamos conferir",
-    mensagem: finalStep
-      ? "Inscrição recebida! Aguarde a confirmação da UniBalsas."
-      : write.status === "received"
-      ? "Recebido com sucesso."
-      : "O servidor demorou a confirmar. Entre em contato.",
+    titulo: "Conferir processamento",
+    mensagem: write.status === "received"
+      ? "O Rubeus recebeu a operação, mas a próxima etapa ainda não foi confirmada. Confira a situação no Portal do candidato antes de repetir."
+      : "A operação foi enviada, mas não foi possível confirmar o resultado. Confira a situação no Portal do candidato antes de repetir.",
     inscricao_id: toStringValue(write.result?.data?.redirect?.applyment_id ?? data.applyment_id)
   });
 }
@@ -1204,7 +1200,7 @@ function encryptResponse(payload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.5" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.6" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1242,7 +1238,7 @@ export default async function handler(req, res) {
     iv = dec.iv;
 
     const payload = await flowContext.run(
-      { deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
+      { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
       () => routeFlowRequest(requestData)
     );
 
