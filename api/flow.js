@@ -1,3 +1,4 @@
+import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -141,15 +142,6 @@ const USER_FIELDS = new Set([
   "tipos_deficiencia",
   "turno_id",
   "texto_redacao",
-  "avaliacao_token",
-  "avaliacao_id",
-  "questao_id",
-  "id_exec_prova",
-  "execucao_id",
-  "contato_crm",
-  "curso_crm",
-  "step_prova_target",
-  "step_prova_token"
 ]);
 
 const RUBEUS_BASE_URL = "https://admin.portal.apprbs.com.br/api/v1";
@@ -443,149 +435,23 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // INTEGRAÇÃO DINÂMICA COM O MÓDULO DE AVALIAÇÃO DA UNIBALSAS
 // -----------------------------------------------------------------------------
 
-async function obterDadosDaExecucaoPorToken(token) {
-  if (!token) return null;
-  try {
-    const res = await fetch(`https://avaliacao.apprubeus.com.br/api/avaliacao/consulta/${token}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" }
-    });
-    const json = await res.json();
-    if (json?.success && json.data) {
-      console.log("[AVALIACAO] Dados reais da sessão recuperados:", {
-        id: json.data.id,
-        crm_contato_id: json.data.crm_contato_id,
-        crm_curso_id: json.data.crm_curso_id,
-        IDEXECPROVA: json.data.IDEXECPROVA
-      });
-      return {
-        execucao_id: json.data.id,
-        contato_crm: json.data.crm_contato_id,
-        curso_crm: json.data.crm_curso_id,
-        id_exec_prova: json.data.IDEXECPROVA,
-        avaliacao_id: json.data.avaliacao_id || 330,
-        questao_id: json.data.questoes?.[0]?.id || 51709,
-        nome: json.data.nome
-      };
-    }
-  } catch (err) {
-    console.warn("[AVALIACAO] Consulta do token demorou:", err.message);
-  }
-  return null;
-}
-
-async function inicializarSessaoAvaliacao(params) {
-  try {
-    const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/create/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chave: params.chave,
-        crm_contato_id: String(params.crm_contato_id),
-        crm_curso_id: String(params.crm_curso_id),
-        crm_processoseletivo_id: null,
-        IDEXECPROVA: String(params.IDEXECPROVA),
-        codUsuarioPS: null
-      })
-    });
-    const json = await res.json();
-    if (json?.success && json.data?.token) {
-      console.log("[AVALIACAO] Sessão criada com token:", json.data.token, "Exec ID:", json.data.id);
-      return {
-        avaliacao_token: json.data.token,
-        execucao_id: json.data.id,
-        avaliacao_id: json.data.avaliacao_id || 330,
-        questao_id: 51709
-      };
-    }
-  } catch (err) {
-    console.warn("[AVALIACAO] Erro em /create/:", err.message);
-  }
-
-  return {
-    avaliacao_token: "36075a5af46150372dd37393fe6e9cec",
-    execucao_id: 701490,
-    avaliacao_id: 330,
-    questao_id: 51709
-  };
-}
-
-async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_token, execucao_id, avaliacao_id, questao_id, id_exec_prova, contato_crm, curso_crm }) {
-  // Sincroniza os IDs reais diretamente com a sessão viva do Rubeus
-  let infoSessao = await obterDadosDaExecucaoPorToken(avaliacao_token);
-
-  const execId = Number(infoSessao?.execucao_id || execucao_id || 701490);
-  const realContato = Number(infoSessao?.contato_crm || contato_crm || 604223);
-  const realCurso = Number(infoSessao?.curso_crm || curso_crm || 890);
-  const realIdExec = String(infoSessao?.id_exec_prova || id_exec_prova || "3DF1C1D84A");
-  const realQuestao = Number(infoSessao?.questao_id || questao_id || 51709);
-  const realAvaliacao = Number(infoSessao?.avaliacao_id || avaliacao_id || 330);
-
-  const payload = {
-    id: execId,
-    avaliacao_id: realAvaliacao,
-    crm_contato_id: realContato,
-    crm_curso_id: realCurso,
-    crm_id: 94,
-    crm_processoseletivo_id: null,
-    IDEXECPROVA: realIdExec,
-    codUsuarioPS: null,
-    questoes: [
-      {
-        questao_id: realQuestao,
-        obrigatoria: 1,
-        tipo: 1,
-        resposta: String(texto_redacao)
-      }
-    ],
-    tempoUsado: 15.0,
-    finalizada: 1,
-    nome: "PROVA REDAÇÃO ONLINE - PRESENCIAL",
-    salvar: 1,
-    salvarEstadoAtual: 1,
-    finalizada_automaticamente: 0
-  };
-
-  console.log(`[AVALIACAO] Submetendo redação oficial (Contato: ${payload.crm_contato_id}, Prova: ${payload.IDEXECPROVA}, Execucao: ${payload.id})...`);
-
-  // 1ª Tentativa: Envio com finalizada = 1 (dispara webhook do CRM)
-  try {
-    const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/salve/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/plain, */*",
-        "Origin": "https://avaliacao.apprubeus.com.br"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const json = await res.json();
-    console.log("[AVALIACAO] Resposta da banca examinadora:", json);
-    if (json?.success === true) return json;
-  } catch (err) {
-    console.warn("[AVALIACAO] Tentativa de finalização gerou aviso:", err.message);
-  }
-
-  // 2ª Tentativa (Resiliente): Salva a resposta sem acionar o evento do CRM
-  try {
-    const resRascunho = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/salve/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/plain, */*",
-        "Origin": "https://avaliacao.apprubeus.com.br"
-      },
-      body: JSON.stringify({ ...payload, finalizada: 0 })
-    });
-    const jsonRascunho = await resRascunho.json();
-    console.log("[AVALIACAO] Texto preservado com status de entrega:", jsonRascunho?.success);
-    return jsonRascunho;
-  } catch (e) {
-    console.warn("[AVALIACAO] Erro ao persistir redação:", e.message);
-  }
-
-  return { success: true };
+function assessmentClient(){return createAssessment({remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
+async function linkDaInscricao(data){
+  if(!data.token||!data.applyment_id)throw new Error("Inscrição não confirmada. Consulte o portal.");
+  const p=await rubeusRequest("/login/portal",{method:"POST",body:{portal:PORTAL_ID,token:data.token,applyment_id:Number(data.applyment_id)}});
+  const current=p.data?.current_process;
+  if(String(current?.applyment_information?.selective_process_id)!==String(data.processo_seletivo_id))throw new Error("O portal retornou outro processo seletivo.");
+  const stages=(current.stages??[]).filter(x=>/avaliação|avaliacao|prova|redação|redacao/i.test(x.title??""));
+  if(stages.length!==1||!stages[0].cta_link)throw new Error("A prova não está disponível para iniciar. Confira o portal.");
+  const step=String(stages[0].cta_link).match(/\/passo\/(\d+)(?:[/?#]|$)/)?.[1];
+  if(!step)throw new Error("Etapa de prova não reconhecida.");
+  const form=await getForm(step,"step",data.token);
+  const buttons=(form.data?.form?.content?.buttons??[]).filter(x=>/^(iniciar prova|continuar prova)$/i.test(x.label??""));
+  if(buttons.length!==1)throw new Error("Abra a prova pelo portal para conferir sua situação.");
+  const result=await submitForm(buttons[0].button,[],form.token??form.data?.token??data.token);
+  const link=result.data?.redirect?.link;
+  if(!link)throw new Error("O Rubeus não retornou o link da prova.");
+  return link;
 }
 
 async function listProcesses() {
@@ -1232,36 +1098,7 @@ async function routeFlowRequest(requestData) {
     }
 
     case "enviar_documento_enem": {
-      try {
-        const rawDoc = data.documento_enem;
-        const docItem = Array.isArray(rawDoc) ? rawDoc[0] : rawDoc;
-        const mediaId = docItem?.file_id || docItem?.media_id || (typeof docItem === "string" ? docItem : null);
-
-        if (!mediaId) {
-          throw new Error("Anexe o comprovante ou boletim do ENEM.");
-        }
-
-        if (process.env.WHATSAPP_TOKEN && mediaId) {
-          try {
-            await downloadWhatsAppMedia(mediaId, process.env.WHATSAPP_TOKEN);
-          } catch (err) {}
-        }
-
-        let nextForm = null;
-        try {
-          nextForm = await getForm(data.target, data.local, data.token);
-        } catch (err) {}
-
-        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, {
-          data: { redirect: { person_id: data.person_id, applyment_id: data.applyment_id } }
-        }, data));
-      } catch (e) {
-        return responseForScreen("DOCUMENTOS_ENEM", {
-          ...data,
-          erro: e.message,
-          tem_erro: true
-        });
-      }
+      return responseForScreen("PENDENTE",{titulo:"Documentos do ENEM",mensagem:"Conclua o envio dos documentos pelo Portal do candidato. O recebimento no Rubeus ainda não foi confirmado por este canal.",inscricao_id:toStringValue(data.applyment_id)});
     }
 
     case "enviar_informacoes_complementares": {
@@ -1289,25 +1126,17 @@ async function routeFlowRequest(requestData) {
           ...(toStringValue(data.como_conheceu) === "10" ? [fieldItem(data.campo_origem_outro_id, toStringValue(data.como_conheceu_outro).trim())] : [])
         ]);
 
-        let submitResult = null;
-        try {
-          submitResult = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
-        } catch (subErr) {
-          console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo acadêmico:", subErr.message);
-        }
-
-        const redirect = submitResult?.data?.redirect ?? {};
-
+        const submitResult=await submitForm(data.button_id,fields,data.token,RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
+        const redirect=submitResult?.data?.redirect??{};
+        if(!redirect.applyment_id)throw new Error("A inscrição ainda não foi confirmada pelo Rubeus.");
         // Se NÃO for ENEM, avança direto para a tela de instruções da redação
         if (!isNotaEnemContext(data)) {
           return responseForScreen("TELA_ORIENTACAO_PROVA", {
             ...data,
             tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
             texto_motivador: "A sociedade contemporânea tem exaltado a produtividade como fator essencial para o sucesso, levando muitas pessoas a negligenciarem o descanso e a saúde mental.",
-            applyment_id: toStringValue(redirect.applyment_id || data.applyment_id, "13940052"),
-            contato_crm: "604223",
-            curso_crm: "890",
-            id_exec_prova: "3DF1C1D84A",
+            applyment_id: String(redirect.applyment_id),
+            token: submitResult.data?.token??data.token,
             erro: "",
             tem_erro: false
           });
@@ -1327,74 +1156,26 @@ async function routeFlowRequest(requestData) {
 
     case "iniciar_redacao": {
       try {
-        console.log("[AVALIACAO] Candidato iniciou a redação. Criando sessão ativa...");
-        const sessao = await inicializarSessaoAvaliacao({
-          chave: "fe73f687e5bc5280214e0486b273a5f9",
-          crm_contato_id: data.contato_crm || "604223",
-          crm_curso_id: data.curso_crm || "890",
-          IDEXECPROVA: data.id_exec_prova || "3DF1C1D84A"
-        });
-
-        return responseForScreen("TELA_REDACAO", {
-          ...data,
-          tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
-          avaliacao_token: sessao.avaliacao_token,
-          execucao_id: sessao.execucao_id,
-          avaliacao_id: sessao.avaliacao_id,
-          questao_id: sessao.questao_id,
-          contato_crm: data.contato_crm || "604223",
-          curso_crm: data.curso_crm || "890",
-          id_exec_prova: data.id_exec_prova || "3DF1C1D84A",
-          erro: "",
-          tem_erro: false
-        });
-      } catch (err) {
-        return responseForScreen("TELA_REDACAO", {
-          ...data,
-          tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
-          avaliacao_token: "36075a5af46150372dd37393fe6e9cec",
-          execucao_id: 701490,
-          avaliacao_id: 330,
-          questao_id: 51709,
-          contato_crm: "604223",
-          curso_crm: "890",
-          id_exec_prova: "3DF1C1D84A",
-          erro: "",
-          tem_erro: false
-        });
+        const link=await linkDaInscricao(data);
+        const sessao=await assessmentClient().init(link);
+        const tema=String(sessao.exam.questoes[0].enunciado??"").replace(/<[^>]*>/g," ").replace(/&nbsp;/g," ");
+        return responseForScreen("TELA_REDACAO",{...data,sessao_avaliacao:sessao,tema_redacao:tema,erro:"",tem_erro:false});
+      }catch(e){
+        const uncertain=pendingAfterWrite(data);if(uncertain)return uncertain;
+        return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,erro:e.message,tem_erro:true});
       }
     }
-
     case "enviar_redacao": {
       try {
-        const texto = String(data.texto_redacao ?? "").trim();
-        if (texto.length < 50) {
-          throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
-        }
-
-        await submeterRedacaoAvaliacao({
-          texto_redacao: texto,
-          avaliacao_token: data.avaliacao_token || "36075a5af46150372dd37393fe6e9cec",
-          execucao_id: data.execucao_id,
-          avaliacao_id: data.avaliacao_id,
-          questao_id: data.questao_id,
-          id_exec_prova: data.id_exec_prova,
-          contato_crm: data.contato_crm,
-          curso_crm: data.curso_crm
-        });
-
-        return responseForScreen("CONFIRMACAO", {
-          titulo: "Inscrição e Redação Enviadas! 🎓",
-          mensagem: "Recebemos sua inscrição e a sua redação com sucesso!\n\nSua prova entrará em fase de correção pelos nossos avaliadores. Assim que a nota for lançada, você receberá a notificação.",
-          inscricao_id: toStringValue(data.applyment_id)
-        });
-      } catch (e) {
-        return responseForScreen("TELA_REDACAO", {
-          ...data,
-          tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
-          erro: e.message,
-          tem_erro: true
-        });
+        const texto=String(data.texto_redacao??"").trim();
+        if(texto.length<50)throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
+        if(!data.sessao_avaliacao?.exam)throw new Error("Inicie uma nova sessão pelo portal para continuar.");
+        await claimDelivery(data.sessao_avaliacao);
+        await assessmentClient().send(data.sessao_avaliacao,texto);
+        return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada",mensagem:"O módulo de avaliação confirmou o envio da sua redação. Acompanhe a situação no Portal do candidato.",inscricao_id:toStringValue(data.applyment_id)});
+      }catch(e){
+        if(e instanceof ResultadoIncerto)return responseForScreen("PENDENTE",{titulo:"Conferir entrega",mensagem:e.message,inscricao_id:toStringValue(data.applyment_id)});
+        return responseForScreen("TELA_REDACAO",{...data,erro:e.message,tem_erro:true});
       }
     }
 
@@ -1440,7 +1221,7 @@ function encryptResponse(payload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-flow-v7.3" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.2" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1498,3 +1279,4 @@ export default async function handler(req, res) {
     return res.status(421).send("Erro na descriptografia do payload.");
   }
 }
+export {routeFlowRequest,flowContext,sealState,openState};
