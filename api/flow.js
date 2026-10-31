@@ -5,19 +5,9 @@ const FLOW_RESPONSE_BUDGET_MS = 8500;
 
 const FORM_DEFAULTS = {
   ESCOLHA_PROCESSO: { processo_id: "" },
-  DADOS_BASICOS: {
-    nome: "", possui_nome_social: false, nome_social: "", email: "",
-    data_nascimento: "", celular: "", genero: "", aceite_privacidade: false,
-  },
-  CURSO_INTERESSE: {
-    curso_id: "", turno_id: "", numero_inscricao_enem: "", ano_enem: "",
-    nota_natureza_enem: "", nota_humanas_enem: "", nota_matematica_enem: "",
-    nota_linguagens_enem: "", nota_redacao_enem: "", media_enem: "",
-  },
-  QUASE_LA: {
-    cpf: "", nacionalidade: "10", concluiu_ensino_medio: "", possui_deficiencia: "",
-    tipos_deficiencia: [], deficiencia_outra: "", como_conheceu: "", como_conheceu_outro: "",
-  },
+  DADOS_BASICOS: { nome: "", possui_nome_social: false, nome_social: "", email: "", data_nascimento: "", celular: "", genero: "", aceite_privacidade: false },
+  CURSO_INTERESSE: { curso_id: "", turno_id: "", numero_inscricao_enem: "", ano_enem: "", nota_natureza_enem: "", nota_humanas_enem: "", nota_matematica_enem: "", nota_linguagens_enem: "", nota_redacao_enem: "", media_enem: "" },
+  QUASE_LA: { cpf: "", nacionalidade: "10", concluiu_ensino_medio: "", possui_deficiencia: "", tipos_deficiencia: [], deficiencia_outra: "", como_conheceu: "", como_conheceu_outro: "" },
   CONFIRMACAO: {},
 };
 
@@ -30,12 +20,7 @@ const SCREEN_KEYS = {
   PENDENTE: ["mensagem","inscricao_id","titulo"],
 };
 
-const USER_FIELDS = new Set([
-  "aceite_privacidade","ano_enem","celular","como_conheceu","como_conheceu_outro","concluiu_ensino_medio","cpf","curso_id",
-  "data_nascimento","deficiencia_outra","email","genero","nacionalidade","nome","nome_social",
-  "nota_humanas_enem","nota_linguagens_enem","nota_matematica_enem","nota_natureza_enem","nota_redacao_enem","media_enem",
-  "numero_inscricao_enem","possui_deficiencia","possui_nome_social","processo_id","processo_seletivo_id","tipos_deficiencia","turno_id"
-]);
+const USER_FIELDS = new Set(["aceite_privacidade","ano_enem","celular","como_conheceu","como_conheceu_outro","concluiu_ensino_medio","cpf","curso_id","data_nascimento","deficiencia_outra","email","genero","nacionalidade","nome","nome_social","nota_humanas_enem","nota_linguagens_enem","nota_matematica_enem","nota_natureza_enem","nota_redacao_enem","media_enem","numero_inscricao_enem","possui_deficiencia","possui_nome_social","processo_id","processo_seletivo_id","tipos_deficiencia","turno_id"]);
 
 const RUBEUS_BASE_URL = "https://admin.portal.apprbs.com.br/api/v1";
 const PORTAL_ID = 257;
@@ -86,7 +71,7 @@ async function rubeusRequest(path,{method="GET",body,timeoutMs=RUBEUS_TIMEOUT_MS
   const mutation=path==="/start"||path==="/submit";if(mutation&&context)context.write={status:"sending",path};
   try{
     const response=await fetch(`${RUBEUS_BASE_URL}${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
-    const raw=await response.text();let json;try{json=JSON.parse(raw)}catch{throw new Error("Rubeus resposta inválida.")}if(!response.ok||json?.success!==true){const validation=mutation&&response.ok&&Array.isArray(json?.errors)&&json.errors.length>0;if(validation&&context)context.write=null;const error=new Error(validation?"Confira os dados preenchidos.":"Não foi possível confirmar no Rubeus.");error.validation=validation;throw error}if(mutation&&context)context.write={status:"received",path,result:json};return json;
+    const raw=await response.text();let json;try{json=JSON.parse(raw)}catch{throw new Error("Rubeus resposta inválida.")}if(!response.ok||json?.success!==true){const validation=mutation&&response.ok&&Array.isArray(json?.errors)&&json.errors.length>0;if(validation&&context)context.write=null;throw new Error(validation?"Confira os dados preenchidos.":"Não foi possível confirmar no Rubeus.");}if(mutation&&context)context.write={status:"received",path,result:json};return json;
   }catch(e){if(e.name==="AbortError")throw new Error("O Rubeus não respondeu no prazo.");throw e}finally{clearTimeout(timeout)}
 }
 async function listProcesses(){const r=await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);return(r.data??[]).map(p=>({id:String(p.id),title:String(p.name)}))}
@@ -96,7 +81,7 @@ async function submitForm(button,data,token,timeoutMs=RUBEUS_TIMEOUT_MS){return 
 async function getDataSource({datasource,target,filter=[],nextFields=[],token}){return rubeusRequest("/data-source",{method:"POST",body:{datasource:toStringValue(datasource),target:toInteger(target,"target do data-source"),filter,nextFields:nextFields.map(i=>toInteger(i,"nextFields")),token:toStringValue(token)}})}
 
 function buildBasicScreenData(formResponse,processId){
-  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;if(!form||!token)throw new Error("Rubeus não retornou dados básicos.");
+  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;
   const nome=requireInput(findInput(form,["Nome completo"],38544),"Nome completo");
   const possui=requireInput(findInput(form,["Possuo nome social"],38606),"Possuo nome social");
   const nomeSocial=requireInput(findInput(form,["Nome social"],38607),"Nome social");
@@ -104,10 +89,10 @@ function buildBasicScreenData(formResponse,processId){
   const nasc=requireInput(findInput(form,["Data de nascimento"],38566),"Data de nascimento");
   const cel=requireInput(findInput(form,["Celular"],38546),"Celular");
   const genero=requireInput(findInput(form,["Gênero","Genero"],38564),"Gênero");
-  const consent=requireInput(findInput(form,["Aceite da LGPD"],38679),"Aceite da LGPD");
+  const consent=requireInput(findInput(form,["Aceite da LGPD"],38679),"Aceite");
   const idps=requireInput(findInput(form,["IDPS"],38548),"IDPS");
-  const lgpdA=requireInput(findInput(form,["LGPD - Assinatura"],38707),"LGPD - Assinatura");
-  const lgpdB=requireInput(findInput(form,["LGPD - Base legal"],38708),"LGPD - Base legal");
+  const lgpdA=requireInput(findInput(form,["LGPD - Assinatura"],38707),"LGPD A");
+  const lgpdB=requireInput(findInput(form,["LGPD - Base legal"],38708),"LGPD B");
   const generoR=requireInput(findInput(form,["Gênero Rubeus","Genero Rubeus"],38565),"Gênero Rubeus");
   const button=findButton(form,["Avançar"]);
   return{token:String(token),target:String(form.id),local:String(form.local),button_id:String(button.button),
@@ -118,14 +103,13 @@ function buildBasicScreenData(formResponse,processId){
     data_maxima_nascimento:currentIsoDate(),titulo_etapa:String(formResponse?.data?.stage?.steps?.find(s=>Number(s.id)===Number(form.id))?.name??"Dados básicos"),
     processo_seletivo_id:isNotaEnemProcess(processId)?PROCESSO_NOTA_ENEM_ID:toStringValue(processId),eh_nota_enem:isNotaEnemProcess(processId),erro:""}
 }
-
 async function buildCourseScreenData(formResponse,processId){
-  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;if(!form||!token)throw new Error("Rubeus não retornou curso.");
+  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;
   const curso=requireInput(findInput(form,["Curso"],38627),"Curso");const turno=requireInput(findInput(form,["Turno"],38547),"Turno");
   const area=requireInput(findInput(form,["IDAREAINTERESSE"],38553),"IDAREAINTERESSE");const oferta=requireInput(findInput(form,["CODOFERTA"],38552),"CODOFERTA");
   const coligada=requireInput(findInput(form,["CODCOLIGADA"],38611),"CODCOLIGADA");const filial=requireInput(findInput(form,["CODFILIAL"],38612),"CODFILIAL");const tipo=requireInput(findInput(form,["CODTIPOCURSO"],38610),"CODTIPOCURSO");
-  const button=findButton(form,["Avançar"]);const query=findQueryForField(form,curso.field_id);if(!query?.query_data)throw new Error("Fonte de cursos não localizada.");
-  const notaEnem=getFormInputs(form).some(i=>Number(i.field_id)===38556||normalizeText(i.label).includes("inscricao do enem"));
+  const button=findButton(form,["Avançar"]);const query=findQueryForField(form,curso.field_id);
+  const notaEnem=getFormInputs(form).some(i=>Number(i.field_id)===38556);
   const polo=notaEnem?requireInput(findInput(form,["CODPOLO"],38550),"CODPOLO"):findInput(form,["CODPOLO"],38550);
   const eNum=notaEnem?requireInput(findInput(form,["Número de inscrição do ENEM"],38556),"Número"):null;
   const eAno=notaEnem?requireInput(findInput(form,["Ano de realização do ENEM"],38557),"Ano"):null;
@@ -145,22 +129,20 @@ async function buildCourseScreenData(formResponse,processId){
     processo_seletivo_id:toStringValue(processId),eh_nota_enem:notaEnem,
     campo_enem_numero_id:toStringValue(eNum?.field_id),campo_enem_ano_id:toStringValue(eAno?.field_id),campo_enem_natureza_id:toStringValue(eNat?.field_id),
     campo_enem_humanas_id:toStringValue(eHum?.field_id),campo_enem_matematica_id:toStringValue(eMat?.field_id),campo_enem_linguagens_id:toStringValue(eLing?.field_id),
-    campo_enem_redacao_id:toStringValue(eRed?.field_id),campo_enem_media_id:toStringValue(eMed?.field_id),
-    anos_enem:notaEnem?ANOS_ENEM:[],erro:""}
+    campo_enem_redacao_id:toStringValue(eRed?.field_id),campo_enem_media_id:toStringValue(eMed?.field_id),anos_enem:ANOS_ENEM,erro:""}
 }
-
 async function buildAlmostThereScreenData(formResponse,prev){
-  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;if(!form||!token)throw new Error("Rubeus não retornou final.");
+  const form=formResponse?.data?.form;const token=formResponse?.token??formResponse?.data?.token;
   const cpf=requireInput(findInput(form,["CPF"],38567),"CPF");const nac=requireInput(findInput(form,["Nacionalidade"],38780),"Nacionalidade");
   const em=requireInput(findInput(form,["Você já concluiu o ensino médio?"],251544),"Conclusão");
-  const def=requireInput(findInput(form,["Possui alguma deficiência?"],38575),"Deficiência?");
+  const def=requireInput(findInput(form,["Possui alguma deficiência?"],38575),"Deficiência");
   const aud=requireInput(findInput(form,["Auditiva"],38577),"Auditiva");const fala=requireInput(findInput(form,["Fala"],38578),"Fala");
   const fis=requireInput(findInput(form,["Física","Fisica"],38576),"Física");const intel=requireInput(findInput(form,["Intelectual"],38580),"Intelectual");
   const vis=requireInput(findInput(form,["Visual"],38579),"Visual");const ment=requireInput(findInput(form,["Mental"],38581),"Mental");
-  const out=requireInput(findInput(form,["Outras deficiências"],38582),"Outras");const outT=requireInput(findInput(form,["Deficiência motivo outras TOTVS"],38583),"Descrição outra");
-  const orig=requireInput(findInput(form,["Como você ficou sabendo sobre este processo seletivo?"],319427),"Como ficou sabendo");
-  const origO=requireInput(findInput(form,["Outro:"],319428),"Outro canal");
-  const button=findButton(form,["Concluir"]);const originQuery=findQueryForField(form,orig.field_id);if(!originQuery?.query_data)throw new Error("Fonte Como nos conheceu não retornada.");
+  const out=requireInput(findInput(form,["Outras deficiências"],38582),"Outras");const outT=requireInput(findInput(form,["Deficiência motivo outras TOTVS"],38583),"Outra");
+  const orig=requireInput(findInput(form,["Como você ficou sabendo sobre este processo seletivo?"],319427),"Como conheceu");
+  const origO=requireInput(findInput(form,["Outro:"],319428),"Outro");
+  const button=findButton(form,["Concluir"]);const originQuery=findQueryForField(form,orig.field_id);
   const originsResponse=await getDataSource({datasource:originQuery.query_data,target:orig.field_id,filter:[],nextFields:[],token});
   const origens=extractDataSourceOptions(originsResponse).map(o=>({id:String(o.value),title:String(o.label)}));
   const redirect=prev?.data?.redirect??{};
@@ -170,23 +152,22 @@ async function buildAlmostThereScreenData(formResponse,prev){
     campo_def_visual_id:String(vis.field_id),campo_def_mental_id:String(ment.field_id),campo_def_outras_id:String(out.field_id),campo_def_outras_texto_id:String(outT.field_id),
     campo_origem_id:String(orig.field_id),campo_origem_outro_id:String(origO.field_id),datasource_origem:toStringValue(originQuery?.query_data),origens,erro:""}
 }
-
 function stateKey(){return crypto.createHash("sha256").update(process.env.FLOW_PRIVATE_KEY.replace(/\\n/g,"\n")).update("unibalsas-flow-state-v1").digest()}
 function sealState(screen,data){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",stateKey(),iv);const value=Buffer.concat([cipher.update(JSON.stringify({screen,exp:Date.now()+3600000,data})),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),value]).toString("base64url")}
-function openState(value,screen){try{const raw=Buffer.from(value??"","base64url"),decipher=crypto.createDecipheriv("aes-256-gcm",stateKey(),raw.subarray(0,12));decipher.setAuthTag(raw.subarray(12,28));const result=JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)),decipher.final()]).toString("utf8"));if(result.exp<Date.now()||result.screen!==screen)throw new Error();return result.data}catch{throw new Error("Esta etapa expirou. Reabra a inscrição.")}}
+function openState(value,screen){try{const raw=Buffer.from(value??"","base64url"),decipher=crypto.createDecipheriv("aes-256-gcm",stateKey(),raw.subarray(0,12));decipher.setAuthTag(raw.subarray(12,28));const result=JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)),decipher.final()]).toString("utf8"));if(result.exp<Date.now()||result.screen!==screen)throw new Error();return result.data}catch{throw new Error("Esta etapa expirou. Reabra.")}}
 function responseForScreen(screen,data){
   const entered=flowContext.getStore()?.request?.data??{};const values={...entered,...data.values};
-  const next={...data,erro:data.erro??"",tem_erro:Boolean(data.erro)};if(screen==="PENDENTE")next.titulo??="Vamos conferir sua inscrição";
+  const next={...data,erro:data.erro??"",tem_erro:Boolean(data.erro)};if(screen==="PENDENTE")next.titulo??="Vamos conferir";
   for(const[name,fallback]of Object.entries(FORM_DEFAULTS[screen]??{}))next["valor_"+name]=values[name]??fallback;
   if(screen==="CURSO_INTERESSE"){next.valor_curso_id=data.curso_selecionado??values.curso_id??"";next.valor_turno_id=data.turno_selecionado??values.turno_id??"";next.curso_selecionado??=next.valor_curso_id;next.turno_selecionado??=next.valor_turno_id}
   if(screen==="ESCOLHA_PROCESSO")next.processos_disponiveis=(data.processo_seletivo_id??[]).map(p=>p.id);
   const trusted=Object.fromEntries(Object.entries(next).filter(([k])=>!k.startsWith("valor_")&&k!=="estado"&&k!=="values"));
   if(["ESCOLHA_PROCESSO","DADOS_BASICOS","CURSO_INTERESSE","QUASE_LA"].includes(screen))next.estado=sealState(screen,trusted);
-  return{screen,data:Object.fromEntries((SCREEN_KEYS[screen]??[]).map(k=>[k,[STRIPPED]
+  return{screen,data:Object.fromEntries((SCREEN_KEYS[screen]??[]).map(k=>[k,next[k]??(k.startsWith("valor_")?"":k==="tem_erro"?false:k==="turno_visivel"||k==="eh_nota_enem"||k==="tem_processos"?false:k==="cursos"||k==="turnos"||k==="anos_enem"||k==="origens"?[]:"")]))}
 }
 function pendingAfterWrite(data){
   const write=flowContext.getStore()?.write;if(!write)return null;const finalStep=data.acao==="enviar_informacoes_complementares";
-  return responseForScreen("PENDENTE",{titulo:finalStep?"Obrigado por preencher seus dados!":"Vamos conferir sua inscrição",mensagem:finalStep?"Aguarde a confirmação da sua inscrição pela UniBalsas.":"O Rubeus recebeu o envio, mas não confirmou a próxima etapa. Entre em contato com a UniBalsas.",inscricao_id:toStringValue(write.result?.data?.redirect?.applyment_id??data.applyment_id)})
+  return responseForScreen("PENDENTE",{titulo:finalStep?"Obrigado!":"Vamos conferir",mensagem:finalStep?"Aguarde a confirmação da UniBalsas.":write.status==="received"?"O Rubeus recebeu mas não confirmou a próxima etapa.":"O Rubeus demorou. Entre em contato com a UniBalsas.",inscricao_id:toStringValue(write.result?.data?.redirect?.applyment_id??data.applyment_id)})
 }
 function validateBasic(data){
   if(String(data.nome??"").trim().split(/\s+/).length<2)throw new Error("Informe nome e sobrenome.");
@@ -194,7 +175,7 @@ function validateBasic(data){
   const date=String(data.data_nascimento??"");if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>currentIsoDate()||date<"1920-01-01")throw new Error("Confira sua data de nascimento.");
   if(!["M","F"].includes(data.genero))throw new Error("Selecione seu gênero.");
   const phone=String(data.celular??"").replace(/\D/g,"").replace(/^55(?=\d{10,11}$)/,"");if(!/^\d{10,11}$/.test(phone))throw new Error("Informe o celular com DDD.");
-  if(!toBoolean(data.aceite_privacidade))throw new Error("É necessário aceitar a Política de Privacidade.");
+  if(!toBoolean(data.aceite_privacidade))throw new Error("Aceite a Política de Privacidade.");
   if(toBoolean(data.possui_nome_social)&&!String(data.nome_social??"").trim())throw new Error("Informe seu nome social.");
 }
 function validateFinal(data){
@@ -205,7 +186,6 @@ function validateFinal(data){
   if(data.como_conheceu==="10"&&!String(data.como_conheceu_outro??"").trim())throw new Error("Informe o outro canal.");
 }
 function basicRetryData(data,message){return{token:toStringValue(data.token),target:toStringValue(data.target),local:toStringValue(data.local,"step"),button_id:toStringValue(data.button_id),campo_nome_id:toStringValue(data.campo_nome_id),campo_possui_nome_social_id:toStringValue(data.campo_possui_nome_social_id),campo_nome_social_id:toStringValue(data.campo_nome_social_id),campo_email_id:toStringValue(data.campo_email_id),campo_data_nascimento_id:toStringValue(data.campo_data_nascimento_id),campo_celular_id:toStringValue(data.campo_celular_id),campo_genero_id:toStringValue(data.campo_genero_id),campo_consentimento_id:toStringValue(data.campo_consentimento_id),campo_idps_id:toStringValue(data.campo_idps_id),campo_lgpd_assinatura_id:toStringValue(data.campo_lgpd_assinatura_id),campo_lgpd_base_legal_id:toStringValue(data.campo_lgpd_base_legal_id),campo_genero_rubeus_id:toStringValue(data.campo_genero_rubeus_id),idps_valor:toStringValue(data.idps_valor,isNotaEnemProcess(data.processo_seletivo_id)?"226":"223"),lgpd_assinatura_valor:toStringValue(data.lgpd_assinatura_valor,"1"),lgpd_base_legal_valor:toStringValue(data.lgpd_base_legal_valor,"4"),data_maxima_nascimento:currentIsoDate(),titulo_etapa:"Dados básicos",processo_seletivo_id:toStringValue(data.processo_seletivo_id),eh_nota_enem:toBoolean(data.eh_nota_enem)||isNotaEnemProcess(data.processo_seletivo_id),erro:message}}
-
 async function courseRetryData(data,message){
   let courses=[];let shifts=[];let nextOptions={};const courseId=toStringValue(data.curso_id??data.curso_selecionado);
   try{
@@ -217,7 +197,6 @@ async function courseRetryData(data,message){
   const opt=(fid,ev)=>toStringValue(nextOptions[toStringValue(fid)]?.value,toStringValue(ev));
   return{token:toStringValue(data.token),target:toStringValue(data.target),local:toStringValue(data.local,"step"),button_id:toStringValue(data.button_id),datasource:toStringValue(data.datasource),campo_curso_id:toStringValue(data.campo_curso_id),campo_turno_id:toStringValue(data.campo_turno_id),campo_area_interesse_id:toStringValue(data.campo_area_interesse_id),campo_oferta_id:toStringValue(data.campo_oferta_id),campo_polo_id:toStringValue(data.campo_polo_id),campo_coligada_id:toStringValue(data.campo_coligada_id),campo_filial_id:toStringValue(data.campo_filial_id),campo_tipo_curso_id:toStringValue(data.campo_tipo_curso_id),cursos,turnos:shifts,turno_visivel:shifts.length>0,curso_selecionado:courseId,turno_selecionado:toStringValue(data.turno_id??data.turno_selecionado,shifts.length===1?shifts[0].id:""),area_interesse_valor:opt(data.campo_area_interesse_id,data.area_interesse_valor),oferta_valor:opt(data.campo_oferta_id,data.oferta_valor),polo_valor:toStringValue(nextOptions[toStringValue(data.campo_polo_id)]?.value,isNotaEnemContext(data)?toStringValue(data.polo_valor,"01"):toStringValue(data.polo_valor)),coligada_valor:opt(data.campo_coligada_id,data.coligada_valor),filial_valor:opt(data.campo_filial_id,data.filial_valor),tipo_curso_valor:opt(data.campo_tipo_curso_id,data.tipo_curso_valor),processo_seletivo_id:isNotaEnemContext(data)?PROCESSO_NOTA_ENEM_ID:toStringValue(data.processo_seletivo_id),eh_nota_enem:isNotaEnemContext(data),campo_enem_numero_id:enemFieldId(data.campo_enem_numero_id,38556),campo_enem_ano_id:enemFieldId(data.campo_enem_ano_id,38557),campo_enem_natureza_id:enemFieldId(data.campo_enem_natureza_id,38563),campo_enem_humanas_id:enemFieldId(data.campo_enem_humanas_id,38562),campo_enem_matematica_id:enemFieldId(data.campo_enem_matematica_id,38561),campo_enem_linguagens_id:enemFieldId(data.campo_enem_linguagens_id,38560),campo_enem_redacao_id:enemFieldId(data.campo_enem_redacao_id,38559),campo_enem_media_id:enemFieldId(data.campo_enem_media_id,38558),anos_enem:ANOS_ENEM,erro:message}
 }
-
 function fastAlmostThereRetryData(data,message){return{token:toStringValue(data.token),target:toStringValue(data.target),local:toStringValue(data.local,"step"),button_id:toStringValue(data.button_id),person_id:toStringValue(data.person_id),applyment_id:toStringValue(data.applyment_id),campo_cpf_id:toStringValue(data.campo_cpf_id),campo_nacionalidade_id:toStringValue(data.campo_nacionalidade_id),campo_ensino_medio_id:toStringValue(data.campo_ensino_medio_id),campo_deficiencia_id:toStringValue(data.campo_deficiencia_id),campo_def_auditiva_id:toStringValue(data.campo_def_auditiva_id),campo_def_fala_id:toStringValue(data.campo_def_fala_id),campo_def_fisica_id:toStringValue(data.campo_def_fisica_id),campo_def_intelectual_id:toStringValue(data.campo_def_intelectual_id),campo_def_visual_id:toStringValue(data.campo_def_visual_id),campo_def_mental_id:toStringValue(data.campo_def_mental_id),campo_def_outras_id:toStringValue(data.campo_def_outras_id),campo_def_outras_texto_id:toStringValue(data.campo_def_outras_texto_id),campo_origem_id:toStringValue(data.campo_origem_id),campo_origem_outro_id:toStringValue(data.campo_origem_outro_id),datasource_origem:toStringValue(data.datasource_origem),origens:Array.isArray(data.origens)?data.origens:[],erro:message||"Não foi possível concluir."}}
 
 async function routeFlowRequest(requestData){
@@ -236,7 +215,7 @@ async function routeFlowRequest(requestData){
     try{const processes=await listProcesses();return responseForScreen("ESCOLHA_PROCESSO",{processo_seletivo_id:processes,tem_processos:processes.length>0,mensagem_vazio:"Não há processo disponível.",erro:""})}catch{return responseForScreen("ESCOLHA_PROCESSO",{processo_seletivo_id:[],tem_processos:false,mensagem_vazio:"Não conseguimos consultar.",erro:"Consulta indisponível."})}
   }
   if(action==="BACK")return responseForScreen("PENDENTE",{mensagem:"Continue pela última etapa aberta.",inscricao_id:toStringValue(data.applyment_id)});
-  if(data.error)return{data:[STRIPPED]
+  if(data.error)return{data:{acknowledged:true}};
   if(action!=="data_exchange")return{data:{status:"active"}};
 
   switch(customAction){
@@ -258,7 +237,6 @@ async function routeFlowRequest(requestData){
     }
     case "avancar_curso_interesse":{
       try{
-        // 1) sem turno -> busca turno
         if(!toBoolean(data.turno_visivel) || (data.turnos??[]).length===0){
           if(!data.curso_id) throw new Error("Selecione um curso.");
           const tech=[data.campo_area_interesse_id,data.campo_oferta_id,data.campo_polo_id,data.campo_coligada_id,data.campo_filial_id,data.campo_tipo_curso_id].filter(Boolean);
@@ -282,7 +260,6 @@ async function routeFlowRequest(requestData){
             anos_enem:ANOS_ENEM,erro:""
           });
         }
-        // 2) tem turno mas ainda não calculou média - mostra 800
         if(isNotaEnemContext(data) && !data.media_enem){
           const media=calcMediaEnemAuto(data);
           if(media===null) throw new Error("Preencha as 5 notas de 0 a 1000 para calcular.");
@@ -298,7 +275,6 @@ async function routeFlowRequest(requestData){
             anos_enem:ANOS_ENEM,erro:"",values:{media_enem:String(media)}
           });
         }
-        // 3) já tem média -> cai para enviar
       }catch(e){return responseForScreen("CURSO_INTERESSE",await courseRetryData(data,e.message))}
     }
     case "enviar_curso":
@@ -338,7 +314,7 @@ function decryptRequest(body,privateKey){
 function encryptResponse(payload,aesKey,iv){const flippedIv=Buffer.from(iv.map(b=>b^0xff));const cipher=crypto.createCipheriv("aes-128-gcm",aesKey,flippedIv);const encrypted=Buffer.concat([cipher.update(JSON.stringify(payload),"utf8"),cipher.final()]);return Buffer.concat([encrypted,cipher.getAuthTag()]).toString("base64")}
 
 export default async function handler(req,res){
-  if(req.method==="GET")return res.status(200).json({status:"ok",version:"media-1-footer-v3"});
+  if(req.method==="GET")return res.status(200).json({status:"ok",version:"media-1-footer-fix-final"});
   if(req.method!=="POST")return res.status(405).send("Method not allowed");
   const appSecret=process.env.META_APP_SECRET||process.env.APP_SECRET;
   if(appSecret){const raw=Buffer.isBuffer(req.rawBody)?req.rawBody:typeof req.rawBody==="string"?Buffer.from(req.rawBody):null;if(!raw)return res.status(503).send("Precisa preservar rawBody.");const sig=req.headers?.["x-hub-signature-256"];if(!/^sha256=[a-f0-9]{64}$/i.test(sig??""))return res.status(432).send("Assinatura inválida.");const expected=crypto.createHmac("sha256",appSecret).update(raw).digest();const received=Buffer.from(sig.slice(7),"hex");if(!crypto.timingSafeEqual(expected,received))return res.status(432).send("Assinatura inválida.");}
