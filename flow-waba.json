@@ -1,0 +1,1407 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "ESCOLHA_PROCESSO": [
+      "DADOS_BASICOS",
+      "PENDENTE"
+    ],
+    "DADOS_BASICOS": [
+      "CURSO_INTERESSE",
+      "OPTIN_SCREEN_screen_dhaobf",
+      "PENDENTE"
+    ],
+    "OPTIN_SCREEN_screen_dhaobf": [],
+    "CURSO_INTERESSE": [
+      "DOCUMENTOS_ENEM",
+      "QUASE_LA",
+      "PENDENTE"
+    ],
+    "DOCUMENTOS_ENEM": [
+      "QUASE_LA",
+      "PENDENTE"
+    ],
+    "QUASE_LA": [
+      "TELA_ORIENTACAO_PROVA",
+      "CONFIRMACAO",
+      "PENDENTE"
+    ],
+    "TELA_ORIENTACAO_PROVA": [
+      "TELA_REDACAO",
+      "PENDENTE"
+    ],
+    "TELA_REDACAO": [
+      "CONFIRMACAO",
+      "PENDENTE"
+    ],
+    "CONFIRMACAO": [],
+    "PENDENTE": []
+  },
+  "screens": [
+    {
+      "id": "ESCOLHA_PROCESSO",
+      "title": "Vestibular UniBalsas",
+      "terminal": false,
+      "data": {
+        "processo_seletivo_id": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "tem_processos": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "mensagem_vazio": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_processo_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_processo",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Processos Seletivos Abertos"
+              },
+              {
+                "type": "TextBody",
+                "text": "Selecione a forma de ingresso desejada para iniciar sua inscrição:"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "Dropdown",
+                "label": "Forma de ingresso",
+                "name": "processo_id",
+                "data-source": "${data.processo_seletivo_id}",
+                "required": true
+              },
+              {
+                "type": "Footer",
+                "label": "Iniciar inscrição",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "selecionar_processo",
+                    "processo_seletivo_id": "${form.processo_id}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ],
+            "init-values": {
+              "processo_id": "${data.valor_processo_id}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DADOS_BASICOS",
+      "title": "Dados básicos",
+      "terminal": false,
+      "data": {
+        "data_maxima_nascimento": {
+          "type": "string",
+          "__example__": "2026-10-31"
+        },
+        "titulo_etapa": {
+          "type": "string",
+          "__example__": "Dados básicos"
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nome": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_possui_nome_social": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "valor_nome_social": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_email": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_data_nascimento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_celular": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_genero": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_aceite_privacidade": {
+          "type": "boolean",
+          "__example__": false
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_dados_basicos",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Dados básicos"
+              },
+              {
+                "type": "TextBody",
+                "text": "Olá! Para começar, preencha alguns dados básicos sobre você:"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextInput",
+                "name": "nome",
+                "label": "Nome completo",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "OptIn",
+                "name": "possui_nome_social",
+                "label": "Possuo nome social",
+                "required": false
+              },
+              {
+                "type": "If",
+                "condition": "${form.possui_nome_social} == true",
+                "then": [
+                  {
+                    "type": "TextInput",
+                    "name": "nome_social",
+                    "label": "Nome social",
+                    "input-type": "text",
+                    "required": true
+                  }
+                ],
+                "else": []
+              },
+              {
+                "type": "TextInput",
+                "name": "email",
+                "label": "E-mail",
+                "input-type": "email",
+                "required": true
+              },
+              {
+                "type": "CalendarPicker",
+                "name": "data_nascimento",
+                "label": "Data de nascimento",
+                "mode": "single",
+                "min-date": "1920-01-01",
+                "max-date": "${data.data_maxima_nascimento}",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "celular",
+                "label": "Celular (WhatsApp)",
+                "helper-text": "Para facilitar o contato, informe seu WhatsApp preferencial.",
+                "input-type": "phone",
+                "required": true
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "genero",
+                "label": "Gênero",
+                "required": true,
+                "data-source": [
+                  {
+                    "id": "M",
+                    "title": "Masculino"
+                  },
+                  {
+                    "id": "F",
+                    "title": "Feminino"
+                  }
+                ]
+              },
+              {
+                "type": "OptIn",
+                "name": "aceite_privacidade",
+                "label": "Aceito receber avisos e concordo com a Política de Privacidade vigente. *",
+                "required": true,
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": {
+                    "name": "OPTIN_SCREEN_screen_dhaobf",
+                    "type": "screen"
+                  },
+                  "payload": {
+                    "data_maxima_nascimento": "${data.data_maxima_nascimento}",
+                    "titulo_etapa": "${data.titulo_etapa}",
+                    "erro": "${data.erro}",
+                    "tem_erro": "${data.tem_erro}",
+                    "estado": "${data.estado}",
+                    "valor_nome": "${data.valor_nome}",
+                    "valor_possui_nome_social": "${data.valor_possui_nome_social}",
+                    "valor_nome_social": "${data.valor_nome_social}",
+                    "valor_email": "${data.valor_email}",
+                    "valor_data_nascimento": "${data.valor_data_nascimento}",
+                    "valor_celular": "${data.valor_celular}",
+                    "valor_genero": "${data.valor_genero}",
+                    "valor_aceite_privacidade": "${data.valor_aceite_privacidade}"
+                  }
+                }
+              },
+              {
+                "type": "Footer",
+                "label": "Avançar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_dados_basicos",
+                    "nome": "${form.nome}",
+                    "possui_nome_social": "${form.possui_nome_social}",
+                    "nome_social": "${form.nome_social}",
+                    "email": "${form.email}",
+                    "data_nascimento": "${form.data_nascimento}",
+                    "celular": "${form.celular}",
+                    "genero": "${form.genero}",
+                    "aceite_privacidade": "${form.aceite_privacidade}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ],
+            "init-values": {
+              "nome": "${data.valor_nome}",
+              "possui_nome_social": "${data.valor_possui_nome_social}",
+              "nome_social": "${data.valor_nome_social}",
+              "email": "${data.valor_email}",
+              "celular": "${data.valor_celular}",
+              "genero": "${data.valor_genero}",
+              "aceite_privacidade": "${data.valor_aceite_privacidade}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CURSO_INTERESSE",
+      "title": "Curso de interesse",
+      "terminal": false,
+      "data": {
+        "cursos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turnos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turno_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "eh_nota_enem": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "anos_enem": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_curso_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_turno_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_numero_inscricao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_ano_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_natureza_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_humanas_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_matematica_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_linguagens_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_redacao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_media_enem": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_curso",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Curso de interesse"
+              },
+              {
+                "type": "TextBody",
+                "text": "Conte-nos mais detalhes sobre o curso de seu interesse!"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "Dropdown",
+                "label": "Curso",
+                "name": "curso_id",
+                "data-source": "${data.cursos}",
+                "required": true,
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_turnos",
+                    "estado": "${data.estado}",
+                    "curso_id": "${form.curso_id}"
+                  }
+                }
+              },
+              {
+                "type": "If",
+                "condition": "${data.turno_visivel} == true",
+                "then": [
+                  {
+                    "type": "Dropdown",
+                    "label": "Turno",
+                    "name": "turno_id",
+                    "data-source": "${data.turnos}",
+                    "required": true
+                  },
+                  {
+                    "type": "If",
+                    "condition": "${data.eh_nota_enem} == true",
+                    "then": [
+                      {
+                        "type": "TextHeading",
+                        "text": "Notas do ENEM"
+                      },
+                      {
+                        "type": "TextBody",
+                        "text": "Informe os dados oficiais do seu exame (notas entre 0 e 1000):"
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "numero_inscricao_enem",
+                        "label": "Nº de inscrição do ENEM",
+                        "helper-text": "12 a 15 números",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "Dropdown",
+                        "name": "ano_enem",
+                        "label": "Ano do exame",
+                        "data-source": "${data.anos_enem}",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "nota_natureza_enem",
+                        "label": "Ciências da Natureza",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "nota_humanas_enem",
+                        "label": "Ciências Humanas",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "nota_matematica_enem",
+                        "label": "Matemática",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "nota_linguagens_enem",
+                        "label": "Linguagens e Códigos",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "nota_redacao_enem",
+                        "label": "Redação",
+                        "input-type": "text",
+                        "required": true
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "media_enem",
+                        "label": "Média geral do ENEM",
+                        "helper-text": "Calculada automaticamente ao avançar",
+                        "input-type": "text",
+                        "required": false,
+                        "enabled": false
+                      }
+                    ],
+                    "else": []
+                  }
+                ],
+                "else": []
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "avancar_curso_interesse",
+                    "curso_id": "${form.curso_id}",
+                    "turno_id": "${form.turno_id}",
+                    "numero_inscricao_enem": "${form.numero_inscricao_enem}",
+                    "ano_enem": "${form.ano_enem}",
+                    "nota_natureza_enem": "${form.nota_natureza_enem}",
+                    "nota_humanas_enem": "${form.nota_humanas_enem}",
+                    "nota_matematica_enem": "${form.nota_matematica_enem}",
+                    "nota_linguagens_enem": "${form.nota_linguagens_enem}",
+                    "nota_redacao_enem": "${form.nota_redacao_enem}",
+                    "media_enem": "${form.media_enem}",
+                    "estado": "${data.estado}"
+                  }
+                },
+                "enabled": "${data.turno_visivel}"
+              }
+            ],
+            "init-values": {
+              "curso_id": "${data.valor_curso_id}",
+              "turno_id": "${data.valor_turno_id}",
+              "numero_inscricao_enem": "${data.valor_numero_inscricao_enem}",
+              "ano_enem": "${data.valor_ano_enem}",
+              "nota_natureza_enem": "${data.valor_nota_natureza_enem}",
+              "nota_humanas_enem": "${data.valor_nota_humanas_enem}",
+              "nota_matematica_enem": "${data.valor_nota_matematica_enem}",
+              "nota_linguagens_enem": "${data.valor_nota_linguagens_enem}",
+              "nota_redacao_enem": "${data.valor_nota_redacao_enem}",
+              "media_enem": "${data.valor_media_enem}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DOCUMENTOS_ENEM",
+      "title": "Comprovante do ENEM",
+      "terminal": false,
+      "data": {
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_documento_enem",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Envio do Boletim do ENEM"
+              },
+              {
+                "type": "TextBody",
+                "text": "Para validar sua nota, anexe o Boletim de Desempenho Individual emitido pelo portal do INEP (PDF ou Imagem):"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "DocumentPicker",
+                "name": "documento_enem",
+                "label": "Boletim do ENEM"
+              },
+              {
+                "type": "Footer",
+                "label": "Avançar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_documento_enem",
+                    "documento_enem": "${form.documento_enem}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "QUASE_LA",
+      "title": "Estamos quase lá",
+      "terminal": false,
+      "data": {
+        "origens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cpf": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nacionalidade": {
+          "type": "string",
+          "__example__": "10"
+        },
+        "valor_concluiu_ensino_medio": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_possui_deficiencia": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_tipos_deficiencia": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "__example__": []
+        },
+        "valor_deficiencia_outra": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_como_conheceu": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_como_conheceu_outro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "processando": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "editavel": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "consultar_tarefa"
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Verificar andamento"
+        },
+        "mensagem_processamento": {
+          "type": "string",
+          "__example__": "Estamos conferindo seus dados."
+        },
+        "job_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_quase_la",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "If",
+                "condition": "${data.processando} == false",
+                "then": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Estamos quase lá!"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "Complete as suas informações para concluir a sua inscrição:"
+                  },
+                  {
+                    "type": "TextInput",
+                    "name": "cpf",
+                    "label": "CPF",
+                    "helper-text": "Somente os 11 números",
+                    "input-type": "text",
+                    "required": true
+                  },
+                  {
+                    "type": "Dropdown",
+                    "name": "nacionalidade",
+                    "label": "Nacionalidade",
+                    "data-source": [
+                      {
+                        "id": "10",
+                        "title": "Brasileira"
+                      },
+                      {
+                        "id": "20",
+                        "title": "Naturalizado Brasileiro"
+                      },
+                      {
+                        "id": "50",
+                        "title": "Outros"
+                      }
+                    ],
+                    "required": true
+                  },
+                  {
+                    "type": "RadioButtonsGroup",
+                    "name": "concluiu_ensino_medio",
+                    "label": "Você já concluiu o ensino médio?",
+                    "required": true,
+                    "data-source": [
+                      {
+                        "id": "Sim",
+                        "title": "Sim"
+                      },
+                      {
+                        "id": "Não",
+                        "title": "Não"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "RadioButtonsGroup",
+                    "name": "possui_deficiencia",
+                    "label": "Possui alguma deficiência?",
+                    "required": true,
+                    "data-source": [
+                      {
+                        "id": "T",
+                        "title": "Sim"
+                      },
+                      {
+                        "id": "F",
+                        "title": "Não"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "If",
+                    "condition": "${form.possui_deficiencia} == 'T'",
+                    "then": [
+                      {
+                        "type": "CheckboxGroup",
+                        "name": "tipos_deficiencia",
+                        "label": "Necessidades especiais",
+                        "required": true,
+                        "data-source": [
+                          {
+                            "id": "auditiva",
+                            "title": "Auditiva"
+                          },
+                          {
+                            "id": "fala",
+                            "title": "Fala"
+                          },
+                          {
+                            "id": "fisica",
+                            "title": "Física"
+                          },
+                          {
+                            "id": "intelectual",
+                            "title": "Intelectual"
+                          },
+                          {
+                            "id": "visual",
+                            "title": "Visual"
+                          },
+                          {
+                            "id": "mental",
+                            "title": "Mental"
+                          },
+                          {
+                            "id": "outras",
+                            "title": "Outras"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "TextInput",
+                        "name": "deficiencia_outra",
+                        "label": "Se marcou Outras, especifique:",
+                        "input-type": "text",
+                        "required": false
+                      }
+                    ],
+                    "else": []
+                  },
+                  {
+                    "type": "Dropdown",
+                    "name": "como_conheceu",
+                    "label": "Como ficou sabendo do processo?",
+                    "required": true,
+                    "data-source": "${data.origens}"
+                  },
+                  {
+                    "type": "If",
+                    "condition": "${form.como_conheceu} == '10'",
+                    "then": [
+                      {
+                        "type": "TextInput",
+                        "name": "como_conheceu_outro",
+                        "label": "Especifique o canal:",
+                        "input-type": "text",
+                        "required": true
+                      }
+                    ],
+                    "else": []
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Estamos preparando sua próxima etapa"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.mensagem_processamento}"
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                  },
+                  {
+                    "type": "EmbeddedLink",
+                    "text": "Abrir Portal do candidato",
+                    "on-click-action": {
+                      "name": "open_url",
+                      "url": "https://vestibular.unibalsas.edu.br/presencial"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "${data.rotulo_rodape}",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "${data.acao_rodape}",
+                    "cpf": "${form.cpf}",
+                    "nacionalidade": "${form.nacionalidade}",
+                    "concluiu_ensino_medio": "${form.concluiu_ensino_medio}",
+                    "possui_deficiencia": "${form.possui_deficiencia}",
+                    "tipos_deficiencia": "${form.tipos_deficiencia}",
+                    "deficiencia_outra": "${form.deficiencia_outra}",
+                    "como_conheceu": "${form.como_conheceu}",
+                    "como_conheceu_outro": "${form.como_conheceu_outro}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ],
+            "init-values": {
+              "cpf": "${data.valor_cpf}",
+              "nacionalidade": "${data.valor_nacionalidade}",
+              "concluiu_ensino_medio": "${data.valor_concluiu_ensino_medio}",
+              "possui_deficiencia": "${data.valor_possui_deficiencia}",
+              "tipos_deficiencia": "${data.valor_tipos_deficiencia}",
+              "deficiencia_outra": "${data.valor_deficiencia_outra}",
+              "como_conheceu": "${data.valor_como_conheceu}",
+              "como_conheceu_outro": "${data.valor_como_conheceu_outro}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "TELA_ORIENTACAO_PROVA",
+      "title": "Avaliação Online",
+      "terminal": false,
+      "data": {
+        "tema_redacao": {
+          "type": "string",
+          "__example__": "Tema: A romantização da produtividade e o esgotamento mental"
+        },
+        "texto_motivador": {
+          "type": "string",
+          "__example__": "Leia com atenção as instruções da prova."
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "processando": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "editavel": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "consultar_tarefa"
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Verificar andamento"
+        },
+        "mensagem_processamento": {
+          "type": "string",
+          "__example__": "Estamos conferindo seus dados."
+        },
+        "job_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_orientacao",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "If",
+                "condition": "${data.processando} == false",
+                "then": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Prova de Redação"
+                  },
+                  {
+                    "type": "TextSubheading",
+                    "text": "Redação online"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "Ao iniciar, o tema e as orientações serão carregados da sua prova. O prazo começa na abertura da avaliação."
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "⏳ Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo."
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Estamos preparando sua próxima etapa"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.mensagem_processamento}"
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                  },
+                  {
+                    "type": "EmbeddedLink",
+                    "text": "Abrir Portal do candidato",
+                    "on-click-action": {
+                      "name": "open_url",
+                      "url": "https://vestibular.unibalsas.edu.br/presencial"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "${data.rotulo_rodape}",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "${data.acao_rodape}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "TELA_REDACAO",
+      "title": "Redação",
+      "terminal": false,
+      "data": {
+        "tema_redacao": {
+          "type": "string",
+          "__example__": "Tema: A romantização da produtividade..."
+        },
+        "valor_texto_redacao": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "processando": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "editavel": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "consultar_tarefa"
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Verificar andamento"
+        },
+        "mensagem_processamento": {
+          "type": "string",
+          "__example__": "Estamos conferindo seus dados."
+        },
+        "job_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_redacao",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "If",
+                "condition": "${data.processando} == false",
+                "then": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Sua Redação"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.tema_redacao}"
+                  },
+                  {
+                    "type": "TextArea",
+                    "name": "texto_redacao",
+                    "label": "Digite aqui seu texto dissertativo...",
+                    "required": true,
+                    "max-length": 3000
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Estamos preparando sua próxima etapa"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.mensagem_processamento}"
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                  },
+                  {
+                    "type": "EmbeddedLink",
+                    "text": "Abrir Portal do candidato",
+                    "on-click-action": {
+                      "name": "open_url",
+                      "url": "https://vestibular.unibalsas.edu.br/presencial"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "${data.rotulo_rodape}",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "${data.acao_rodape}",
+                    "texto_redacao": "${form.texto_redacao}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ],
+            "init-values": {
+              "texto_redacao": "${data.valor_texto_redacao}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONFIRMACAO",
+      "title": "Confirmação",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "titulo": {
+          "type": "string",
+          "__example__": "Inscrição Concluída!"
+        },
+        "mensagem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "inscricao_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.mensagem}"
+          },
+          {
+            "type": "Footer",
+            "label": "Concluir",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "PENDENTE",
+      "title": "Aviso",
+      "terminal": true,
+      "success": false,
+      "data": {
+        "mensagem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "inscricao_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "titulo": {
+          "type": "string",
+          "__example__": "Conferir"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.mensagem}"
+          },
+          {
+            "type": "Footer",
+            "label": "Fechar",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "OPTIN_SCREEN_screen_dhaobf",
+      "title": "Privacidade",
+      "terminal": false,
+      "data": {
+        "data_maxima_nascimento": {
+          "type": "string",
+          "__example__": "2026-10-31"
+        },
+        "titulo_etapa": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nome": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_possui_nome_social": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "valor_nome_social": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_email": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_data_nascimento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_celular": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_genero": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_aceite_privacidade": {
+          "type": "boolean",
+          "__example__": false
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_lgpd",
+            "children": [
+              {
+                "type": "TextCaption",
+                "text": "A Faculdade de Balsas - Unibalsas preza pelos preceitos fundamentais de confiabilidade de seus contratantes e qualidade de seus serviços prestados, levando em consideração o princípio da boa-fé e estando comprometida com a proteção e privacidade dos seus dados pessoais.\n\nOs dados informados serão utilizados exclusivamente para o gerenciamento de sua inscrição e comunicação no processo seletivo vigente.\n\nPara maiores detalhes e contato com nosso DPO, acesse: https://lp.unibalsas.edu.br/lgpd/"
+              },
+              {
+                "type": "Footer",
+                "label": "Voltar",
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": {
+                    "name": "DADOS_BASICOS",
+                    "type": "screen"
+                  },
+                  "payload": {
+                    "data_maxima_nascimento": "${data.data_maxima_nascimento}",
+                    "titulo_etapa": "${data.titulo_etapa}",
+                    "erro": "${data.erro}",
+                    "tem_erro": "${data.tem_erro}",
+                    "estado": "${data.estado}",
+                    "valor_nome": "${data.valor_nome}",
+                    "valor_possui_nome_social": "${data.valor_possui_nome_social}",
+                    "valor_nome_social": "${data.valor_nome_social}",
+                    "valor_email": "${data.valor_email}",
+                    "valor_data_nascimento": "${data.valor_data_nascimento}",
+                    "valor_celular": "${data.valor_celular}",
+                    "valor_genero": "${data.valor_genero}",
+                    "valor_aceite_privacidade": "${data.valor_aceite_privacidade}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
