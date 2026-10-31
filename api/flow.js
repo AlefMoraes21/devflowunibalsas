@@ -424,7 +424,6 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
   }
 }
 
-// INTEGRAÇÃO COM MÓDULO DE AVALIAÇÃO / REDAÇÃO
 async function gerarTokenAvaliacao(data) {
   const mockChave = data.cpf + "abc";
   const mockIdExecProva = "701489";
@@ -438,7 +437,7 @@ async function gerarTokenAvaliacao(data) {
 
 async function buscarDetalhesRedacao(avaliacaoToken) {
   return {
-    tema_redacao: "A romantização da produtividade e o esgotamento mental",
+    tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
     texto_motivador: "A sociedade contemporânea tem exaltado a produtividade como fator essencial para o sucesso, levando muitas pessoas a negligenciarem o descanso e a saúde mental."
   };
 }
@@ -762,7 +761,7 @@ function pendingAfterWrite(data) {
     return null;
   }
 
-  // Não encerra no Vestibular Tradicional, pois o aluno ainda precisa fazer a redação!
+  // Não encerra no Vestibular Tradicional, pois o aluno ainda precisa fazer a redação
   if (!isNotaEnemContext(data)) {
     return null;
   }
@@ -1218,7 +1217,7 @@ async function routeFlowRequest(requestData) {
         try {
           submitResult = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
         } catch (subErr) {
-          console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo:", subErr.message);
+          console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo acadêmico:", subErr.message);
         }
 
         // Se NÃO for ENEM (Vestibular Online), avança para a Redação:
@@ -1236,11 +1235,11 @@ async function routeFlowRequest(requestData) {
           });
         }
 
-        // Se for ENEM, encerra com a confirmação:
+        // Se for processo ENEM, encerra com a confirmação:
         const redirect = submitResult?.data?.redirect ?? {};
         return responseForScreen("CONFIRMACAO", {
           titulo: "Inscrição Realizada! 🎉",
-          mensagem: `Sua inscrição pelo ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id || "confirmado"}.\nNossos consultores entrarão em contato em breve.`,
+          mensagem: `Sua inscrição ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id || "confirmado"}.\nNossos consultores entrarão em contato em breve.`,
           inscricao_id: String(redirect.applyment_id || "")
         });
       } catch (e) {
@@ -1253,7 +1252,7 @@ async function routeFlowRequest(requestData) {
     case "iniciar_redacao": {
       return responseForScreen("TELA_REDACAO", {
         ...data,
-        tema_redacao: toStringValue(data.tema_redacao, "A romantização da produtividade e o esgotamento mental"),
+        tema_redacao: toStringValue(data.tema_redacao, "Tema: A romantização da produtividade e o esgotamento mental"),
         erro: "",
         tem_erro: false
       });
@@ -1283,7 +1282,7 @@ async function routeFlowRequest(requestData) {
       } catch (e) {
         return responseForScreen("TELA_REDACAO", {
           ...data,
-          tema_redacao: toStringValue(data.tema_redacao, "A romantização da produtividade e o esgotamento mental"),
+          tema_redacao: toStringValue(data.tema_redacao, "Tema: A romantização da produtividade e o esgotamento mental"),
           erro: e.message,
           tem_erro: true
         });
