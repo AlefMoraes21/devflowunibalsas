@@ -1,3 +1,4 @@
+import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -412,7 +413,12 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal
     });
-    const json = JSON.parse(await response.text());
+    const raw=await response.text();
+    let json;
+    try{json=JSON.parse(raw)}catch{
+      console.warn(JSON.stringify({event:"rubeus_non_json",path:path.split("?")[0],http:response.status,contentType:response.headers.get("content-type"),redirected:response.redirected,ms:Date.now()-began}));
+      throw new Error(`[RUBEUS_RESPOSTA] ${path.split("?")[0]} retornou resposta não JSON (HTTP ${response.status}).`);
+    }
     console.info(JSON.stringify({event:"rubeus_end",path:path.split("?")[0],http:response.status,success:json?.success===true,ms:Date.now()-began}));
     if (!response.ok || json?.success !== true) {
       if (mutation && context) {
@@ -440,23 +446,8 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // -----------------------------------------------------------------------------
 
 function assessmentClient(){return createAssessment({observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
-async function linkDaInscricao(data){
-  if(!data.token||!data.applyment_id)throw new Error("[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.");
-  const p=await rubeusRequest("/login/portal",{method:"POST",body:{portal:PORTAL_ID,token:data.token,applyment_id:Number(data.applyment_id)}});
-  const current=p.data?.current_process;
-  if(String(current?.applyment_information?.selective_process_id)!==String(data.processo_seletivo_id))throw new Error("[PROVA_PROCESSO] O portal não confirmou o processo seletivo desta inscrição.");
-  const stages=(current.stages??[]).filter(x=>/avaliação|avaliacao|prova|redação|redacao/i.test(x.title??""));
-  if(stages.length!==1||!stages[0].cta_link)throw new Error("[PROVA_ETAPA] O portal não retornou uma etapa de prova disponível. Confira o portal.");
-  const step=String(stages[0].cta_link).match(/\/passo\/(\d+)(?:[/?#]|$)/)?.[1];
-  if(!step)throw new Error("[PROVA_LINK_ETAPA] O endereço da etapa de prova não foi reconhecido.");
-  const form=await getForm(step,"step",data.token);
-  const buttons=(form.data?.form?.content?.buttons??[]).filter(x=>x.visible!==false&&x.hidden!==true&&x.disabled!==true&&/^(iniciar prova|continuar prova)$/i.test(String(x.label??"").trim()));
-  if(buttons.length!==1)throw new Error("[PROVA_BOTAO] O formulário não retornou um único botão de prova disponível.");
-  const result=await submitForm(buttons[0].button,[],form.token??form.data?.token??data.token);
-  const link=result.data?.redirect?.link;
-  if(!link)throw new Error("[PROVA_LINK] O Rubeus não retornou o link da prova.");
-  return link;
-}
+const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm});
+async function linkDaInscricao(data){return proofRouter.resolve(data)}
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -1213,7 +1204,7 @@ function encryptResponse(payload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.3" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.4" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
