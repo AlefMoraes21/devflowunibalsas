@@ -75,3 +75,17 @@ test('não aceita ação de outra tela se ela não está autenticada no estado',
  const e=engine(memory(),async()=>({}));
  await assert.rejects(e.route({action:'data_exchange',screen:'TELA_ORIENTACAO_PROVA',flow_token:'unit',data:{acao:'enviar_informacoes_complementares',estado:'{}'}}),/Ação não permitida/);
 });
+
+
+test('prova pendente sai do polling para conferência, sem repetir a operação antiga',async()=>{
+ const store=memory();let runs=0;
+ const e=engine(store,async request=>{runs++;return request.data.acao==='iniciar_redacao'?{screen:'PENDENTE',data:{mensagem:'Parâmetros não encontrados'}}:{screen:'TELA_ORIENTACAO_PROVA',data:{}}});
+ const request={action:'data_exchange',screen:'TELA_ORIENTACAO_PROVA',flow_token:'unit-flow',data:{acao:'iniciar_redacao',estado:JSON.stringify({token:'unit',applyment_id:'unit-app'})}};
+ const first=await e.route(request);await e.worker(first.data.job_id,workerSignature(first.data.job_id));
+ const poll={action:'data_exchange',screen:request.screen,flow_token:request.flow_token,data:{acao:'consultar_tarefa',estado:first.data.estado}};
+ for(let i=0;i<3;i++){const result=await e.route(poll);assert.equal(result.data.processando,false);assert.equal(result.data.proof_resume_required,true);assert.equal(result.data.job_id,'')}
+ assert.equal(runs,1);
+ const ready=await e.route(poll);
+ const check=await e.route({...poll,data:{acao:'conferir_prova_existente',estado:ready.data.estado}});
+ await e.worker(check.data.job_id,workerSignature(check.data.job_id));assert.equal(runs,2);
+});

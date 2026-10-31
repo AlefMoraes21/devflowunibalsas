@@ -1,10 +1,11 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {routeFlowRequest,flowContext,sealState} from '../api/flow.js';
-test('preparar, entregar e confirmar portal usam a mesma execução, com uma única entrega',async()=>{
+for(const resume of [false,true])test(`preparação ${resume?'retomada sem submit':'normal'}, entrega e portal mantêm a mesma execução`,async()=>{
  process.env.FLOW_PRIVATE_KEY='unit-whole-proof';process.env.FLOW_PROJECT_ID='unit';process.env.RBS_TOKEN='unit';
  const original=globalThis.fetch;let submissions=0,saves=0,locks=0,portalText='Prova disponível';
  const snapshot={id:33,applicantData:[{field_id:112,value:'unit-key'},{field_id:113,value:'42'},{field_id:114,value:'unit-offer'}],content:[{type:'text',field_id:110,label:'IDEXECPROVA',value_now:'CURRENT'},{type:'text',field_id:111,label:'IDPROVAINSCRITO',value_now:'99'},{type:'button',id:1000,label:'Iniciar prova',forwardData:[{link:'https://avaliacao.apprubeus.com.br/api/avaliacao/linkProva',parameters:[{name:'chave',field_id:112,parameter_type_id:1},{name:'codigoContato',field_id:113,parameter_type_id:1},{name:'codigoOferta',field_id:114,parameter_type_id:1},{name:'idExecProva',field_id:110,parameter_type_id:1}]}]}]};
+ snapshot.content=[{type:'container',container_content:[{type:'container',container_content:snapshot.content}]}];
  const exam={id:777,avaliacao_id:10,crm_id:94,crm_contato_id:4,crm_curso_id:5,IDEXECPROVA:'CURRENT',codUsuarioPS:null,finalizada:0,tempoRestante:120,nome:'Redação',questoes:[{id:6,enunciado:'<p>Reda&ccedil;&atilde;o sobre equil&iacute;brio.</p>'}]};
  globalThis.fetch=async(input,options={})=>{
   const u=new URL(String(input)),body=options.body?JSON.parse(options.body):null;
@@ -31,11 +32,13 @@ test('preparar, entregar e confirmar portal usam a mesma execução, com uma ún
   return flowContext.run({request:req,deadline:Date.now()+120000,worker:true,write:null},()=>routeFlowRequest(req));
  }
  try{
-  const start=sealState('TELA_ORIENTACAO_PROVA',{applyment_id:'123',processo_seletivo_id:'94001',token:'unit'});
-  const editor=await run('TELA_ORIENTACAO_PROVA','iniciar_redacao',start);assert.equal(editor.screen,'TELA_REDACAO');assert.equal(editor.data.tema_redacao,'Redação sobre equilíbrio.');
+  const start=sealState('TELA_ORIENTACAO_PROVA',{applyment_id:'123',processo_seletivo_id:'94001',token:'unit',proof_resume_required:resume});
+  let ready=start;
+  if(resume){const checked=await run('TELA_ORIENTACAO_PROVA','conferir_prova_existente',start);assert.equal(checked.screen,'TELA_ORIENTACAO_PROVA');assert.equal(checked.data.acao_rodape,'iniciar_redacao');assert.equal(checked.data.rotulo_rodape,'Continuar para redação');ready=checked.data.estado;assert.equal(submissions,0);assert.equal(saves,0)}
+  const editor=await run('TELA_ORIENTACAO_PROVA','iniciar_redacao',ready);assert.equal(editor.screen,'TELA_REDACAO');assert.equal(editor.data.tema_redacao,'Redação sobre equilíbrio.');
   const delivered=await run('TELA_REDACAO','enviar_redacao',editor.data.estado,{texto_redacao:'Um texto de teste com desenvolvimento suficiente para verificar a entrega da redação.'});
   assert.equal(delivered.screen,'TELA_REDACAO');assert.equal(delivered.data.acao_rodape,'verificar_entrega');assert.equal(delivered.data.titulo_processamento,'Redação recebida');
   portalText='Aguardando correção';
-  const final=await run('TELA_REDACAO','verificar_entrega',delivered.data.estado);assert.equal(final.screen,'CONFIRMACAO');assert.match(final.data.mensagem,/Aguardando correção/);assert.equal(submissions,1);assert.equal(saves,1);assert.equal(locks,1);
+  const final=await run('TELA_REDACAO','verificar_entrega',delivered.data.estado);assert.equal(final.screen,'CONFIRMACAO');assert.match(final.data.mensagem,/Aguardando correção/);assert.equal(submissions,resume?0:1);assert.equal(saves,1);assert.equal(locks,1);
  }finally{globalThis.fetch=original}
 });
