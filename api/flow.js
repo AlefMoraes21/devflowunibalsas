@@ -1,3 +1,4 @@
+import {createJobEngine} from "./jobs.js";
 import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
@@ -112,6 +113,8 @@ const SCREEN_KEYS = {
   CONFIRMACAO: ["titulo", "mensagem", "inscricao_id"],
   PENDENTE: ["mensagem", "inscricao_id", "titulo"],
 };
+
+for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_KEYS[screen].push("processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id")}
 
 const USER_FIELDS = new Set([
   "aceite_privacidade",
@@ -386,6 +389,7 @@ async function downloadWhatsAppMedia(mediaId, token) {
 }
 
 async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TIMEOUT_MS } = {}) {
+  if(flowContext.getStore()?.worker)timeoutMs=Math.max(timeoutMs,60000);
   const rawToken = process.env.RBS_TOKEN.trim().replace(/^Bearer\s+/i, "");
   const headers = { Authorization: `Bearer ${rawToken}` };
   if (body !== undefined) {
@@ -448,7 +452,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // INTEGRAÇÃO DINÂMICA COM O MÓDULO DE AVALIAÇÃO DA UNIBALSAS
 // -----------------------------------------------------------------------------
 
-function assessmentClient(){return createAssessment({observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
+function assessmentClient(){return createAssessment({maxRequestMs:flowContext.getStore()?.worker?30000:4500,observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
 const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm});
 async function linkDaInscricao(data){return proofRouter.resolve(data)}
 
@@ -682,7 +686,7 @@ function sealState(screen, data) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", stateKey(), iv);
   const value = Buffer.concat([
-    cipher.update(JSON.stringify({ screen, exp: Date.now() + 3600000, data })),
+    cipher.update(JSON.stringify({ screen, exp: Date.now() + 10800000, data })),
     cipher.final()
   ]);
   return Buffer.concat([iv, cipher.getAuthTag(), value]).toString("base64url");
@@ -708,7 +712,9 @@ function openState(value, screen) {
 function responseForScreen(screen, data) {
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
-  const next = { ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
+  const actionByScreen={QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
+  const labelByScreen={QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
+  const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
   if (screen === "PENDENTE") {
     next.titulo ??= "Vamos conferir";
   }
@@ -1198,9 +1204,18 @@ function encryptResponse(payload, aesKey, iv) {
   return Buffer.concat([encrypted, cipher.getAuthTag()]).toString("base64");
 }
 
+const jobEngine=createJobEngine({
+  openState,render:responseForScreen,
+  run:(request,worker=false)=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+(worker?120000:FLOW_RESPONSE_BUDGET_MS),request,write:null,worker},()=>routeFlowRequest(request))
+});
+export async function workerHandler(req,res){
+  try{return res.status(await jobEngine.worker(req.body?.id,req.headers["x-flow-worker-signature"])).send("")}
+  catch(error){console.error(JSON.stringify({event:"flow_worker_error",kind:error.name,message:error.message}));return res.status(500).send("")}
+}
+
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.6" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-durable-1.1.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1239,7 +1254,7 @@ export default async function handler(req, res) {
 
     const payload = await flowContext.run(
       { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
-      () => routeFlowRequest(requestData)
+      () => jobEngine.route(requestData)
     );
 
     const enc = encryptResponse(payload, aesKey, iv);
@@ -1247,10 +1262,9 @@ export default async function handler(req, res) {
     return res.status(200).send(enc);
   } catch (err) {
     if (aesKey && iv) {
-      const p = responseForScreen("PENDENTE", {
-        mensagem: "Não foi possível carregar esta etapa. Tente novamente.",
-        inscricao_id: ""
-      });
+      const current=["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"].includes(requestData?.screen)?requestData.screen:"PENDENTE";
+      let trusted={};try{trusted=openState(requestData?.data?.estado,current)}catch{}
+      const p=responseForScreen(current,{...trusted,values:requestData?.data,erro:err.message||"Não foi possível consultar o processamento.",mensagem:"Não foi possível carregar esta etapa.",inscricao_id:""});
       const enc = encryptResponse(p, aesKey, iv);
       res.setHeader("Content-Type", "text/plain");
       return res.status(200).send(enc);

@@ -1,9 +1,10 @@
+import {claimProofDelivery} from "./cloud-store.js";
 import crypto from 'node:crypto';
 const BASE='https://avaliacao.apprubeus.com.br';
 export class ResultadoIncerto extends Error {}
-export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=>{},observe=()=>{}}={}) {
+export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=>{},observe=()=>{},maxRequestMs=4500}={}) {
   async function call(path,{body,cookie,method=body?'POST':'GET',manual=false}={}) {
-    const budget=Math.min(4500,remaining()-150);
+    const budget=Math.min(maxRequestMs,remaining()-150);
     if(budget<250)throw new Error('Tempo insuficiente. Reabra esta etapa pelo portal.');
     const started=Date.now();observe({phase:path.startsWith("/api/avaliacao/consulta/")?"consulta":path.split("?")[0],state:"begin"});
     const r=await fetcher(BASE+path,{method,redirect:manual?'manual':'error',headers:{...(body?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(budget)});
@@ -57,15 +58,7 @@ export function createAssessment({fetcher=fetch,remaining=()=>8000,markWrite=()=
   return {init,send};
 }
 
-// No in-memory lock: Cloud Run may execute concurrently on many instances.
-// Redis REST provides an atomic, durable tombstone before the external finalization.
-export async function claimDelivery(session) {
-  if(!process.env.REDIS_REST_URL||!process.env.REDIS_REST_TOKEN)throw new Error('Configure Redis REST para proteger a finalização.');
-  const url=new URL(process.env.REDIS_REST_URL);
-  if(url.protocol!=='https:')throw new Error('Redis exige HTTPS.');
-  const key='unibalsas:delivery:'+crypto.createHash('sha256').update(String(session.exam.id)+':'+session.token).digest('hex');
-  const r=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${process.env.REDIS_REST_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify(['SET',key,'claimed','NX','EX',604800]),signal:AbortSignal.timeout(1500)});
-  const j=await r.json();
-  if(!r.ok||j.error)throw new Error('Não foi possível proteger o envio.');
-  if(j.result!=='OK')throw new ResultadoIncerto('Esta prova já teve uma tentativa de entrega. Confira o resultado no Portal do candidato.');
+// Durable create-only lock shared by all Cloud Run instances.
+export async function claimDelivery(session){
+ if(!await claimProofDelivery(session))throw new ResultadoIncerto("Esta prova já teve uma tentativa de entrega. Confira o Portal do candidato.");
 }
