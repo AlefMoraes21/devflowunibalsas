@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const flowContext = new AsyncLocalStorage();
-const FLOW_RESPONSE_BUDGET_MS = 9200;
+const FLOW_RESPONSE_BUDGET_MS = 9500;
 
 const FORM_DEFAULTS = {
   ESCOLHA_PROCESSO: { processo_id: "" },
@@ -149,13 +149,26 @@ const USER_FIELDS = new Set([
 
 const RUBEUS_BASE_URL = "https://admin.portal.apprbs.com.br/api/v1";
 const PORTAL_ID = 257;
-const RUBEUS_TIMEOUT_MS = 7500;
+const RUBEUS_TIMEOUT_MS = 5500;
 const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 8000;
 
 const NACIONALIDADES_ESTATICAS = [
   { id: "10", title: "Brasileira" },
   { id: "20", title: "Naturalizado Brasileiro" },
   { id: "50", title: "Outros" }
+];
+
+const ORIGENS_PADRAO = [
+  { id: "01", title: "Site oficial da instituição" },
+  { id: "02", title: "Pesquisa no Google" },
+  { id: "03", title: "Redes sociais (Instagram, Facebook...)" },
+  { id: "04", title: "Anúncios patrocinados" },
+  { id: "05", title: "Indicação de amigos ou familiares" },
+  { id: "06", title: "Divulgação na escola ou empresa" },
+  { id: "07", title: "Feiras, palestras ou eventos" },
+  { id: "08", title: "Contato comercial (WhatsApp/Tel)" },
+  { id: "09", title: "Materiais impressos (cartazes/outdoors)" },
+  { id: "10", title: "Outro" }
 ];
 
 const PROCESSO_NOTA_ENEM_ID = "20386";
@@ -615,60 +628,51 @@ async function buildCourseScreenData(formResponse, processId) {
   };
 }
 
-async function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
+// Constrói QUASE_LA sem requisições HTTP adicionais
+function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
   const form = formResponse?.data?.form;
-  const token = formResponse?.token ?? formResponse?.data?.token;
+  const token = formResponse?.token ?? formResponse?.data?.token ?? dataAnterior.token;
 
-  const cpf = requireInput(findInput(form, ["CPF"], 38567), "CPF");
-  const nac = requireInput(findInput(form, ["Nacionalidade"], 38780), "Nacionalidade");
-  const em = requireInput(findInput(form, ["Você já concluiu o ensino médio?"], 251544), "Conclusão");
-  const def = requireInput(findInput(form, ["Possui alguma deficiência?"], 38575), "Deficiência");
-  const aud = requireInput(findInput(form, ["Auditiva"], 38577), "Auditiva");
-  const fala = requireInput(findInput(form, ["Fala"], 38578), "Fala");
-  const fis = requireInput(findInput(form, ["Física", "Fisica"], 38576), "Física");
-  const intel = requireInput(findInput(form, ["Intelectual"], 38580), "Intelectual");
-  const vis = requireInput(findInput(form, ["Visual"], 38579), "Visual");
-  const ment = requireInput(findInput(form, ["Mental"], 38581), "Mental");
-  const out = requireInput(findInput(form, ["Outras deficiências"], 38582), "Outras");
-  const outT = requireInput(findInput(form, ["Deficiência motivo outras TOTVS"], 38583), "Outra");
-  const orig = requireInput(findInput(form, ["Como você ficou sabendo sobre este processo seletivo?"], 319427), "Como conheceu");
-  const origO = requireInput(findInput(form, ["Outro:"], 319428), "Outro");
-  const button = findButton(form, ["Concluir"]);
+  const cpf = findInput(form, ["CPF"], 38567);
+  const nac = findInput(form, ["Nacionalidade"], 38780);
+  const em = findInput(form, ["Você já concluiu o ensino médio?"], 251544);
+  const def = findInput(form, ["Possui alguma deficiência?"], 38575);
+  const aud = findInput(form, ["Auditiva"], 38577);
+  const fala = findInput(form, ["Fala"], 38578);
+  const fis = findInput(form, ["Física", "Fisica"], 38576);
+  const intel = findInput(form, ["Intelectual"], 38580);
+  const vis = findInput(form, ["Visual"], 38579);
+  const ment = findInput(form, ["Mental"], 38581);
+  const out = findInput(form, ["Outras deficiências"], 38582);
+  const outT = findInput(form, ["Deficiência motivo outras TOTVS"], 38583);
+  const orig = findInput(form, ["Como você ficou sabendo sobre este processo seletivo?"], 319427);
+  const origO = findInput(form, ["Outro:"], 319428);
+  const button = form ? findButton(form, ["Concluir"]) : null;
 
-  const originQuery = findQueryForField(form, orig.field_id);
-  const originsResponse = await getDataSource({
-    datasource: originQuery.query_data,
-    target: orig.field_id,
-    filter: [],
-    nextFields: [],
-    token
-  });
-  const origens = extractDataSourceOptions(originsResponse).map(o => ({ id: String(o.value), title: String(o.label) }));
   const redirect = prev?.data?.redirect ?? {};
 
   return {
     token: String(token),
-    target: String(form.id),
-    local: String(form.local),
-    button_id: String(button.button),
-    person_id: toStringValue(redirect.person_id),
-    applyment_id: toStringValue(redirect.applyment_id),
-    campo_cpf_id: String(cpf.field_id),
-    campo_nacionalidade_id: String(nac.field_id),
-    campo_ensino_medio_id: String(em.field_id),
-    campo_deficiencia_id: String(def.field_id),
-    campo_def_auditiva_id: String(aud.field_id),
-    campo_def_fala_id: String(fala.field_id),
-    campo_def_fisica_id: String(fis.field_id),
-    campo_def_intelectual_id: String(intel.field_id),
-    campo_def_visual_id: String(vis.field_id),
-    campo_def_mental_id: String(ment.field_id),
-    campo_def_outras_id: String(out.field_id),
-    campo_def_outras_texto_id: String(outT.field_id),
-    campo_origem_id: String(orig.field_id),
-    campo_origem_outro_id: String(origO.field_id),
-    datasource_origem: toStringValue(originQuery?.query_data),
-    origens,
+    target: String(form?.id || "300663"),
+    local: String(form?.local || "step"),
+    button_id: String(button?.button || "3940366"),
+    person_id: toStringValue(redirect.person_id || dataAnterior.person_id),
+    applyment_id: toStringValue(redirect.applyment_id || dataAnterior.applyment_id),
+    campo_cpf_id: String(cpf?.field_id || 38567),
+    campo_nacionalidade_id: String(nac?.field_id || 38780),
+    campo_ensino_medio_id: String(em?.field_id || 251544),
+    campo_deficiencia_id: String(def?.field_id || 38575),
+    campo_def_auditiva_id: String(aud?.field_id || 38577),
+    campo_def_fala_id: String(fala?.field_id || 38578),
+    campo_def_fisica_id: String(fis?.field_id || 38576),
+    campo_def_intelectual_id: String(intel?.field_id || 38580),
+    campo_def_visual_id: String(vis?.field_id || 38579),
+    campo_def_mental_id: String(ment?.field_id || 38581),
+    campo_def_outras_id: String(out?.field_id || 38582),
+    campo_def_outras_texto_id: String(outT?.field_id || 38583),
+    campo_origem_id: String(orig?.field_id || 319427),
+    campo_origem_outro_id: String(origO?.field_id || 319428),
+    origens: ORIGENS_PADRAO,
     processo_seletivo_id: toStringValue(dataAnterior.processo_seletivo_id),
     eh_nota_enem: toBoolean(dataAnterior.eh_nota_enem),
     erro: ""
@@ -829,7 +833,6 @@ function basicRetryData(data, message) {
   };
 }
 
-// Preserva o catálogo de cursos já carregado para não quebrar o Dropdown
 function courseRetryData(data, message) {
   return {
     ...data,
@@ -846,7 +849,7 @@ function courseRetryData(data, message) {
 function fastAlmostThereRetryData(data, message) {
   return {
     ...data,
-    origens: Array.isArray(data.origens) ? data.origens : [],
+    origens: Array.isArray(data.origens) ? data.origens : ORIGENS_PADRAO,
     processo_seletivo_id: toStringValue(data.processo_seletivo_id),
     eh_nota_enem: toBoolean(data.eh_nota_enem),
     erro: message || "Não foi possível concluir."
@@ -978,7 +981,7 @@ async function routeFlowRequest(requestData) {
 
     case "avancar_curso_interesse": {
       try {
-        // Dispara APENAS a busca do turno (1 chamada rápida, preservando data.cursos)
+        // Passo 1: Busca apenas os turnos (rápido, preservando o catálogo de cursos)
         if (!toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
           if (!data.curso_id) {
             throw new Error("Selecione um curso para ver os turnos.");
@@ -1038,7 +1041,7 @@ async function routeFlowRequest(requestData) {
           });
         }
 
-        if (!data.curso_id || data.curso_id !== data.curso_selecionado || !(data.turnos ?? []).some(t => t.id === data.turno_id)) {
+        if (!data.curso_id || !(data.turnos ?? []).some(t => t.id === data.turno_id)) {
           throw new Error("Selecione o turno correspondente.");
         }
 
@@ -1070,7 +1073,7 @@ async function routeFlowRequest(requestData) {
         ]);
 
         const submit = await submitForm(data.button_id, fields, data.token);
-        const nextToken = submit.data.token ?? data.token;
+        const nextToken = submit.data?.token ?? data.token;
         const redirect = submit?.data?.redirect ?? {};
 
         if (notaEnem) {
@@ -1086,8 +1089,15 @@ async function routeFlowRequest(requestData) {
           });
         }
 
-        const nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
-        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, submit, data));
+        // Tenta baixar o formulário seguinte ou avança com os campos mapeados (resiliente)
+        let nextForm = null;
+        try {
+          nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
+        } catch (formErr) {
+          console.warn("Aviso: getForm demorou, avançando com mapeamento resiliente:", formErr.message);
+        }
+
+        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, submit, data));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1111,8 +1121,12 @@ async function routeFlowRequest(requestData) {
           } catch (err) {}
         }
 
-        const nextForm = await getForm(data.target, data.local, data.token);
-        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, {
+        let nextForm = null;
+        try {
+          nextForm = await getForm(data.target, data.local, data.token);
+        } catch (err) {}
+
+        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, {
           data: { redirect: { person_id: data.person_id, applyment_id: data.applyment_id } }
         }, data));
       } catch (e) {
@@ -1156,7 +1170,7 @@ async function routeFlowRequest(requestData) {
           console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo acadêmico:", subErr.message);
         }
 
-        // Se NÃO for ENEM (Vestibular Online), avança para a Redação:
+        // Se NÃO for ENEM (Vestibular Online), avança para a Redação
         if (!isNotaEnemContext(data)) {
           const credenciaisProva = await gerarTokenAvaliacao(data);
           const detalhesProva = await buscarDetalhesRedacao(credenciaisProva.avaliacao_token);
@@ -1167,11 +1181,13 @@ async function routeFlowRequest(requestData) {
             avaliacao_token: credenciaisProva.avaliacao_token,
             avaliacao_id: credenciaisProva.avaliacao_id,
             questao_id: credenciaisProva.questao_id,
-            id_exec_prova: credenciaisProva.id_exec_prova
+            id_exec_prova: credenciaisProva.id_exec_prova,
+            erro: "",
+            tem_erro: false
           });
         }
 
-        // Se for ENEM, encerra com a confirmação:
+        // Se for ENEM, encerra com a confirmação
         const redirect = submitResult?.data?.redirect ?? {};
         return responseForScreen("CONFIRMACAO", {
           titulo: "Inscrição Realizada! 🎉",
