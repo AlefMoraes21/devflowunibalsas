@@ -437,18 +437,73 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
   }
 }
 
+// -----------------------------------------------------------------------------
+// INTEGRAÇÃO COM A PLATAFORMA DE AVALIAÇÃO DA UNIBALSAS (avaliacao.apprubeus.com.br)
+// -----------------------------------------------------------------------------
 async function gerarTokenAvaliacao(data) {
-  const mockChave = data.cpf + "abc";
-  const mockIdExecProva = "701489";
+  const chave = toStringValue(data.avaliacao_chave, "chave_vestibular_2027");
+  const contatoCrm = toStringValue(data.person_id || data.contact_id_crm, "604196");
+  const cursoCrm = "926"; // Mapeado da avaliação da UniBalsas
+  const idExecProva = toStringValue(data.applyment_id, "701489");
+
+  try {
+    const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/create/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chave,
+        crm_contato_id: String(contatoCrm),
+        crm_curso_id: String(cursoCrm),
+        crm_processoseletivo_id: null,
+        IDEXECPROVA: String(idExecProva),
+        codUsuarioPS: null
+      })
+    });
+    const json = await res.json();
+    if (json?.success && json.data?.token) {
+      return {
+        avaliacao_token: json.data.token,
+        avaliacao_id: 330,
+        questao_id: 51709,
+        id_exec_prova: idExecProva,
+        contato_crm: contatoCrm,
+        curso_crm: cursoCrm
+      };
+    }
+  } catch (err) {
+    console.warn("Aviso ao gerar token dinâmico da avaliação:", err.message);
+  }
+
+  // Fallback seguro caso a API de avaliação demore
   return {
-    avaliacao_token: "tok_" + mockChave,
+    avaliacao_token: "tok_" + chave,
     avaliacao_id: 330,
     questao_id: 51709,
-    id_exec_prova: mockIdExecProva
+    id_exec_prova: idExecProva,
+    contato_crm: contatoCrm,
+    curso_crm: cursoCrm
   };
 }
 
 async function buscarDetalhesRedacao(avaliacaoToken) {
+  try {
+    const res = await fetch(`https://avaliacao.apprubeus.com.br/api/avaliacao/consulta/${avaliacaoToken}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+    const json = await res.json();
+    if (json?.success && json.data?.questoes?.length) {
+      const q = json.data.questoes[0];
+      const textoLimpo = q.enunciado.replace(/<[^>]*>?/gm, "").slice(0, 320);
+      return {
+        tema_redacao: "Tema: " + (json.data.nome || "A romantização da produtividade e o esgotamento mental"),
+        texto_motivador: textoLimpo
+      };
+    }
+  } catch (err) {
+    console.warn("Aviso ao consultar detalhes da redação:", err.message);
+  }
+
   return {
     tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
     texto_motivador: "A sociedade contemporânea tem exaltado a produtividade como fator essencial para o sucesso, levando muitas pessoas a negligenciarem o descanso e a saúde mental."
@@ -456,7 +511,45 @@ async function buscarDetalhesRedacao(avaliacaoToken) {
 }
 
 async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_id, questao_id, id_exec_prova, contato_crm, curso_crm }) {
-  return { success: true };
+  const payload = {
+    id: Number(id_exec_prova || 701489),
+    avaliacao_id: Number(avaliacao_id || 330),
+    crm_contato_id: Number(contato_crm || 604196),
+    crm_curso_id: Number(curso_crm || 926),
+    crm_id: 94,
+    crm_processoseletivo_id: null,
+    IDEXECPROVA: String(id_exec_prova || 701489),
+    codUsuarioPS: null,
+    questoes: [
+      {
+        questao_id: Number(questao_id || 51709),
+        obrigatoria: 1,
+        tipo: 1,
+        resposta: String(texto_redacao)
+      }
+    ],
+    tempoUsado: 15.0,
+    finalizada: 1,
+    nome: "PROVA REDAÇÃO ONLINE - PRESENCIAL",
+    salvar: 1,
+    salvarEstadoAtual: 1,
+    finalizada_automaticamente: 0
+  };
+
+  console.log("[AVALIACAO] Submetendo redação ao painel da UniBalsas...");
+  const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/salve/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/plain, */*",
+      "Origin": "https://avaliacao.apprubeus.com.br"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await res.text();
+  console.log("[AVALIACAO] Resposta da banca examinadora:", raw);
+  return JSON.parse(raw);
 }
 
 async function listProcesses() {
@@ -628,7 +721,6 @@ async function buildCourseScreenData(formResponse, processId) {
   };
 }
 
-// Constrói QUASE_LA sem requisições HTTP adicionais
 function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
   const form = formResponse?.data?.form;
   const token = formResponse?.token ?? formResponse?.data?.token ?? dataAnterior.token;
@@ -981,7 +1073,6 @@ async function routeFlowRequest(requestData) {
 
     case "avancar_curso_interesse": {
       try {
-        // Passo 1: Busca apenas os turnos (rápido, preservando o catálogo de cursos)
         if (!toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
           if (!data.curso_id) {
             throw new Error("Selecione um curso para ver os turnos.");
@@ -1089,7 +1180,6 @@ async function routeFlowRequest(requestData) {
           });
         }
 
-        // Tenta baixar o formulário seguinte ou avança com os campos mapeados (resiliente)
         let nextForm = null;
         try {
           nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
