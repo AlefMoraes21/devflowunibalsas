@@ -1044,4 +1044,284 @@ async function routeFlowRequest(requestData) {
 
         const notaEnem = isNotaEnemContext(data);
         const campoPoloId = notaEnem ? toStringValue(data.campo_polo_id, "38550") : toStringValue(data.campo_polo_id);
-        const poloValor = notaEnem ? toStringValue(data.polo_valor, "01") :
+        const poloValor = notaEnem ? toStringValue(data.polo_valor, "01") : toStringValue(data.polo_valor);
+        const mediaCalculada = calcMediaEnemAuto(data);
+        const mediaFinal = mediaCalculada ?? (data.media_enem ? Number(String(data.media_enem).replace(",", ".")) : null);
+
+        const fields = compactFields([
+          fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
+          fieldItem(data.campo_turno_id, toStringValue(data.turno_id)),
+          ...(notaEnem ? [
+            fieldItem(enemFieldId(data.campo_enem_numero_id, 38556), normalizeEnemRegistration(data.numero_inscricao_enem)),
+            fieldItem(enemFieldId(data.campo_enem_ano_id, 38557), toStringValue(data.ano_enem)),
+            fieldItem(enemFieldId(data.campo_enem_natureza_id, 38563), normalizeEnemScore(data.nota_natureza_enem, "Ciências da Natureza")),
+            fieldItem(enemFieldId(data.campo_enem_humanas_id, 38562), normalizeEnemScore(data.nota_humanas_enem, "Ciências Humanas")),
+            fieldItem(enemFieldId(data.campo_enem_matematica_id, 38561), normalizeEnemScore(data.nota_matematica_enem, "Matemática")),
+            fieldItem(enemFieldId(data.campo_enem_linguagens_id, 38560), normalizeEnemScore(data.nota_linguagens_enem, "Linguagens")),
+            fieldItem(enemFieldId(data.campo_enem_redacao_id, 38559), normalizeEnemScore(data.nota_redacao_enem, "Redação")),
+            fieldItem(enemFieldId(data.campo_enem_media_id, 38558), mediaFinal !== null ? mediaFinal : normalizeEnemScore(data.media_enem, "Média"))
+          ] : []),
+          fieldItem(data.campo_area_interesse_id, toStringValue(data.area_interesse_valor)),
+          fieldItem(data.campo_oferta_id, toStringValue(data.oferta_valor)),
+          fieldItem(campoPoloId, poloValor),
+          fieldItem(data.campo_coligada_id, toStringValue(data.coligada_valor)),
+          fieldItem(data.campo_filial_id, toStringValue(data.filial_valor)),
+          fieldItem(data.campo_tipo_curso_id, toStringValue(data.tipo_curso_valor))
+        ]);
+
+        const submit = await submitForm(data.button_id, fields, data.token);
+        const nextToken = submit.data.token ?? data.token;
+        const redirect = submit?.data?.redirect ?? {};
+
+        if (notaEnem) {
+          return responseForScreen("DOCUMENTOS_ENEM", {
+            token: String(nextToken),
+            target: String(submit.data.next),
+            local: String(submit.data.local),
+            person_id: toStringValue(redirect.person_id),
+            applyment_id: toStringValue(redirect.applyment_id),
+            processo_seletivo_id: toStringValue(data.processo_seletivo_id),
+            eh_nota_enem: true,
+            erro: ""
+          });
+        }
+
+        const nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
+        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, submit, data));
+      } catch (e) {
+        const p = pendingAfterWrite(data);
+        if (p) return p;
+        return responseForScreen("CURSO_INTERESSE", courseRetryData(data, e.message));
+      }
+    }
+
+    case "enviar_documento_enem": {
+      try {
+        const rawDoc = data.documento_enem;
+        const docItem = Array.isArray(rawDoc) ? rawDoc[0] : rawDoc;
+        const mediaId = docItem?.file_id || docItem?.media_id || (typeof docItem === "string" ? docItem : null);
+
+        if (!mediaId) {
+          throw new Error("Anexe o comprovante ou boletim do ENEM.");
+        }
+
+        if (process.env.WHATSAPP_TOKEN && mediaId) {
+          try {
+            await downloadWhatsAppMedia(mediaId, process.env.WHATSAPP_TOKEN);
+          } catch (err) {}
+        }
+
+        const nextForm = await getForm(data.target, data.local, data.token);
+        return responseForScreen("QUASE_LA", await buildAlmostThereScreenData(nextForm, {
+          data: { redirect: { person_id: data.person_id, applyment_id: data.applyment_id } }
+        }, data));
+      } catch (e) {
+        return responseForScreen("DOCUMENTOS_ENEM", {
+          ...data,
+          erro: e.message,
+          tem_erro: true
+        });
+      }
+    }
+
+    case "enviar_informacoes_complementares": {
+      try {
+        validateFinal(data);
+        const has = toStringValue(data.possui_deficiencia) === "T";
+        const sel = Array.isArray(data.tipos_deficiencia) ? data.tipos_deficiencia.map(String) : [];
+        const selected = t => has && sel.includes(t);
+        const other = selected("outras");
+
+        const fields = compactFields([
+          fieldItem(data.campo_cpf_id, normalizeCpf(data.cpf)),
+          fieldItem(data.campo_nacionalidade_id, normalizeNationality(data.nacionalidade)),
+          fieldItem(data.campo_ensino_medio_id, toStringValue(data.concluiu_ensino_medio)),
+          fieldItem(data.campo_deficiencia_id, has ? "T" : "F"),
+          ...(has ? [fieldItem(data.campo_def_auditiva_id, selected("auditiva"))] : []),
+          ...(has ? [fieldItem(data.campo_def_fala_id, selected("fala"))] : []),
+          ...(has ? [fieldItem(data.campo_def_fisica_id, selected("fisica"))] : []),
+          ...(has ? [fieldItem(data.campo_def_intelectual_id, selected("intelectual"))] : []),
+          ...(has ? [fieldItem(data.campo_def_visual_id, selected("visual"))] : []),
+          ...(has ? [fieldItem(data.campo_def_mental_id, selected("mental"))] : []),
+          ...(has ? [fieldItem(data.campo_def_outras_id, other)] : []),
+          ...(other ? [fieldItem(data.campo_def_outras_texto_id, toStringValue(data.deficiencia_outra).trim())] : []),
+          fieldItem(data.campo_origem_id, toStringValue(data.como_conheceu)),
+          ...(toStringValue(data.como_conheceu) === "10" ? [fieldItem(data.campo_origem_outro_id, toStringValue(data.como_conheceu_outro).trim())] : [])
+        ]);
+
+        let submitResult = null;
+        try {
+          submitResult = await submitForm(data.button_id, fields, data.token, RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
+        } catch (subErr) {
+          console.warn("Aviso: submit final demorou no Rubeus, seguindo fluxo acadêmico:", subErr.message);
+        }
+
+        // Se NÃO for ENEM (Vestibular Online), avança para a Redação:
+        if (!isNotaEnemContext(data)) {
+          const credenciaisProva = await gerarTokenAvaliacao(data);
+          const detalhesProva = await buscarDetalhesRedacao(credenciaisProva.avaliacao_token);
+          return responseForScreen("TELA_ORIENTACAO_PROVA", {
+            ...data,
+            tema_redacao: detalhesProva.tema_redacao,
+            texto_motivador: detalhesProva.texto_motivador,
+            avaliacao_token: credenciaisProva.avaliacao_token,
+            avaliacao_id: credenciaisProva.avaliacao_id,
+            questao_id: credenciaisProva.questao_id,
+            id_exec_prova: credenciaisProva.id_exec_prova
+          });
+        }
+
+        // Se for ENEM, encerra com a confirmação:
+        const redirect = submitResult?.data?.redirect ?? {};
+        return responseForScreen("CONFIRMACAO", {
+          titulo: "Inscrição Realizada! 🎉",
+          mensagem: `Sua inscrição pelo ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id || "confirmado"}.\nNossos consultores entrarão em contato em breve.`,
+          inscricao_id: String(redirect.applyment_id || "")
+        });
+      } catch (e) {
+        const p = pendingAfterWrite(data);
+        if (p) return p;
+        return responseForScreen("QUASE_LA", fastAlmostThereRetryData(data, e.message));
+      }
+    }
+
+    case "iniciar_redacao": {
+      return responseForScreen("TELA_REDACAO", {
+        ...data,
+        tema_redacao: toStringValue(data.tema_redacao, "Tema: A romantização da produtividade e o esgotamento mental"),
+        erro: "",
+        tem_erro: false
+      });
+    }
+
+    case "enviar_redacao": {
+      try {
+        const texto = String(data.texto_redacao ?? "").trim();
+        if (texto.length < 50) {
+          throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
+        }
+
+        await submeterRedacaoAvaliacao({
+          texto_redacao: texto,
+          avaliacao_id: data.avaliacao_id || 330,
+          questao_id: data.questao_id || 51709,
+          id_exec_prova: data.id_exec_prova || "701489",
+          contato_crm: data.person_id || 604196,
+          curso_crm: 926
+        });
+
+        return responseForScreen("CONFIRMACAO", {
+          titulo: "Inscrição e Redação Enviadas! 🎓",
+          mensagem: "Recebemos sua inscrição e a sua redação com sucesso!\n\nSua prova entrará em fase de correção pelos nossos avaliadores. Assim que a nota for lançada, você receberá a notificação.",
+          inscricao_id: toStringValue(data.applyment_id)
+        });
+      } catch (e) {
+        return responseForScreen("TELA_REDACAO", {
+          ...data,
+          tema_redacao: toStringValue(data.tema_redacao, "Tema: A romantização da produtividade e o esgotamento mental"),
+          erro: e.message,
+          tem_erro: true
+        });
+      }
+    }
+
+    default:
+      return { data: { status: "active" } };
+  }
+}
+
+function decryptRequest(body, privateKey) {
+  const { encrypted_flow_data, encrypted_aes_key, initial_vector } = body ?? {};
+  if (!encrypted_flow_data || !encrypted_aes_key || !initial_vector) {
+    throw new Error("Payload incompleto.");
+  }
+
+  const aesKey = crypto.privateDecrypt(
+    {
+      key: privateKey,
+      passphrase: process.env.FLOW_PASSPHRASE || undefined,
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: "sha256"
+    },
+    Buffer.from(encrypted_aes_key, "base64")
+  );
+
+  const iv = Buffer.from(initial_vector, "base64");
+  const encryptedData = Buffer.from(encrypted_flow_data, "base64");
+  const authTag = encryptedData.subarray(-16);
+  const data = encryptedData.subarray(0, -16);
+
+  const decipher = crypto.createDecipheriv("aes-128-gcm", aesKey, iv);
+  decipher.setAuthTag(authTag);
+
+  const decrypted = decipher.update(data, undefined, "utf8") + decipher.final("utf8");
+  return { requestData: JSON.parse(decrypted), aesKey, iv };
+}
+
+function encryptResponse(payload, aesKey, iv) {
+  const flippedIv = Buffer.from(iv.map(b => b ^ 0xff));
+  const cipher = crypto.createCipheriv("aes-128-gcm", aesKey, flippedIv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  return Buffer.concat([encrypted, cipher.getAuthTag()]).toString("base64");
+}
+
+export default async function handler(req, res) {
+  if (req.method === "GET") {
+    return res.status(200).json({ status: "ok", version: "unibalsas-flow-v7.3" });
+  }
+  if (req.method !== "POST") {
+    return res.status(405).send("Method not allowed");
+  }
+
+  const appSecret = process.env.META_APP_SECRET || process.env.APP_SECRET;
+  if (appSecret) {
+    const raw = Buffer.isBuffer(req.rawBody)
+      ? req.rawBody
+      : typeof req.rawBody === "string"
+      ? Buffer.from(req.rawBody)
+      : null;
+
+    if (!raw) {
+      return res.status(503).send("rawBody não preservado no servidor.");
+    }
+    const sig = req.headers?.["x-hub-signature-256"];
+    if (!/^sha256=[a-f0-9]{64}$/i.test(sig ?? "")) {
+      return res.status(432).send("Assinatura inválida.");
+    }
+    const expected = crypto.createHmac("sha256", appSecret).update(raw).digest();
+    const received = Buffer.from(sig.slice(7), "hex");
+    if (!crypto.timingSafeEqual(expected, received)) {
+      return res.status(432).send("Assinatura inválida.");
+    }
+  }
+
+  let aesKey, iv, requestData;
+  try {
+    requirePrivateKey();
+    const privateKey = process.env.FLOW_PRIVATE_KEY.replace(/\\n/g, "\n");
+    const dec = decryptRequest(req.body, privateKey);
+    requestData = dec.requestData;
+    aesKey = dec.aesKey;
+    iv = dec.iv;
+
+    const payload = await flowContext.run(
+      { deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
+      () => routeFlowRequest(requestData)
+    );
+
+    const enc = encryptResponse(payload, aesKey, iv);
+    res.setHeader("Content-Type", "text/plain");
+    return res.status(200).send(enc);
+  } catch (err) {
+    if (aesKey && iv) {
+      const p = responseForScreen("PENDENTE", {
+        mensagem: "Não foi possível carregar esta etapa. Tente novamente.",
+        inscricao_id: ""
+      });
+      const enc = encryptResponse(p, aesKey, iv);
+      res.setHeader("Content-Type", "text/plain");
+      return res.status(200).send(enc);
+    }
+    return res.status(421).send("Erro na descriptografia do payload.");
+  }
+}
