@@ -1204,7 +1204,7 @@ function encryptResponse(payload, aesKey, iv) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.4" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-redacao-fix-1.0.5" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
