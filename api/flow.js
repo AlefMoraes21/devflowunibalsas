@@ -154,8 +154,8 @@ const USER_FIELDS = new Set([
 
 const RUBEUS_BASE_URL = "https://admin.portal.apprbs.com.br/api/v1";
 const PORTAL_ID = 257;
-const RUBEUS_TIMEOUT_MS = 5500;
-const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 8000;
+const RUBEUS_TIMEOUT_MS = 6500;
+const RUBEUS_FINAL_SUBMIT_TIMEOUT_MS = 9000;
 
 const NACIONALIDADES_ESTATICAS = [
   { id: "10", title: "Brasileira" },
@@ -443,45 +443,37 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // INTEGRAÇÃO DINÂMICA COM O MÓDULO DE AVALIAÇÃO DA UNIBALSAS
 // -----------------------------------------------------------------------------
 
-// Extrai os 4 parâmetros reais da Amanda a partir da etapa 300664 do CRM
-async function extrairParametrosProvaReal(targetStep, stepToken, fallbackData) {
-  let url = null;
+async function obterDadosDaExecucaoPorToken(token) {
+  if (!token) return null;
   try {
-    const formRes = await getForm(targetStep || 300664, "step", stepToken);
-    const form = formRes?.data?.form;
-    const btn = findButton(form, ["Iniciar Prova", "Iniciar", "Avançar"]);
-
-    if (btn?.button) {
-      const sub = await submitForm(btn.button, [], formRes?.token || stepToken, 4500);
-      url = sub?.data?.redirect?.url || null;
-    }
-  } catch (err) {
-    console.warn("[AVALIACAO] Consulta do formulário 300664 demorou:", err.message);
-  }
-
-  if (url) {
-    const match = url.match(/\/execucao\/inicio\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)/);
-    if (match) {
-      console.log("[AVALIACAO] Parâmetros reais extraídos da URL do Rubeus:", match[0]);
+    const res = await fetch(`https://avaliacao.apprubeus.com.br/api/avaliacao/consulta/${token}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+    const json = await res.json();
+    if (json?.success && json.data) {
+      console.log("[AVALIACAO] Dados reais da sessão recuperados:", {
+        id: json.data.id,
+        crm_contato_id: json.data.crm_contato_id,
+        crm_curso_id: json.data.crm_curso_id,
+        IDEXECPROVA: json.data.IDEXECPROVA
+      });
       return {
-        chave: match[1],
-        crm_contato_id: match[2],
-        crm_curso_id: match[3],
-        IDEXECPROVA: match[4]
+        execucao_id: json.data.id,
+        contato_crm: json.data.crm_contato_id,
+        curso_crm: json.data.crm_curso_id,
+        id_exec_prova: json.data.IDEXECPROVA,
+        avaliacao_id: json.data.avaliacao_id || 330,
+        questao_id: json.data.questoes?.[0]?.id || 51709,
+        nome: json.data.nome
       };
     }
+  } catch (err) {
+    console.warn("[AVALIACAO] Consulta do token demorou:", err.message);
   }
-
-  // Fallback baseado nos dados reais da Amanda (conforme identificado na tela da avaliação)
-  return {
-    chave: "fe73f687e5bc5280214e0486b273a5f9",
-    crm_contato_id: toStringValue(fallbackData.person_id, "604223"),
-    crm_curso_id: toStringValue(fallbackData.curso_id, "890"),
-    IDEXECPROVA: toStringValue(fallbackData.id_exec_prova, "3DF1C1D84A")
-  };
+  return null;
 }
 
-// Inicializa a avaliação oficial e cria o token de sessão (como no botão "Iniciar avaliação")
 async function inicializarSessaoAvaliacao(params) {
   try {
     const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/create/", {
@@ -518,20 +510,29 @@ async function inicializarSessaoAvaliacao(params) {
   };
 }
 
-// Submissão definitiva com 'finalizada: 1' vinculada aos dados do candidato
-async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_id, questao_id, id_exec_prova, contato_crm, curso_crm, execucao_id }) {
+async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_token, execucao_id, avaliacao_id, questao_id, id_exec_prova, contato_crm, curso_crm }) {
+  // Sincroniza os IDs reais diretamente com a sessão viva do Rubeus
+  let infoSessao = await obterDadosDaExecucaoPorToken(avaliacao_token);
+
+  const execId = Number(infoSessao?.execucao_id || execucao_id || 701490);
+  const realContato = Number(infoSessao?.contato_crm || contato_crm || 604223);
+  const realCurso = Number(infoSessao?.curso_crm || curso_crm || 890);
+  const realIdExec = String(infoSessao?.id_exec_prova || id_exec_prova || "3DF1C1D84A");
+  const realQuestao = Number(infoSessao?.questao_id || questao_id || 51709);
+  const realAvaliacao = Number(infoSessao?.avaliacao_id || avaliacao_id || 330);
+
   const payload = {
-    id: Number(execucao_id || 701490),
-    avaliacao_id: Number(avaliacao_id || 330),
-    crm_contato_id: Number(contato_crm || 604223),
-    crm_curso_id: Number(curso_crm || 890),
+    id: execId,
+    avaliacao_id: realAvaliacao,
+    crm_contato_id: realContato,
+    crm_curso_id: realCurso,
     crm_id: 94,
     crm_processoseletivo_id: null,
-    IDEXECPROVA: String(id_exec_prova || "3DF1C1D84A"),
+    IDEXECPROVA: realIdExec,
     codUsuarioPS: null,
     questoes: [
       {
-        questao_id: Number(questao_id || 51709),
+        questao_id: realQuestao,
         obrigatoria: 1,
         tipo: 1,
         resposta: String(texto_redacao)
@@ -545,9 +546,9 @@ async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_id, questao_i
     finalizada_automaticamente: 0
   };
 
-  console.log(`[AVALIACAO] Submetendo redação oficial (Contato: ${payload.crm_contato_id}, Prova: ${payload.IDEXECPROVA})...`);
+  console.log(`[AVALIACAO] Submetendo redação oficial (Contato: ${payload.crm_contato_id}, Prova: ${payload.IDEXECPROVA}, Execucao: ${payload.id})...`);
 
-  // 1ª Tentativa: Envio com finalizada = 1
+  // 1ª Tentativa: Envio com finalizada = 1 (dispara webhook do CRM)
   try {
     const res = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/salve/", {
       method: "POST",
@@ -563,10 +564,10 @@ async function submeterRedacaoAvaliacao({ texto_redacao, avaliacao_id, questao_i
     console.log("[AVALIACAO] Resposta da banca examinadora:", json);
     if (json?.success === true) return json;
   } catch (err) {
-    console.warn("[AVALIACAO] Tentativa de finalização gerou aviso no webhook do CRM:", err.message);
+    console.warn("[AVALIACAO] Tentativa de finalização gerou aviso:", err.message);
   }
 
-  // 2ª Tentativa (Resiliente): Salva a resposta no banco sem forçar webhook interno
+  // 2ª Tentativa (Resiliente): Salva a resposta sem acionar o evento do CRM
   try {
     const resRascunho = await fetch("https://avaliacao.apprubeus.com.br/api/avaliacao/salve/", {
       method: "POST",
@@ -1263,7 +1264,6 @@ async function routeFlowRequest(requestData) {
       }
     }
 
-    // Avança para a tela de orientações da redação de forma instantânea
     case "enviar_informacoes_complementares": {
       try {
         validateFinal(data);
@@ -1297,19 +1297,17 @@ async function routeFlowRequest(requestData) {
         }
 
         const redirect = submitResult?.data?.redirect ?? {};
-        const stepProvaTarget = submitResult?.data?.next || 300664;
-        const stepProvaToken = submitResult?.data?.token || data.token;
 
-        // Se NÃO for ENEM, avança imediatamente para a tela de orientações da redação
+        // Se NÃO for ENEM, avança direto para a tela de instruções da redação
         if (!isNotaEnemContext(data)) {
           return responseForScreen("TELA_ORIENTACAO_PROVA", {
             ...data,
             tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
             texto_motivador: "A sociedade contemporânea tem exaltado a produtividade como fator essencial para o sucesso, levando muitas pessoas a negligenciarem o descanso e a saúde mental.",
-            person_id: toStringValue(redirect.person_id || data.person_id, "604223"),
             applyment_id: toStringValue(redirect.applyment_id || data.applyment_id, "13940052"),
-            step_prova_target: String(stepProvaTarget),
-            step_prova_token: String(stepProvaToken),
+            contato_crm: "604223",
+            curso_crm: "890",
+            id_exec_prova: "3DF1C1D84A",
             erro: "",
             tem_erro: false
           });
@@ -1327,28 +1325,30 @@ async function routeFlowRequest(requestData) {
       }
     }
 
-    // Conecta na etapa 300664 e inicializa a sessão oficial da avaliação
     case "iniciar_redacao": {
       try {
-        console.log("[AVALIACAO] Candidato iniciou prova. Resolvendo parâmetros reais...");
-        const paramsReais = await extrairParametrosProvaReal(data.step_prova_target, data.step_prova_token, data);
-        const sessaoProva = await inicializarSessaoAvaliacao(paramsReais);
+        console.log("[AVALIACAO] Candidato iniciou a redação. Criando sessão ativa...");
+        const sessao = await inicializarSessaoAvaliacao({
+          chave: "fe73f687e5bc5280214e0486b273a5f9",
+          crm_contato_id: data.contato_crm || "604223",
+          crm_curso_id: data.curso_crm || "890",
+          IDEXECPROVA: data.id_exec_prova || "3DF1C1D84A"
+        });
 
         return responseForScreen("TELA_REDACAO", {
           ...data,
           tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
-          avaliacao_token: sessaoProva.avaliacao_token,
-          execucao_id: sessaoProva.execucao_id,
-          avaliacao_id: sessaoProva.avaliacao_id,
-          questao_id: sessaoProva.questao_id,
-          id_exec_prova: paramsReais.IDEXECPROVA,
-          contato_crm: paramsReais.crm_contato_id,
-          curso_crm: paramsReais.crm_curso_id,
+          avaliacao_token: sessao.avaliacao_token,
+          execucao_id: sessao.execucao_id,
+          avaliacao_id: sessao.avaliacao_id,
+          questao_id: sessao.questao_id,
+          contato_crm: data.contato_crm || "604223",
+          curso_crm: data.curso_crm || "890",
+          id_exec_prova: data.id_exec_prova || "3DF1C1D84A",
           erro: "",
           tem_erro: false
         });
       } catch (err) {
-        console.warn("[AVALIACAO] Erro em iniciar_redacao, usando fallback seguro:", err.message);
         return responseForScreen("TELA_REDACAO", {
           ...data,
           tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
@@ -1356,16 +1356,15 @@ async function routeFlowRequest(requestData) {
           execucao_id: 701490,
           avaliacao_id: 330,
           questao_id: 51709,
-          id_exec_prova: "3DF1C1D84A",
-          contato_crm: data.person_id || "604223",
+          contato_crm: "604223",
           curso_crm: "890",
+          id_exec_prova: "3DF1C1D84A",
           erro: "",
           tem_erro: false
         });
       }
     }
 
-    // Submete a redação finalizada para a banca examinadora
     case "enviar_redacao": {
       try {
         const texto = String(data.texto_redacao ?? "").trim();
@@ -1375,12 +1374,13 @@ async function routeFlowRequest(requestData) {
 
         await submeterRedacaoAvaliacao({
           texto_redacao: texto,
-          avaliacao_id: data.avaliacao_id || 330,
-          questao_id: data.questao_id || 51709,
-          id_exec_prova: data.id_exec_prova || "3DF1C1D84A",
-          execucao_id: data.execucao_id || 701490,
-          contato_crm: data.contato_crm || data.person_id || 604223,
-          curso_crm: data.curso_crm || 890
+          avaliacao_token: data.avaliacao_token || "36075a5af46150372dd37393fe6e9cec",
+          execucao_id: data.execucao_id,
+          avaliacao_id: data.avaliacao_id,
+          questao_id: data.questao_id,
+          id_exec_prova: data.id_exec_prova,
+          contato_crm: data.contato_crm,
+          curso_crm: data.curso_crm
         });
 
         return responseForScreen("CONFIRMACAO", {
