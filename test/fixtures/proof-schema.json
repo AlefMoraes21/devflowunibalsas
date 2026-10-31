@@ -2,61 +2,427 @@
   "id": 300664,
   "content": [
     {
-      "id": 3940382,
-      "type": "button",
-      "label": "Iniciar prova",
-      "forwardData": [
+      "id": 3940378,
+      "type": "container",
+      "label": "Prova disponível",
+      "related_component_id": null,
+      "container_content": [
         {
-          "link": "https://avaliacao.apprubeus.com.br/api/avaliacao/linkProva",
-          "parameters": [
+          "id": 3940379,
+          "type": "text",
+          "label": "Texto - Prova Disponível",
+          "related_component_id": null
+        },
+        {
+          "id": 3940380,
+          "type": "text",
+          "label": "Texto - Descrição",
+          "related_component_id": null
+        },
+        {
+          "id": 3940381,
+          "type": "container",
+          "label": "CTA",
+          "related_component_id": null,
+          "container_content": [
             {
-              "name": "chave",
-              "field_id": 38593,
-              "parameter_type_id": 1,
-              "fixed_value": null
+              "id": 3940382,
+              "type": "button",
+              "label": "Iniciar prova",
+              "forwardData": [
+                {
+                  "id": 54155,
+                  "link": "https://avaliacao.apprubeus.com.br/api/avaliacao/linkProva",
+                  "logics": [
+                    {
+                      "id": 221109,
+                      "field_id": null,
+                      "stage_id": null,
+                      "action_id": null,
+                      "report_id": null,
+                      "created_at": "2022-08-29 12:39:37",
+                      "deleted_at": null,
+                      "updated_at": "2022-08-29 12:39:37",
+                      "feedback_id": null,
+                      "fixed_value": null,
+                      "redirect_id": 54155,
+                      "component_id": null,
+                      "data_layer_id": null,
+                      "rubeus_pay_id": null,
+                      "rule_logic_id": 4,
+                      "field_compare_id": 38590,
+                      "field_settings_id": null,
+                      "rubeus_action_events_id": null,
+                      "totvs_instant_payment_id": null,
+                      "integration_edu_connect_pay_id": null,
+                      "integration_external_system_id": null,
+                      "integration_cielo_transparent_id": null
+                    }
+                  ],
+                  "new_tab": 0,
+                  "page_id": null,
+                  "popup_id": null,
+                  "position": 0,
+                  "stage_id": null,
+                  "created_at": "2022-08-29T15:39:37.000000Z",
+                  "deleted_at": null,
+                  "parameters": [
+                    {
+                      "id": 12873,
+                      "name": "chave",
+                      "field_id": 38593,
+                      "created_at": "2022-08-29T15:39:37.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:04:53.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54155,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 12874,
+                      "name": "codigoContato",
+                      "field_id": 38608,
+                      "created_at": "2022-08-29T15:39:37.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:04:53.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54155,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 12875,
+                      "name": "codigoOferta",
+                      "field_id": 38552,
+                      "created_at": "2022-08-29T15:39:37.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:04:53.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54155,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 21356,
+                      "name": "origemContato",
+                      "field_id": null,
+                      "created_at": "2022-11-07T14:04:53.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:04:53.000000Z",
+                      "fixed_value": "121",
+                      "redirect_id": 54155,
+                      "parameter_type_id": 2
+                    },
+                    {
+                      "id": 21357,
+                      "name": "idExecProva",
+                      "field_id": 38590,
+                      "created_at": "2022-11-07T14:04:53.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:04:53.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54155,
+                      "parameter_type_id": 1
+                    }
+                  ],
+                  "updated_at": "2023-03-09T19:15:24.000000Z",
+                  "component_id": 174883,
+                  "link_field_id": null,
+                  "logic_enabled": 1,
+                  "use_parameters": 1,
+                  "action_logic_id": 1,
+                  "redirect_type_id": 5,
+                  "condition_logic_id": 2,
+                  "link_field_type_id": 2
+                }
+              ],
+              "related_component_id": 174883
             },
             {
-              "name": "codigoContato",
-              "field_id": 38608,
-              "parameter_type_id": 1,
-              "fixed_value": null
-            },
-            {
-              "name": "codigoOferta",
-              "field_id": 38552,
-              "parameter_type_id": 1,
-              "fixed_value": null
-            },
-            {
-              "name": "origemContato",
-              "field_id": null,
-              "parameter_type_id": 2,
-              "fixed_value": "121"
-            },
-            {
-              "name": "idExecProva",
-              "field_id": 38590,
-              "parameter_type_id": 1,
-              "fixed_value": null
+              "id": 3940383,
+              "type": "button",
+              "label": "Continuar Prova",
+              "forwardData": [
+                {
+                  "id": 54156,
+                  "link": "https://avaliacao.apprubeus.com.br/api/avaliacao/linkProva",
+                  "logics": [],
+                  "new_tab": 0,
+                  "page_id": null,
+                  "popup_id": null,
+                  "position": 0,
+                  "stage_id": null,
+                  "created_at": "2022-08-29T15:39:38.000000Z",
+                  "deleted_at": null,
+                  "parameters": [
+                    {
+                      "id": 12877,
+                      "name": "chave",
+                      "field_id": 38593,
+                      "created_at": "2022-08-29T15:39:38.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:06:38.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54156,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 12878,
+                      "name": "codigoContato",
+                      "field_id": 38608,
+                      "created_at": "2022-08-29T15:39:38.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:06:38.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54156,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 12879,
+                      "name": "codigoOferta",
+                      "field_id": 38552,
+                      "created_at": "2022-08-29T15:39:38.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:06:38.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54156,
+                      "parameter_type_id": 1
+                    },
+                    {
+                      "id": 21433,
+                      "name": "origemContato",
+                      "field_id": null,
+                      "created_at": "2022-11-07T14:06:38.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:06:38.000000Z",
+                      "fixed_value": "121",
+                      "redirect_id": 54156,
+                      "parameter_type_id": 2
+                    },
+                    {
+                      "id": 21434,
+                      "name": "idExecProva",
+                      "field_id": 38590,
+                      "created_at": "2022-11-07T14:06:38.000000Z",
+                      "deleted_at": null,
+                      "updated_at": "2022-11-07T14:06:38.000000Z",
+                      "fixed_value": null,
+                      "redirect_id": 54156,
+                      "parameter_type_id": 1
+                    }
+                  ],
+                  "updated_at": "2023-03-09T19:15:24.000000Z",
+                  "component_id": 174884,
+                  "link_field_id": null,
+                  "logic_enabled": 0,
+                  "use_parameters": 1,
+                  "action_logic_id": null,
+                  "redirect_type_id": 5,
+                  "condition_logic_id": null,
+                  "link_field_type_id": 2
+                }
+              ],
+              "related_component_id": 174884
             }
           ]
         }
       ]
     },
     {
+      "id": 3940384,
+      "type": "container",
+      "label": "Aguardando correção",
+      "related_component_id": null,
+      "container_content": [
+        {
+          "id": 3940385,
+          "type": "text",
+          "label": "Texto - Aguardando correção",
+          "related_component_id": null
+        },
+        {
+          "id": 3940386,
+          "type": "text",
+          "label": "Texto - Realizou a prova",
+          "related_component_id": null
+        },
+        {
+          "id": 3940387,
+          "type": "container",
+          "label": "CTA",
+          "related_component_id": null,
+          "container_content": [
+            {
+              "id": 3940388,
+              "type": "button",
+              "label": "Portal do candidato",
+              "forwardData": [
+                {
+                  "id": 54152,
+                  "link": null,
+                  "logics": [],
+                  "new_tab": 0,
+                  "page_id": null,
+                  "popup_id": null,
+                  "position": 0,
+                  "stage_id": null,
+                  "created_at": "2022-08-29T15:39:37.000000Z",
+                  "deleted_at": null,
+                  "parameters": [],
+                  "updated_at": "2022-08-29T15:39:37.000000Z",
+                  "component_id": 174878,
+                  "link_field_id": null,
+                  "logic_enabled": null,
+                  "use_parameters": 0,
+                  "action_logic_id": null,
+                  "redirect_type_id": 4,
+                  "condition_logic_id": null,
+                  "link_field_type_id": null
+                }
+              ],
+              "related_component_id": 174878
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3940389,
+      "type": "container",
+      "label": "Reprovado",
+      "related_component_id": null,
+      "container_content": [
+        {
+          "id": 3940390,
+          "type": "text",
+          "label": "Título",
+          "related_component_id": null
+        },
+        {
+          "id": 3940391,
+          "type": "text",
+          "label": "Descrição",
+          "related_component_id": null
+        },
+        {
+          "id": 3940392,
+          "type": "container",
+          "label": "CTA",
+          "related_component_id": null,
+          "container_content": [
+            {
+              "id": 3940393,
+              "type": "button",
+              "label": "Portal do candidato",
+              "forwardData": [
+                {
+                  "id": 54152,
+                  "link": null,
+                  "logics": [],
+                  "new_tab": 0,
+                  "page_id": null,
+                  "popup_id": null,
+                  "position": 0,
+                  "stage_id": null,
+                  "created_at": "2022-08-29T15:39:37.000000Z",
+                  "deleted_at": null,
+                  "parameters": [],
+                  "updated_at": "2022-08-29T15:39:37.000000Z",
+                  "component_id": 174878,
+                  "link_field_id": null,
+                  "logic_enabled": null,
+                  "use_parameters": 0,
+                  "action_logic_id": null,
+                  "redirect_type_id": 4,
+                  "condition_logic_id": null,
+                  "link_field_type_id": null
+                }
+              ],
+              "related_component_id": 174878
+            },
+            {
+              "id": 3940394,
+              "type": "button",
+              "label": "Refazer a minha prova",
+              "forwardData": [
+                {
+                  "id": 1327318,
+                  "link": null,
+                  "logics": [],
+                  "new_tab": 0,
+                  "page_id": null,
+                  "popup_id": 762,
+                  "position": 0,
+                  "stage_id": null,
+                  "created_at": "2026-09-09T14:31:17.000000Z",
+                  "deleted_at": null,
+                  "parameters": [],
+                  "updated_at": "2026-09-09T14:31:17.000000Z",
+                  "component_id": 3940394,
+                  "link_field_id": null,
+                  "logic_enabled": null,
+                  "use_parameters": 0,
+                  "action_logic_id": null,
+                  "redirect_type_id": 7,
+                  "condition_logic_id": null,
+                  "link_field_type_id": null
+                }
+              ],
+              "related_component_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3127718,
       "type": "text",
-      "field_id": 38590,
+      "label": "TOKENPROVA",
+      "field_id": 38593,
+      "value_now": "unit-key"
+    },
+    {
+      "id": 3127719,
+      "type": "text",
       "label": "IDEXECPROVA",
+      "field_id": 38590,
       "value_now": "UNIT-EXEC-CODE"
     },
     {
+      "id": 3127720,
       "type": "text",
-      "field_id": 38620,
       "label": "IDPROVAINSCRITO",
+      "field_id": 38620,
       "value_now": "unit-proof"
+    },
+    {
+      "id": 3127721,
+      "type": "text",
+      "label": "Status da Inscrição",
+      "field_id": 38639
+    },
+    {
+      "id": 3127722,
+      "type": "text",
+      "label": "Status da prova",
+      "field_id": 38592,
+      "value_now": "Não iniciada"
+    },
+    {
+      "id": 3127723,
+      "type": "text",
+      "label": "Status da opção",
+      "field_id": 38623,
+      "value_now": "0"
     }
   ],
   "applicantData": [
+    {
+      "field_id": 38590,
+      "value": "UNIT-EXEC-CODE"
+    },
+    {
+      "field_id": 38620,
+      "value": "unit-proof"
+    },
     {
       "field_id": 38593,
       "value": "unit-key"
@@ -70,8 +436,12 @@
       "value": "unit-offer"
     },
     {
-      "field_id": 38590,
-      "value": "OLD"
+      "field_id": 38592,
+      "value": "Não iniciada"
+    },
+    {
+      "field_id": 38623,
+      "value": "0"
     }
   ]
 }
