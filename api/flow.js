@@ -1,3 +1,4 @@
+import {enemAverage,enemYears} from "./enem.js";
 import {portalConfirmsDelivery} from "./proof-binding.js";
 import {promptText} from "./prompt-text.js";
 import {createJobEngine} from "./jobs.js";
@@ -118,6 +119,9 @@ const SCREEN_KEYS = {
 
 for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_KEYS[screen].push("processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento")}
 
+FORM_DEFAULTS.CURSO_ENEM=FORM_DEFAULTS.CURSO_INTERESSE;
+SCREEN_KEYS.CURSO_ENEM=[...SCREEN_KEYS.CURSO_INTERESSE,"processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento"];
+
 const USER_FIELDS = new Set([
   "aceite_privacidade",
   "ano_enem",
@@ -177,7 +181,7 @@ const ORIGENS_PADRAO = [
 
 const PROCESSO_NOTA_ENEM_ID = "20386";
 const ANOS_ENEM = [
-  "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018",
+  "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018",
   "2017", "2016", "2015", "2014", "2013", "2012", "2011", "2010"
 ].map(a => ({ id: a, title: a }));
 
@@ -622,7 +626,7 @@ async function buildCourseScreenData(formResponse, processId) {
     campo_enem_linguagens_id: toStringValue(eLing?.field_id),
     campo_enem_redacao_id: toStringValue(eRed?.field_id),
     campo_enem_media_id: toStringValue(eMed?.field_id),
-    anos_enem: ANOS_ENEM,
+    anos_enem: notaEnem?enemYears(eAno,ANOS_ENEM):ANOS_ENEM,
     erro: ""
   };
 }
@@ -648,6 +652,7 @@ function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
   const button = form ? findButton(form, ["Concluir"]) : null;
 
   const redirect = prev?.data?.redirect ?? {};
+  if(isNotaEnemContext(dataAnterior)&&(!form?.id||!button?.button))throw new Error("Não foi possível confirmar o formulário final do ENEM. A operação não será reenviada automaticamente.");
 
   return {
     token: String(token),
@@ -712,10 +717,11 @@ function openState(value, screen) {
 }
 
 function responseForScreen(screen, data) {
+  if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
-  const actionByScreen={QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
-  const labelByScreen={QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
+  const actionByScreen={CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
+  const labelByScreen={CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
   // Navigation belongs to the destination screen, never to the previous form.
   if(actionByScreen[screen]){
@@ -726,7 +732,11 @@ function responseForScreen(screen, data) {
     next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
   }
   if(screen==="TELA_ORIENTACAO_PROVA"&&data.prepared_existing&&!(next.processando&&next.job_id))next.rotulo_rodape="Continuar para redação";
-  next.titulo_processamento=screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
+  if(screen==="CURSO_ENEM"&&data.continuacao_enem&&!(next.processando&&next.job_id)){
+    next.editavel=false;next.acao_rodape="retomar_etapa_enem";next.rotulo_rodape="Retomar inscrição";
+    next.mensagem_processamento="Suas notas foram recebidas. Vamos consultar a próxima etapa sem enviá-las novamente.";
+  }
+  next.titulo_processamento=screen==="CURSO_ENEM"?"Estamos registrando suas notas":screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
     next.processando=true;next.editavel=false;next.job_id="";next.acao_rodape="verificar_entrega";next.rotulo_rodape="Verificar atualização";next.titulo_processamento="Redação recebida";
@@ -755,7 +765,7 @@ function responseForScreen(screen, data) {
     Object.entries(next).filter(([k]) => !k.startsWith("valor_") && k !== "estado" && k !== "values")
   );
 
-  if (["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO"].includes(screen)) {
+  if (["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO"].includes(screen)) {
     next.estado = sealState(screen, trusted);
   }
 
@@ -875,6 +885,7 @@ async function routeFlowRequest(requestData) {
       "enviar_dados_basicos",
       "buscar_turnos",
       "calcular_media",
+      "retomar_etapa_enem",
       "avancar_curso_interesse",
       "enviar_curso",
       "enviar_documento_enem",
@@ -1032,7 +1043,7 @@ async function routeFlowRequest(requestData) {
             coligada_valor: toStringValue(nextOptions[toStringValue(data.campo_coligada_id)]?.value),
             filial_valor: toStringValue(nextOptions[toStringValue(data.campo_filial_id)]?.value),
             tipo_curso_valor: toStringValue(nextOptions[toStringValue(data.campo_tipo_curso_id)]?.value),
-            anos_enem: ANOS_ENEM,
+            anos_enem: data.anos_enem??ANOS_ENEM,
             erro: ""
           });
         }
@@ -1045,7 +1056,8 @@ async function routeFlowRequest(requestData) {
         const campoPoloId = notaEnem ? toStringValue(data.campo_polo_id, "38550") : toStringValue(data.campo_polo_id);
         const poloValor = notaEnem ? toStringValue(data.polo_valor, "01") : toStringValue(data.polo_valor);
         const mediaCalculada = calcMediaEnemAuto(data);
-        const mediaFinal = mediaCalculada ?? (data.media_enem ? Number(String(data.media_enem).replace(",", ".")) : null);
+        const mediaFinal = notaEnem?enemAverage(data):mediaCalculada;
+        if(notaEnem&&!(data.anos_enem??ANOS_ENEM).some(y=>String(y.id)===String(data.ano_enem)))throw new Error("Selecione um ano de ENEM disponível.");
 
         const fields = compactFields([
           fieldItem(data.campo_curso_id, toStringValue(data.curso_id)),
@@ -1069,22 +1081,14 @@ async function routeFlowRequest(requestData) {
         ]);
 
         const submit = await submitForm(data.button_id, fields, data.token);
-        const nextToken = submit.data?.token ?? data.token;
+        const nextToken = submit.token ?? submit.data?.token ?? data.token;
         const redirect = submit?.data?.redirect ?? {};
 
-        if (notaEnem) {
-          return responseForScreen("DOCUMENTOS_ENEM", {
-            token: String(nextToken),
-            target: String(submit.data.next),
-            local: String(submit.data.local),
-            person_id: toStringValue(redirect.person_id),
-            applyment_id: toStringValue(redirect.applyment_id),
-            processo_seletivo_id: toStringValue(data.processo_seletivo_id),
-            eh_nota_enem: true,
-            erro: ""
-          });
-        }
 
+        if(notaEnem){
+          flowContext.getStore().audit={enemContinuation:{next:submit.data.next,local:submit.data.local,token:nextToken,processo_seletivo_id:data.processo_seletivo_id}};
+          console.info(JSON.stringify({event:"enem_course_received",process:data.processo_seletivo_id,next:submit.data.next}));
+        }
         let nextForm = null;
         try {
           nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
@@ -1092,7 +1096,7 @@ async function routeFlowRequest(requestData) {
           console.warn("Aviso: getForm demorou, avançando com mapeamento resiliente:", formErr.message);
         }
 
-        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, submit, data));
+        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, submit, notaEnem?{...data,token:nextToken}:data));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1100,6 +1104,23 @@ async function routeFlowRequest(requestData) {
       }
     }
 
+    case "retomar_etapa_enem": {
+      if(!isNotaEnemContext(data)||!data.continuacao_enem||String(data.continuacao_enem.processo_seletivo_id)!==String(data.processo_seletivo_id))throw new Error("Retomada não autorizada nesta etapa.");
+      const next=data.continuacao_enem;
+      flowContext.getStore().audit={enemContinuation:next};
+      try{
+        const form=await getForm(next.next,next.local,next.token);
+        if(Number(form.data?.form?.id)!==Number(next.next))throw new Error("O Rubeus não retornou a etapa esperada do ENEM.");
+        return responseForScreen("QUASE_LA",buildAlmostThereScreenData(form,{data:{next:next.next,local:next.local}},{...data,token:next.token}));
+      }catch(e){return responseForScreen("CURSO_ENEM",{...data,erro:e.message})}
+    }
+    case "calcular_media": {
+      if(!isNotaEnemContext(data))return responseForScreen("CURSO_INTERESSE",courseRetryData(data,"Esta ação pertence ao ENEM."));
+      try{
+        const media=enemAverage(data,{checkTyped:false});
+        return responseForScreen("CURSO_INTERESSE",{...data,values:{...data,media_enem:media},erro:""});
+      }catch(e){return responseForScreen("CURSO_INTERESSE",courseRetryData(data,e.message))}
+    }
     case "enviar_documento_enem": {
       return responseForScreen("PENDENTE",{titulo:"Documentos do ENEM",mensagem:"Conclua o envio dos documentos pelo Portal do candidato. O recebimento no Rubeus ainda não foi confirmado por este canal.",inscricao_id:toStringValue(data.applyment_id)});
     }
@@ -1145,9 +1166,10 @@ async function routeFlowRequest(requestData) {
           });
         }
 
+        console.info(JSON.stringify({event:"enem_registration",applicationId:String(redirect.applyment_id),process:data.processo_seletivo_id,confirmed:true}));
         return responseForScreen("CONFIRMACAO", {
-          titulo: "Inscrição Realizada! 🎉",
-          mensagem: `Sua inscrição pelo ENEM foi registrada com sucesso sob o protocolo Nº ${redirect.applyment_id || "confirmado"}.\nNossos consultores entrarão em contato em breve.`,
+          titulo: "Obrigado pelo seu cadastro!",
+          mensagem: `Sua inscrição pelo ENEM foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve. A validação das notas e os documentos são acompanhados no Portal do candidato.`,
           inscricao_id: String(redirect.applyment_id || "")
         });
       } catch (e) {
@@ -1276,7 +1298,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-binding-1.2.1" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-enem-1.3.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
