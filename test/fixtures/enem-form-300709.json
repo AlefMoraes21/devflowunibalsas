@@ -1,0 +1,120 @@
+{
+  "id": 300709,
+  "local": "step",
+  "content": {
+    "inputs": [
+      {
+        "field_id": 38567,
+        "label": "CPF",
+        "value": null
+      },
+      {
+        "field_id": 38780,
+        "label": "Nacionalidade",
+        "value": null
+      },
+      {
+        "field_id": 251544,
+        "label": "Você já concluiu o ensino médio?",
+        "value": null
+      },
+      {
+        "field_id": 38575,
+        "label": "Possui alguma deficiência?",
+        "value": null
+      },
+      {
+        "field_id": 38577,
+        "label": "Auditiva",
+        "value": null
+      },
+      {
+        "field_id": 38578,
+        "label": "Fala",
+        "value": null
+      },
+      {
+        "field_id": 38576,
+        "label": "Física",
+        "value": null
+      },
+      {
+        "field_id": 38580,
+        "label": "Intelectual",
+        "value": null
+      },
+      {
+        "field_id": 38579,
+        "label": "Visual",
+        "value": null
+      },
+      {
+        "field_id": 38581,
+        "label": "Mental",
+        "value": null
+      },
+      {
+        "field_id": 38582,
+        "label": "Outras deficiências",
+        "value": null
+      },
+      {
+        "field_id": 38583,
+        "label": "Deficiência motivo outras TOTVS",
+        "value": null
+      },
+      {
+        "field_id": 319427,
+        "label": "Como você ficou sabendo sobre este processo seletivo?",
+        "value": null
+      },
+      {
+        "field_id": 319428,
+        "label": "Outro:",
+        "value": null
+      },
+      {
+        "field_id": 38609,
+        "label": "NUMEROINSCRICAO",
+        "value": null
+      }
+    ],
+    "buttons": [
+      {
+        "button": 3940774,
+        "label": "Concluir"
+      }
+    ]
+  },
+  "querys": [
+    {
+      "query_data": "unit-datasource",
+      "fields": [
+        {
+          "field": 38554
+        },
+        {
+          "field": 38547
+        },
+        {
+          "field": 38553
+        },
+        {
+          "field": 38552
+        },
+        {
+          "field": 38550
+        },
+        {
+          "field": 38611
+        },
+        {
+          "field": 38612
+        },
+        {
+          "field": 38610
+        }
+      ]
+    }
+  ]
+}
