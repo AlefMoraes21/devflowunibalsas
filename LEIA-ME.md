@@ -1,86 +1,74 @@
-# Flow 1.2.1 — contêineres reais e retomada da preparação
+# ENEM 1.3.0 — até a confirmação da inscrição
 
-## Falha corrigida nesta versão
+Esta versão parte do código 1.2.1 conferido no GitHub AlefMoraes21/devflowunibalsas e do flow-waba.json atual do repositório. Não publica mudanças no Git nem no Cloud Run automaticamente.
 
-O erro PROVA_VINCULO / Não foi possível identificar os parâmetros atuais da prova ocorreu porque o leitor não percorria container_content. Os botões do formulário real ficam em dois contêineres aninhados. A fixture da versão anterior tinha sido achatada e não expunha esse erro. Esta versão preserva a hierarquia capturada na fixture e corrige os leitores do servidor e dos scripts de auditoria.
+## O que muda
 
-Uma tarefa de iniciar_redacao já encerrada como PENDENTE deixa de exibir processamento infinito. Na mesma sessão, ao consultar a tarefa antiga, o servidor oferece Conferir prova existente. Essa ação usa apenas leituras: etapas, passo com execute_stage_query=0 e portal. Não chama /submit, button-click, linkProva, create nem salve. Se houver uma execução distribuída válida e não finalizada, prepara o vínculo assinado e oferece Continuar para redação. Só esse próximo clique abre a sessão da avaliação, verifica o vínculo e mostra o editor, sem repetir /submit.
+- ENEM (processo 20386) usa uma tela exclusiva CURSO_ENEM. As telas anteriores permanecem idênticas ao JSON do GitHub, incluindo privacidade, vestibular, redação e confirmação. DADOS_BASICOS recebe uma nova saída de roteamento para CURSO_ENEM.
+- Curso e notas seguem para Estamos quase lá e depois para Obrigado pelo seu cadastro. O desvio anterior para DOCUMENTOS_ENEM não é usado pelo caminho novo.
+- Nenhum upload ou etapa do portal é implementado nesta entrega. A confirmação da inscrição não significa aprovação das notas nem recebimento dos documentos.
+- Média digitável, opcional. Calcular média consulta apenas o endpoint do Flow, sem chamar o Rubeus. Preenche a média com duas casas, aceita vírgula ou ponto e preserva os demais campos. Se ficar vazia, é calculada ao continuar. Se uma média digitada divergir da média das cinco notas, o usuário recebe a orientação para corrigi-la antes de enviar.
+- Não foi introduzido um gatilho automático em TextInput: o cálculo é disparado pelo link Calcular média ou pelo botão Continuar. Não há atualização automática a cada tecla.
+- Anos vêm das opções devolvidas pelo formulário; a lista de contingência inclui 2026, conforme a captura fornecida.
+- O envio do curso/notas do ENEM é durável e assíncrono, como a conclusão da inscrição. A seleção de curso e o cálculo continuam leves.
+- Se o envio das notas foi confirmado, mas a leitura do formulário final falhou, Retomar inscrição consulta o próximo passo sem reenviar /submit. O destino e token ficam no registro criptografado da tarefa e no estado autenticado. Não há fallback para o botão final do vestibular.
+- O envio da inscrição só mostra sucesso após Rubeus success=true e um identificador de inscrição. Timeout sem confirmação não é convertido em sucesso.
 
-Se a sessão/tarefa tiver expirado, a retomada não é autorizada. Não se deve criar outra inscrição só para contornar essa expiração. A retomada descrita aqui é da preparação da prova; não migra a redação antiga já finalizada em outra execução.
+## Preservação do vestibular
 
+A avaliação, o vínculo da prova, os cookies e a entrega da redação não foram alterados. api/avaliacao.js, cloud-store.js, diagnostics.js, prompt-text.js, proof-binding.js e prova-route.js são idênticos à base conferida. jobs.js só acrescenta as ações da nova tela ENEM; o avanço da tela CURSO_INTERESSE continua síncrono como antes.
 
-## Diagnóstico real da inscrição 13948467
+## Arquivos a atualizar
 
-A auditoria executada pelo proprietário do projeto confirmou que o portal e o Flow se referem à mesma inscrição. A redação foi entregue na execução de avaliação 701942, com IDEXECPROVA 0A14C822CD. O formulário oficial e o formulário do site apontam IDEXECPROVA 79E0602B66, IDPROVAINSCRITO 45287. Essa divergência é suficiente para explicar o portal consultar uma execução diferente daquela que recebeu o texto. Ainda não foi identificado em qual ponto exato do servidor os dois códigos divergiram.
+Servidor: api/flow.js, api/jobs.js, novo api/enem.js e package.json. O ZIP completo também contém os módulos e arquivos de execução anteriores, necessários para implantação por fonte.
+Meta: substitua o JSON pelo flow-waba.json deste pacote. O servidor e o JSON precisam ser atualizados antes do teste. Reabra o Flow para começar uma sessão nova; sessões ENEM antigas não são migradas.
+GitHub: sincronize os arquivos alterados para que um deploy automático posterior não reverta a atualização. Pode versionar também JSON, testes e documentação. Este pacote não foi enviado ao GitHub pela assistência.
 
-A configuração capturada do site mostra que o botão Iniciar prova distribui o caderno via ações TOTVS, consulta os dados e monta o link de avaliação. O campo Status da prova consulta o endpoint de status da avaliação usando a chave e IDEXECPROVA. Não basta obter finalizada=1 de uma execução sem conferir que o portal consulta o mesmo código.
+## Implantação
 
-## Correção implementada
-
-1. Confirma no portal, com o token atual, o número da inscrição e o processo antes de abrir a prova.
-2. Executa uma única ação do botão, com os campos recebidos no formulário.
-3. Relê o passo pelo endpoint do site com execute_stage_query=0, sem executar novamente a distribuição.
-4. Reconstrói o link a partir do forwardData do próprio formulário e dos valores atuais de content/applicantData. O código do redirecionamento anterior não é reutilizado quando diverge do código atual. Chave, candidato, oferta e execução precisam estar presentes; não há fallback para dados de outra inscrição.
-5. Confere o ID da execução retornado pelo módulo de avaliação contra o vínculo confirmado e relê o vínculo antes de mostrar o editor.
-6. Confere outra vez o vínculo antes de entregar. Se ele mudou, bloqueia a entrega; não transfere o texto automaticamente para outra execução.
-7. Preserva cookies desde linkProva até a consulta, trata o código numérico conforme o cliente publicado do site e corrige as entidades HTML no enunciado.
-8. Guarda o recibo de finalização e a auditoria no registro criptografado da tarefa. Não imprime chaves, cookies ou redação nos logs.
-9. Só mostra a confirmação final após o portal da mesma inscrição reconhecer a entrega/correção. Enquanto a avaliação confirmou recebimento, mas o portal não confirmou a atualização, mostra Redação recebida com Verificar atualização. Essa ação faz consultas; não reenvia o texto.
-
-As operações lentas continuam usando a fila e o Firestore já instalados. Não há nova infraestrutura nem dependências npm adicionais.
-
-## Validação
-
-60 testes locais passaram, incluindo o caminho de preparação, entrega e confirmação do portal com uma única gravação, redirecionamento desatualizado, valores de applicantData, rejeição de vínculo alterado, rotação de cookies, códigos numéricos e leitura de recibo sem reenvio. Um teste usa estrutura sanitizada do formulário capturado no REA.
-
-O planejador de recuperação também foi executado com respostas simuladas e verificado para não imprimir credenciais ou texto da redação. Nada desta versão foi executado contra os registros reais pela assistência. O teste no Cloud Run/Rubeus e a validação do novo JSON no editor da Meta ainda são necessários; esses testes locais não são homologação de produção.
-
-## Implantar o servidor
-
-Envie o ZIP ao Cloud Shell. A fila e o banco da 1.1.0 devem continuar configurados. Para atualizar apenas código, preservando configuração existente:
+Envie cloud-run-flow-1.3.0.zip ao Cloud Shell e execute em uma aba livre (não na aba de logs tail):
 
 ```bash
 flow_dir=$(mktemp -d /tmp/unibalsas-deploy-XXXXXX)
-unzip "$HOME/cloud-run-flow-1.2.1.zip" -d "$flow_dir" &&
-gcloud run deploy devflowunibalsas-git --project=talks-servidor --region=southamerica-east1 --source="$flow_dir"
+unzip "$HOME/cloud-run-flow-1.3.0.zip" -d "$flow_dir" &&
+gcloud run deploy devflowunibalsas-git \
+  --project=talks-servidor \
+  --region=southamerica-east1 \
+  --source="$flow_dir"
 ```
 
-Se já usa o JSON da 1.2.0, não precisa atualizar a Meta: o arquivo é idêntico. Para versões anteriores, atualize flow-waba.json. Ele declara titulo_processamento para as três telas dinâmicas. O botão de verificação de entrega usa as ações dinâmicas já existentes. Versão esperada do endpoint: unibalsas-cloudrun-binding-1.2.1.
-
-Sincronize api/, server.js, package.json e os arquivos de implantação no GitHub. O upload ao Cloud Shell não altera o repositório. Testes e documentação são opcionais no runtime; são úteis no controle de versão. O JSON funciona na Meta e pode ser versionado no Git opcionalmente.
-
-## Entrega antiga: planejar antes de recuperar
-
-Atualizar o servidor não migra a redação da execução antiga 701942. Não sobrescreve o código da prova no TOTVS, não altera manualmente o status e não cria uma segunda entrega para esse registro.
-
-Antes de qualquer recuperação, execute o planejador somente de leitura, na pasta extraída:
+Fila, banco e variáveis existentes continuam necessários. Não é necessário executar implantar.sh para criar infraestrutura outra vez.
 
 ```bash
-node "$flow_dir/planejar-recuperacao.mjs"
+curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api/flow
 ```
 
-O padrão aponta para a tarefa já entregue informada no chat. Para outra tarefa, passe o ID como primeiro argumento. O script consulta a configuração do serviço e a tarefa criptografada com as permissões do proprietário; as chaves ficam apenas em memória. O plano inclui origem, destino, número da inscrição, tamanho/hash do texto, hash do enunciado, chave de definição compatível (somente booleano) e se a entrega original ocorreu dentro do prazo. Ele NÃO chama submit, linkProva, create ou salve.
+Versão esperada: unibalsas-cloudrun-enem-1.3.0.
 
-A recuperação de uma redação já entregue entre duas execuções é uma operação separada e precisa ser revisada/autorizada com esses dados. O mecanismo de recuperação que efetivamente grava não está incluído neste pacote. Não se deve reaproveitar o texto em uma questão/enunciado diferente nem sobrescrever uma execução já finalizada. Os registros das tarefas têm retenção e podem ser removidos por TTL; por isso, o plano pode ficar indisponível se a tarefa expirar.
+## Validação realizada
 
-## Logs para uma tentativa nova
+65 testes locais passaram: regressões da prova, notas decimais/zero/mil, validação de média, ano 2026, caminho ENEM com contratos sanitizados dos passos 300708 e 300709, repetição de clique/tarefa sem novo submit e retomada somente por leitura após falha no formulário final. O teste de preservação compara o hash de cada tela anterior com o JSON efetivamente lido do GitHub.
+
+As chamadas Google/Rubeus dos testes são simuladas. Nenhuma inscrição foi criada durante esta alteração. A importação/compilação do JSON na Meta e o teste integrado real ainda precisam ser feitos. Consultas atuais à documentação Meta retornaram HTTP 429; foram usados os conteúdos oficiais capturados anteriormente para os componentes e ações já conhecidos. Não há promessa de cálculo automático por digitação.
+
+## Teste integrado sugerido
+
+1. Reabrir um Flow novo com Nota do ENEM - 2027/1.
+2. Preencher dados básicos e selecionar curso/turno.
+3. Preencher inscrição, ano e cinco notas; testar Calcular média e editar uma nota depois para conferir validação.
+4. Continuar, consultar o andamento se necessário e preencher Estamos quase lá.
+5. Concluir e conferir o protocolo no Flow e a inscrição no CRM.
+6. O portal pode continuar mostrando Checando as notas / Validando e Documentos inscrição / Pendentes. Esta versão não conclui essas etapas posteriores.
+
+## Logs
 
 ```bash
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="proof_binding" OR jsonPayload.event="proof_resume" OR jsonPayload.event="proof_receipt" OR jsonPayload.event="proof_portal_check" OR jsonPayload.event="flow_job" OR jsonPayload.event="flow_error")' --project=talks-servidor --freshness=30m --limit=40 --format=json
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="enem_course_received" OR jsonPayload.event="enem_registration" OR jsonPayload.event="flow_job" OR jsonPayload.event="rubeus_error" OR jsonPayload.event="flow_error" OR jsonPayload.event="flow_worker_error")' --project=talks-servidor --freshness=24h --limit=80 --order=desc --format=json
 ```
 
-proof_binding registra o código atual usado na abertura. proof_receipt registra a execução e o código efetivamente finalizados. proof_portal_check registra se o portal confirmou a atualização. Esses dados devem coincidir para a mesma inscrição.
+## Fontes e contratos
 
-## Limites
-
-A rel leitura usa o estado que o servidor devolve; não é uma transação distribuída com o TOTVS. Se um sistema externo redistribuir a prova durante o processo, a versão bloqueia o vínculo divergente e pede conferência. O worker não repete automaticamente uma gravação de resultado incerto. A recuperação de falha entre gravar no Rubeus e guardar o recibo segue exigindo conferência manual.
-
-A integração de documentos ENEM permanece pendente. As tarefas usam a configuração de TTL de duas horas, a trava de entrega dura sete dias e o estado do Flow é autenticado por até três horas, respeitando o prazo efetivo da avaliação para a entrega. Uma instância mínima continua aquecida, com custos correspondentes.
-
-## Fontes e evidência
-
-O passo capturado do site mapeia IDEXECPROVA para BEXECPROVA e Status da prova para https://avaliacao.apprubeus.com.br/api/avaliacao/status. O JavaScript público de execução foi relido com REA: https://avaliacao.apprubeus.com.br/17-es2015.913b512825323118bce3.js (SHA-256 6e15cef6f0dcb2dc6e8781d87878870fb5a7755326c9beff9874f0348081bb6d). Não foi encontrado nesse trecho um callback separado do frontend que pudesse substituir a conferência de vínculo.
-
-API oficial de metadados: https://docs.rubeus.com.br/api_im/listagem/
-Métodos de formulário: https://docs.rubeus.com.br/api_im/metodosdeinscricao/
-Fila: https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks
+- API de formulários e submissão: https://docs.rubeus.com.br/api_im/metodosdeinscricao/
+- Componentes Meta: https://developers.facebook.com/documentation/business-messaging/whatsapp/flows/guides/components
+- JSON e ações Meta: https://developers.facebook.com/docs/whatsapp/flows/reference/flowjson/
+- Captura anterior do site: passos 300707 (dados básicos), 300708 (curso/notas), 300709 (finalização) e telas fornecidas pelo usuário nesta revisão. Os campos e botões da integração continuam sendo obtidos do formulário oficial.
