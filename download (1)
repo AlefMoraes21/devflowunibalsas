@@ -2,6 +2,5 @@
 node_modules
 test
 *.md
-implantar.sh
 flow-waba.json
-planejar-recuperacao.mjs
+implantar.sh

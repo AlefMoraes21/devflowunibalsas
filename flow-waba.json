@@ -8,8 +8,10 @@
     ],
     "DADOS_BASICOS": [
       "CURSO_INTERESSE",
+      "CURSO_ENEM",
       "OPTIN_SCREEN_screen_dhaobf",
-      "PENDENTE"
+      "PENDENTE",
+      "CURSO_INGRESSO"
     ],
     "OPTIN_SCREEN_screen_dhaobf": [],
     "CURSO_INTERESSE": [
@@ -35,7 +37,15 @@
       "PENDENTE"
     ],
     "CONFIRMACAO": [],
-    "PENDENTE": []
+    "PENDENTE": [],
+    "CURSO_ENEM": [
+      "QUASE_LA",
+      "PENDENTE"
+    ],
+    "CURSO_INGRESSO": [
+      "QUASE_LA",
+      "PENDENTE"
+    ]
   },
   "screens": [
     {
@@ -591,6 +601,590 @@
                   }
                 },
                 "enabled": "${data.turno_visivel}"
+              }
+            ],
+            "init-values": {
+              "curso_id": "${data.valor_curso_id}",
+              "turno_id": "${data.valor_turno_id}",
+              "numero_inscricao_enem": "${data.valor_numero_inscricao_enem}",
+              "ano_enem": "${data.valor_ano_enem}",
+              "nota_natureza_enem": "${data.valor_nota_natureza_enem}",
+              "nota_humanas_enem": "${data.valor_nota_humanas_enem}",
+              "nota_matematica_enem": "${data.valor_nota_matematica_enem}",
+              "nota_linguagens_enem": "${data.valor_nota_linguagens_enem}",
+              "nota_redacao_enem": "${data.valor_nota_redacao_enem}",
+              "media_enem": "${data.valor_media_enem}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CURSO_INGRESSO",
+      "title": "Curso de interesse",
+      "terminal": false,
+      "data": {
+        "cursos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turnos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turno_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "eh_nota_enem": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "anos_enem": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_curso_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_turno_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_numero_inscricao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_ano_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_natureza_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_humanas_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_matematica_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_linguagens_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_redacao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_media_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "processando": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "editavel": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "consultar_tarefa"
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Verificar andamento"
+        },
+        "mensagem_processamento": {
+          "type": "string",
+          "__example__": "Estamos conferindo seus dados."
+        },
+        "job_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "titulo_processamento": {
+          "type": "string",
+          "__example__": "Estamos preparando sua próxima etapa"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_curso",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "If",
+                "condition": "${data.editavel} == true",
+                "then": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Curso de interesse"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "Conte-nos mais detalhes sobre o curso de seu interesse!"
+                  },
+                  {
+                    "type": "Dropdown",
+                    "label": "Curso",
+                    "name": "curso_id",
+                    "data-source": "${data.cursos}",
+                    "required": true,
+                    "on-select-action": {
+                      "name": "data_exchange",
+                      "payload": {
+                        "acao": "buscar_turnos",
+                        "estado": "${data.estado}",
+                        "curso_id": "${form.curso_id}"
+                      }
+                    }
+                  },
+                  {
+                    "type": "If",
+                    "condition": "${data.turno_visivel} == true",
+                    "then": [
+                      {
+                        "type": "Dropdown",
+                        "label": "Turno",
+                        "name": "turno_id",
+                        "data-source": "${data.turnos}",
+                        "required": true
+                      }
+                    ],
+                    "else": []
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "TextHeading",
+                    "text": "${data.titulo_processamento}"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.mensagem_processamento}"
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "Verificar o andamento não envia seus dados novamente."
+                  }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "${data.rotulo_rodape}",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "${data.acao_rodape}",
+                    "curso_id": "${form.curso_id}",
+                    "turno_id": "${form.turno_id}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ],
+            "init-values": {
+              "curso_id": "${data.valor_curso_id}",
+              "turno_id": "${data.valor_turno_id}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CURSO_ENEM",
+      "title": "Curso e notas do ENEM",
+      "terminal": false,
+      "data": {
+        "cursos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turnos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "turno_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "eh_nota_enem": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "anos_enem": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_curso_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_turno_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_numero_inscricao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_ano_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_natureza_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_humanas_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_matematica_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_linguagens_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_nota_redacao_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_media_enem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "processando": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "editavel": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "consultar_tarefa"
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Verificar andamento"
+        },
+        "mensagem_processamento": {
+          "type": "string",
+          "__example__": "Estamos conferindo seus dados."
+        },
+        "job_id": {
+          "type": "string",
+          "__example__": ""
+        },
+        "titulo_processamento": {
+          "type": "string",
+          "__example__": "Estamos preparando sua próxima etapa"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_curso",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "If",
+                "condition": "${data.editavel} == true",
+                "then": [
+                  {
+                    "type": "TextHeading",
+                    "text": "Curso de interesse"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "Conte-nos mais detalhes sobre o curso de seu interesse!"
+                  },
+                  {
+                    "type": "Dropdown",
+                    "label": "Curso",
+                    "name": "curso_id",
+                    "data-source": "${data.cursos}",
+                    "required": true,
+                    "on-select-action": {
+                      "name": "data_exchange",
+                      "payload": {
+                        "acao": "buscar_turnos",
+                        "estado": "${data.estado}",
+                        "curso_id": "${form.curso_id}",
+                        "turno_id": "${form.turno_id}",
+                        "numero_inscricao_enem": "${form.numero_inscricao_enem}",
+                        "ano_enem": "${form.ano_enem}",
+                        "nota_natureza_enem": "${form.nota_natureza_enem}",
+                        "nota_humanas_enem": "${form.nota_humanas_enem}",
+                        "nota_matematica_enem": "${form.nota_matematica_enem}",
+                        "nota_linguagens_enem": "${form.nota_linguagens_enem}",
+                        "nota_redacao_enem": "${form.nota_redacao_enem}",
+                        "media_enem": "${form.media_enem}"
+                      }
+                    }
+                  },
+                  {
+                    "type": "If",
+                    "condition": "${data.turno_visivel} == true",
+                    "then": [
+                      {
+                        "type": "Dropdown",
+                        "label": "Turno",
+                        "name": "turno_id",
+                        "data-source": "${data.turnos}",
+                        "required": true
+                      },
+                      {
+                        "type": "If",
+                        "condition": "${data.eh_nota_enem} == true",
+                        "then": [
+                          {
+                            "type": "TextHeading",
+                            "text": "Notas do ENEM"
+                          },
+                          {
+                            "type": "TextBody",
+                            "text": "Informe os dados oficiais do seu exame (notas entre 0 e 1000):"
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "numero_inscricao_enem",
+                            "label": "Nº de inscrição do ENEM",
+                            "helper-text": "12 a 15 números",
+                            "input-type": "text",
+                            "required": true
+                          },
+                          {
+                            "type": "Dropdown",
+                            "name": "ano_enem",
+                            "label": "Ano do exame",
+                            "data-source": "${data.anos_enem}",
+                            "required": true
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "nota_natureza_enem",
+                            "label": "Ciências da Natureza",
+                            "input-type": "text",
+                            "required": true,
+                            "helper-text": "De 0 a 1000. Use vírgula ou ponto."
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "nota_humanas_enem",
+                            "label": "Ciências Humanas",
+                            "input-type": "text",
+                            "required": true,
+                            "helper-text": "De 0 a 1000. Use vírgula ou ponto."
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "nota_matematica_enem",
+                            "label": "Matemática",
+                            "input-type": "text",
+                            "required": true,
+                            "helper-text": "De 0 a 1000. Use vírgula ou ponto."
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "nota_linguagens_enem",
+                            "label": "Linguagens e Códigos",
+                            "input-type": "text",
+                            "required": true,
+                            "helper-text": "De 0 a 1000. Use vírgula ou ponto."
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "nota_redacao_enem",
+                            "label": "Redação",
+                            "input-type": "text",
+                            "required": true,
+                            "helper-text": "De 0 a 1000. Use vírgula ou ponto."
+                          },
+                          {
+                            "type": "TextInput",
+                            "name": "media_enem",
+                            "label": "Média geral do ENEM",
+                            "helper-text": "Opcional: calcule abaixo ou informe a média.",
+                            "input-type": "text",
+                            "required": false
+                          },
+                          {
+                            "type": "EmbeddedLink",
+                            "text": "Calcular média",
+                            "on-click-action": {
+                              "name": "data_exchange",
+                              "payload": {
+                                "acao": "calcular_media",
+                                "curso_id": "${form.curso_id}",
+                                "turno_id": "${form.turno_id}",
+                                "numero_inscricao_enem": "${form.numero_inscricao_enem}",
+                                "ano_enem": "${form.ano_enem}",
+                                "nota_natureza_enem": "${form.nota_natureza_enem}",
+                                "nota_humanas_enem": "${form.nota_humanas_enem}",
+                                "nota_matematica_enem": "${form.nota_matematica_enem}",
+                                "nota_linguagens_enem": "${form.nota_linguagens_enem}",
+                                "nota_redacao_enem": "${form.nota_redacao_enem}",
+                                "media_enem": "${form.media_enem}",
+                                "estado": "${data.estado}"
+                              }
+                            }
+                          }
+                        ],
+                        "else": []
+                      }
+                    ],
+                    "else": []
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "TextHeading",
+                    "text": "${data.titulo_processamento}"
+                  },
+                  {
+                    "type": "TextBody",
+                    "text": "${data.mensagem_processamento}"
+                  },
+                  {
+                    "type": "TextCaption",
+                    "text": "Verificar o andamento não envia suas notas novamente."
+                  }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "${data.rotulo_rodape}",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "${data.acao_rodape}",
+                    "curso_id": "${form.curso_id}",
+                    "turno_id": "${form.turno_id}",
+                    "numero_inscricao_enem": "${form.numero_inscricao_enem}",
+                    "ano_enem": "${form.ano_enem}",
+                    "nota_natureza_enem": "${form.nota_natureza_enem}",
+                    "nota_humanas_enem": "${form.nota_humanas_enem}",
+                    "nota_matematica_enem": "${form.nota_matematica_enem}",
+                    "nota_linguagens_enem": "${form.nota_linguagens_enem}",
+                    "nota_redacao_enem": "${form.nota_redacao_enem}",
+                    "media_enem": "${form.media_enem}",
+                    "estado": "${data.estado}"
+                  }
+                }
               }
             ],
             "init-values": {

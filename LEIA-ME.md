@@ -1,74 +1,78 @@
-# ENEM 1.3.0 — até a confirmação da inscrição
+# Versão 1.4.0 — Transferência e Portador de Diploma
 
-Esta versão parte do código 1.2.1 conferido no GitHub AlefMoraes21/devflowunibalsas e do flow-waba.json atual do repositório. Não publica mudanças no Git nem no Cloud Run automaticamente.
+## Base preservada
 
-## O que muda
+Código do ZIP devflowunibalsas-main (1).zip, versão 1.3.0, e JSON da WABA anexado pelo proprietário em 02/11/2026. O JSON do GitHub/ZIP ainda não tinha CURSO_ENEM; o JSON anexado, que está funcionando na Meta, foi usado como base para evitar regressão.
 
-- ENEM (processo 20386) usa uma tela exclusiva CURSO_ENEM. As telas anteriores permanecem idênticas ao JSON do GitHub, incluindo privacidade, vestibular, redação e confirmação. DADOS_BASICOS recebe uma nova saída de roteamento para CURSO_ENEM.
-- Curso e notas seguem para Estamos quase lá e depois para Obrigado pelo seu cadastro. O desvio anterior para DOCUMENTOS_ENEM não é usado pelo caminho novo.
-- Nenhum upload ou etapa do portal é implementado nesta entrega. A confirmação da inscrição não significa aprovação das notas nem recebimento dos documentos.
-- Média digitável, opcional. Calcular média consulta apenas o endpoint do Flow, sem chamar o Rubeus. Preenche a média com duas casas, aceita vírgula ou ponto e preserva os demais campos. Se ficar vazia, é calculada ao continuar. Se uma média digitada divergir da média das cinco notas, o usuário recebe a orientação para corrigi-la antes de enviar.
-- Não foi introduzido um gatilho automático em TextInput: o cálculo é disparado pelo link Calcular média ou pelo botão Continuar. Não há atualização automática a cada tecla.
-- Anos vêm das opções devolvidas pelo formulário; a lista de contingência inclui 2026, conforme a captura fornecida.
-- O envio do curso/notas do ENEM é durável e assíncrono, como a conclusão da inscrição. A seleção de curso e o cálculo continuam leves.
-- Se o envio das notas foi confirmado, mas a leitura do formulário final falhou, Retomar inscrição consulta o próximo passo sem reenviar /submit. O destino e token ficam no registro criptografado da tarefa e no estado autenticado. Não há fallback para o botão final do vestibular.
-- O envio da inscrição só mostra sucesso após Rubeus success=true e um identificador de inscrição. Timeout sem confirmação não é convertido em sucesso.
+A atualização não foi publicada no GitHub, na Meta nem no Cloud Run pela assistência.
 
-## Preservação do vestibular
+## Caminhos
 
-A avaliação, o vínculo da prova, os cookies e a entrega da redação não foram alterados. api/avaliacao.js, cloud-store.js, diagnostics.js, prompt-text.js, proof-binding.js e prova-route.js são idênticos à base conferida. jobs.js só acrescenta as ações da nova tela ENEM; o avanço da tela CURSO_INTERESSE continua síncrono como antes.
+- 20383 / IDPS 223: Vestibular Online. Mantém a redação já validada.
+- 20386 / IDPS 226: ENEM. Mantém notas, média e conclusão já validadas.
+- 20385 / IDPS 225: Transferência. Dados básicos → CURSO_INGRESSO → Estamos quase lá → confirmação.
+- 20384 / IDPS 224: Portador de Diploma. Mesmo caminho de inscrição, com a identidade própria do processo.
 
-## Arquivos a atualizar
+IDs e identificadores foram conferidos na listagem pública utilizada pelo site Unibalsas. Os primeiros passos públicos foram consultados sem envio de dados pessoais. Não houve submissão de dados de candidatos ou conclusão real durante a revisão.
 
-Servidor: api/flow.js, api/jobs.js, novo api/enem.js e package.json. O ZIP completo também contém os módulos e arquivos de execução anteriores, necessários para implantação por fonte.
-Meta: substitua o JSON pelo flow-waba.json deste pacote. O servidor e o JSON precisam ser atualizados antes do teste. Reabra o Flow para começar uma sessão nova; sessões ENEM antigas não são migradas.
-GitHub: sincronize os arquivos alterados para que um deploy automático posterior não reverta a atualização. Pode versionar também JSON, testes e documentação. Este pacote não foi enviado ao GitHub pela assistência.
+## Correções
 
-## Implantação
+1. Cada processo usa seu IDPS na contingência dos dados básicos; Transferência e Diploma não assumem mais 223.
+2. Transferência/Diploma usam uma tela exclusiva CURSO_INGRESSO. As 11 telas anteriores da WABA foram comparadas e permanecem semanticamente idênticas.
+3. O envio do curso usa a fila durável. A leitura do formulário seguinte ocorre no worker, com orçamento maior, preservando o token atualizado.
+4. O passo e o botão final são lidos do retorno oficial do Rubeus. Exige um único botão Concluir e os campos principais do formulário. Não usa o botão 3940366 nem o passo 300663 como contingência para essas modalidades.
+5. Se o curso foi recebido mas a leitura falhou, Retomar inscrição consulta apenas o formulário seguinte. Não reenvia o curso.
+6. A conclusão confirmada de Transferência/Diploma vai para CONFIRMACAO. Somente o Vestibular Online vai para a redação. Também foi acrescentado um bloqueio para impedir a abertura da redação por sessões dessas modalidades.
+7. Uma recusa explícita JSON/HTTP 403 nessas modalidades aparece como erro de formulário, em vez de ficar para sempre no estado de processamento. Não há repetição automática do envio. Timeouts e resultados incertos continuam protegidos contra reenvio.
+8. Processos desconhecidos são recusados antes de iniciar o cadastro, para não herdar o caminho da redação inadvertidamente.
 
-Envie cloud-run-flow-1.3.0.zip ao Cloud Shell e execute em uma aba livre (não na aba de logs tail):
+## O que permanece igual
+
+api/avaliacao.js, api/enem.js, api/cloud-store.js, api/diagnostics.js, api/prompt-text.js, api/proof-binding.js, api/prova-route.js, server.js e Dockerfile foram comparados com o ZIP e não foram alterados. As mudanças na fila acrescentam as ações da nova tela; o fluxo de curso do vestibular e o caminho ENEM existentes mantêm seus comportamentos.
+
+## Limites da validação
+
+73 testes locais passaram e o servidor iniciou corretamente. Incluem as regressões anteriores de ENEM/redação, as duas novas modalidades, botões/etapas diferentes por processo, cliques repetidos, token atualizado, falha de leitura com retomada sem novo submit e resposta 403.
+
+As chamadas Google/Rubeus dos testes são simuladas. Os IDs de passos e botões usados nos testes novos são deliberadamente sintéticos para verificar a descoberta dinâmica, não uma captura real dos formulários finais de Transferência/Diploma. O site exige sessão vinculada para ler esses formulários finais; a consulta anônima retornou 403 e não foi contornada. Em produção a leitura usa o token autenticado da própria inscrição, via API oficial, como os caminhos existentes.
+
+Ainda é necessário importar/validar o JSON na Meta e homologar no Cloud Run com dados de teste autorizados. A confirmação de inscrição não representa aprovação acadêmica ou recebimento de documentos. O portal e as etapas posteriores não estão implementados nesta entrega.
+
+Inscrições antigas em PENDENTE não são reenviadas nem migradas automaticamente. Não recrie um cadastro antigo apenas para testar a atualização sem conferir antes o CRM/portal.
+
+## Atualizar
+
+Arquivos do servidor alterados: api/flow.js, api/jobs.js, package.json e o novo api/processes.js. O pacote completo inclui todos os módulos necessários. A API não precisa de novas variáveis, banco ou fila.
+
+Atualize também o JSON da WABA: há uma nova tela CURSO_INGRESSO e uma saída adicional em DADOS_BASICOS. Preserve a versão 7.3 do JSON. Atualize os dois lados antes de testar e reabra o Flow em uma sessão nova.
+
+Para GitHub, copie o conteúdo da pasta release-1.4.0 para a raiz do repositório respeitando api/ e test/. O ZIP também contém essa estrutura na raiz, sem uma pasta intermediária. Evite enviar os arquivos achatados diretamente na raiz, especialmente os módulos importados de api/.
+
+## Cloud Shell
+
+Envie cloud-run-flow-1.4.0.zip pelo Upload do Cloud Shell. Em uma aba livre:
 
 ```bash
 flow_dir=$(mktemp -d /tmp/unibalsas-deploy-XXXXXX)
-unzip "$HOME/cloud-run-flow-1.3.0.zip" -d "$flow_dir" &&
+unzip "$HOME/cloud-run-flow-1.4.0.zip" -d "$flow_dir" &&
 gcloud run deploy devflowunibalsas-git \
   --project=talks-servidor \
   --region=southamerica-east1 \
   --source="$flow_dir"
 ```
 
-Fila, banco e variáveis existentes continuam necessários. Não é necessário executar implantar.sh para criar infraestrutura outra vez.
+Não é necessário executar implantar.sh novamente; fila, banco, chaves e permissões já configuradas permanecem necessários. O arquivo foi mantido no pacote como referência da infraestrutura anterior.
 
 ```bash
 curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api/flow
 ```
 
-Versão esperada: unibalsas-cloudrun-enem-1.3.0.
+Versão esperada: unibalsas-cloudrun-ingressos-1.4.0.
 
-## Validação realizada
-
-65 testes locais passaram: regressões da prova, notas decimais/zero/mil, validação de média, ano 2026, caminho ENEM com contratos sanitizados dos passos 300708 e 300709, repetição de clique/tarefa sem novo submit e retomada somente por leitura após falha no formulário final. O teste de preservação compara o hash de cada tela anterior com o JSON efetivamente lido do GitHub.
-
-As chamadas Google/Rubeus dos testes são simuladas. Nenhuma inscrição foi criada durante esta alteração. A importação/compilação do JSON na Meta e o teste integrado real ainda precisam ser feitos. Consultas atuais à documentação Meta retornaram HTTP 429; foram usados os conteúdos oficiais capturados anteriormente para os componentes e ações já conhecidos. Não há promessa de cálculo automático por digitação.
-
-## Teste integrado sugerido
-
-1. Reabrir um Flow novo com Nota do ENEM - 2027/1.
-2. Preencher dados básicos e selecionar curso/turno.
-3. Preencher inscrição, ano e cinco notas; testar Calcular média e editar uma nota depois para conferir validação.
-4. Continuar, consultar o andamento se necessário e preencher Estamos quase lá.
-5. Concluir e conferir o protocolo no Flow e a inscrição no CRM.
-6. O portal pode continuar mostrando Checando as notas / Validando e Documentos inscrição / Pendentes. Esta versão não conclui essas etapas posteriores.
-
-## Logs
+## Logs das duas novas modalidades
 
 ```bash
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="enem_course_received" OR jsonPayload.event="enem_registration" OR jsonPayload.event="flow_job" OR jsonPayload.event="rubeus_error" OR jsonPayload.event="flow_error" OR jsonPayload.event="flow_worker_error")' --project=talks-servidor --freshness=24h --limit=80 --order=desc --format=json
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event="ingresso_course_received" OR jsonPayload.event="ingresso_registration" OR jsonPayload.event="flow_job" OR jsonPayload.event="rubeus_rejected" OR jsonPayload.event="flow_worker_error")' --project=talks-servidor --freshness=24h --limit=60 --order=desc --format=json
 ```
 
-## Fontes e contratos
-
-- API de formulários e submissão: https://docs.rubeus.com.br/api_im/metodosdeinscricao/
-- Componentes Meta: https://developers.facebook.com/documentation/business-messaging/whatsapp/flows/guides/components
-- JSON e ações Meta: https://developers.facebook.com/docs/whatsapp/flows/reference/flowjson/
-- Captura anterior do site: passos 300707 (dados básicos), 300708 (curso/notas), 300709 (finalização) e telas fornecidas pelo usuário nesta revisão. Os campos e botões da integração continuam sendo obtidos do formulário oficial.
+A evidência de conclusão esperada é ingresso_registration com process 20384 ou 20385, confirmed true e applicationId da inscrição, acompanhada de flow_job done / CONFIRMACAO e conferência no CRM.
