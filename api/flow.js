@@ -1,3 +1,4 @@
+import {processPolicy,isDirectRegistration,requiresEssay} from "./processes.js";
 import {enemAverage,enemYears} from "./enem.js";
 import {portalConfirmsDelivery} from "./proof-binding.js";
 import {promptText} from "./prompt-text.js";
@@ -121,6 +122,9 @@ for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_
 
 FORM_DEFAULTS.CURSO_ENEM=FORM_DEFAULTS.CURSO_INTERESSE;
 SCREEN_KEYS.CURSO_ENEM=[...SCREEN_KEYS.CURSO_INTERESSE,"processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento"];
+
+FORM_DEFAULTS.CURSO_INGRESSO=FORM_DEFAULTS.CURSO_INTERESSE;
+SCREEN_KEYS.CURSO_INGRESSO=[...SCREEN_KEYS.CURSO_ENEM];
 
 const USER_FIELDS = new Set([
   "aceite_privacidade",
@@ -434,7 +438,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
     if (!response.ok || json?.success !== true) {
       const explanation=response.status===422?validationSummary(json,body):"Sem confirmação da operação.";
       console.warn(JSON.stringify({event:"rubeus_rejected",request_id:context?.request_id,action:context?.request?.data?.acao,path:path.split("?")[0],http:response.status,details:explanation}));
-      if (mutation && context && response.status===422) {
+      if (mutation && context && (response.status===422||(response.status===403&&isDirectRegistration(context.request?.data?.processo_seletivo_id)))) {
         context.write = null;
       }
       throw new Error(`[RUBEUS_ERRO] ${path.split("?")[0]} não confirmou a operação (HTTP ${response.status}). ${response.status===422?explanation:""}`);
@@ -546,7 +550,7 @@ function buildBasicScreenData(formResponse, processId) {
     campo_lgpd_assinatura_id: String(lgpdA.field_id),
     campo_lgpd_base_legal_id: String(lgpdB.field_id),
     campo_genero_rubeus_id: String(generoR.field_id),
-    idps_valor: toStringValue(idps.value, isNotaEnemProcess(processId) ? "226" : "223"),
+    idps_valor: isDirectRegistration(processId) ? (toStringValue(idps.value).trim() || processPolicy(processId).academicId) : toStringValue(idps.value, processPolicy(processId).academicId),
     lgpd_assinatura_valor: toStringValue(lgpdA.value, "1"),
     lgpd_base_legal_valor: toStringValue(lgpdB.value, "4"),
     data_maxima_nascimento: currentIsoDate(),
@@ -570,7 +574,7 @@ async function buildCourseScreenData(formResponse, processId) {
   const tipo = requireInput(findInput(form, ["CODTIPOCURSO"], 38610), "CODTIPOCURSO");
   const button = findButton(form, ["Avançar"]);
   const query = findQueryForField(form, curso.field_id);
-  const notaEnem = getFormInputs(form).some(i => Number(i.field_id) === 38556) || isNotaEnemProcess(processId);
+  const notaEnem = !isDirectRegistration(processId) && (getFormInputs(form).some(i => Number(i.field_id) === 38556) || isNotaEnemProcess(processId));
 
   const polo = notaEnem ? requireInput(findInput(form, ["CODPOLO"], 38550), "CODPOLO") : findInput(form, ["CODPOLO"], 38550);
   const eNum = notaEnem ? requireInput(findInput(form, ["Número de inscrição do ENEM"], 38556), "Número") : null;
@@ -652,6 +656,11 @@ function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
   const button = form ? findButton(form, ["Concluir"]) : null;
 
   const redirect = prev?.data?.redirect ?? {};
+  if(isDirectRegistration(dataAnterior.processo_seletivo_id)){
+    if(!form?.id||!button?.button||(getFormButtons(form).filter(b=>normalizeText(b.label)==="concluir").length!==1))throw new Error("Não foi possível confirmar o formulário final deste processo. Use Retomar inscrição; seus dados não serão reenviados.");
+    if(Number(prev?.data?.next)&&Number(form.id)!==Number(prev.data.next))throw new Error("O formulário retornado não corresponde à próxima etapa desta inscrição.");
+    for(const [field,label] of [[cpf,"CPF"],[nac,"Nacionalidade"],[em,"Ensino médio"],[def,"Deficiência"],[orig,"Origem"]])requireInput(field,label);
+  }
   if(isNotaEnemContext(dataAnterior)&&(!form?.id||!button?.button))throw new Error("Não foi possível confirmar o formulário final do ENEM. A operação não será reenviada automaticamente.");
 
   return {
@@ -717,11 +726,12 @@ function openState(value, screen) {
 }
 
 function responseForScreen(screen, data) {
+  if(screen==="CURSO_INTERESSE"&&isDirectRegistration(data.processo_seletivo_id))screen="CURSO_INGRESSO";
   if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
-  const actionByScreen={CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
-  const labelByScreen={CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
+  const actionByScreen={CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
+  const labelByScreen={CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
   // Navigation belongs to the destination screen, never to the previous form.
   if(actionByScreen[screen]){
@@ -736,7 +746,11 @@ function responseForScreen(screen, data) {
     next.editavel=false;next.acao_rodape="retomar_etapa_enem";next.rotulo_rodape="Retomar inscrição";
     next.mensagem_processamento="Suas notas foram recebidas. Vamos consultar a próxima etapa sem enviá-las novamente.";
   }
-  next.titulo_processamento=screen==="CURSO_ENEM"?"Estamos registrando suas notas":screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
+  if(screen==="CURSO_INGRESSO"&&data.continuacao_ingresso&&!(next.processando&&next.job_id)){
+    next.editavel=false;next.acao_rodape="retomar_etapa_ingresso";next.rotulo_rodape="Retomar inscrição";
+    next.mensagem_processamento="Seu curso foi recebido. Vamos consultar a próxima etapa sem enviar os dados novamente.";
+  }
+  next.titulo_processamento=screen==="CURSO_INGRESSO"?"Estamos registrando seu curso":screen==="CURSO_ENEM"?"Estamos registrando suas notas":screen==="QUASE_LA"?"Estamos concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Estamos preparando sua prova":"Estamos enviando sua redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
     next.processando=true;next.editavel=false;next.job_id="";next.acao_rodape="verificar_entrega";next.rotulo_rodape="Verificar atualização";next.titulo_processamento="Redação recebida";
@@ -765,7 +779,7 @@ function responseForScreen(screen, data) {
     Object.entries(next).filter(([k]) => !k.startsWith("valor_") && k !== "estado" && k !== "values")
   );
 
-  if (["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO"].includes(screen)) {
+  if (["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO"].includes(screen)) {
     next.estado = sealState(screen, trusted);
   }
 
@@ -887,6 +901,8 @@ async function routeFlowRequest(requestData) {
       "calcular_media",
       "retomar_etapa_enem",
       "avancar_curso_interesse",
+      "avancar_curso_ingresso",
+      "retomar_etapa_ingresso",
       "enviar_curso",
       "enviar_documento_enem",
       "enviar_informacoes_complementares",
@@ -947,6 +963,7 @@ async function routeFlowRequest(requestData) {
     case "selecionar_processo": {
       try {
         const raw = data.processo_seletivo_id ?? data.processo_id;
+        processPolicy(raw);
         if (!raw) {
           throw new Error("Selecione um processo seletivo.");
         }
@@ -984,7 +1001,7 @@ async function routeFlowRequest(requestData) {
           fieldItem(data.campo_celular_id, formatBrazilianPhone(data.celular)),
           fieldItem(data.campo_genero_id, genero),
           fieldItem(data.campo_consentimento_id, toBoolean(data.aceite_privacidade)),
-          fieldItem(data.campo_idps_id, toStringValue(data.idps_valor, isNotaEnemProcess(data.processo_seletivo_id) ? "226" : "223")),
+          fieldItem(data.campo_idps_id, toStringValue(data.idps_valor, processPolicy(data.processo_seletivo_id).academicId)),
           fieldItem(data.campo_lgpd_assinatura_id, toStringValue(data.lgpd_assinatura_valor, "1")),
           fieldItem(data.campo_lgpd_base_legal_id, toStringValue(data.lgpd_base_legal_valor, "4")),
           fieldItem(data.campo_genero_rubeus_id, genero === "M" ? "1" : "2")
@@ -1001,7 +1018,8 @@ async function routeFlowRequest(requestData) {
     }
 
     case "buscar_turnos":
-    case "avancar_curso_interesse": {
+    case "avancar_curso_interesse":
+    case "avancar_curso_ingresso": {
       try {
         if (customAction === "buscar_turnos" || data.curso_id !== data.curso_selecionado || !toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
           if (!(data.cursos??[]).some(c=>c.id===data.curso_id)) {
@@ -1089,6 +1107,10 @@ async function routeFlowRequest(requestData) {
           flowContext.getStore().audit={enemContinuation:{next:submit.data.next,local:submit.data.local,token:nextToken,processo_seletivo_id:data.processo_seletivo_id}};
           console.info(JSON.stringify({event:"enem_course_received",process:data.processo_seletivo_id,next:submit.data.next}));
         }
+        if(isDirectRegistration(data.processo_seletivo_id)){
+          flowContext.getStore().audit={ingressoContinuation:{next:submit.data.next,local:submit.data.local,token:nextToken,processo_seletivo_id:data.processo_seletivo_id}};
+          console.info(JSON.stringify({event:"ingresso_course_received",process:data.processo_seletivo_id,next:submit.data.next}));
+        }
         let nextForm = null;
         try {
           nextForm = await getForm(submit.data.next, submit.data.local, nextToken);
@@ -1096,7 +1118,7 @@ async function routeFlowRequest(requestData) {
           console.warn("Aviso: getForm demorou, avançando com mapeamento resiliente:", formErr.message);
         }
 
-        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, submit, notaEnem?{...data,token:nextToken}:data));
+        return responseForScreen("QUASE_LA", buildAlmostThereScreenData(nextForm, submit, (notaEnem||isDirectRegistration(data.processo_seletivo_id))?{...data,token:nextToken}:data));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1104,6 +1126,15 @@ async function routeFlowRequest(requestData) {
       }
     }
 
+    case "retomar_etapa_ingresso": {
+      const next=data.continuacao_ingresso;
+      if(!isDirectRegistration(data.processo_seletivo_id)||!next||String(next.processo_seletivo_id)!==String(data.processo_seletivo_id))throw new Error("Retomada não autorizada nesta etapa.");
+      flowContext.getStore().audit={ingressoContinuation:next};
+      try{
+        const form=await getForm(next.next,next.local,next.token);
+        return responseForScreen("QUASE_LA",buildAlmostThereScreenData(form,{data:{next:next.next,local:next.local}},{...data,token:next.token}));
+      }catch(e){return responseForScreen("CURSO_INGRESSO",{...data,erro:e.message})}
+    }
     case "retomar_etapa_enem": {
       if(!isNotaEnemContext(data)||!data.continuacao_enem||String(data.continuacao_enem.processo_seletivo_id)!==String(data.processo_seletivo_id))throw new Error("Retomada não autorizada nesta etapa.");
       const next=data.continuacao_enem;
@@ -1153,8 +1184,8 @@ async function routeFlowRequest(requestData) {
         const submitResult=await submitForm(data.button_id,fields,data.token,RUBEUS_FINAL_SUBMIT_TIMEOUT_MS);
         const redirect=submitResult?.data?.redirect??{};
         if(!redirect.applyment_id)throw new Error("A inscrição ainda não foi confirmada pelo Rubeus.");
-        // Se NÃO for ENEM, avança direto para a tela de instruções da redação
-        if (!isNotaEnemContext(data)) {
+        // Somente o vestibular validado avança para a redação.
+        if (requiresEssay(data.processo_seletivo_id)) {
           return responseForScreen("TELA_ORIENTACAO_PROVA", {
             ...data,
             tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
@@ -1166,6 +1197,11 @@ async function routeFlowRequest(requestData) {
           });
         }
 
+        if(isDirectRegistration(data.processo_seletivo_id)){
+          console.info(JSON.stringify({event:"ingresso_registration",applicationId:String(redirect.applyment_id),process:data.processo_seletivo_id,confirmed:true}));
+          return responseForScreen("CONFIRMACAO",{titulo:"Obrigado pelo seu cadastro!",mensagem:`Sua inscrição de ${processPolicy(data.processo_seletivo_id).name} foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve.`,inscricao_id:String(redirect.applyment_id)});
+        }
+        if(!isNotaEnemContext(data))throw new Error("Este processo não possui um destino de conclusão validado.");
         console.info(JSON.stringify({event:"enem_registration",applicationId:String(redirect.applyment_id),process:data.processo_seletivo_id,confirmed:true}));
         return responseForScreen("CONFIRMACAO", {
           titulo: "Obrigado pelo seu cadastro!",
@@ -1191,6 +1227,7 @@ async function routeFlowRequest(requestData) {
     }
     case "iniciar_redacao": {
       try {
+        if(isDirectRegistration(data.processo_seletivo_id))throw new Error("Este processo não utiliza a redação deste Flow. Confira a conclusão da inscrição no portal; não é necessário realizar uma prova por aqui.");
         if(data.proof_resume_required)throw new Error("Confira a prova existente antes de continuar.");
         const prepared=data.prepared_existing??await linkDaInscricao(data);
         if(data.prepared_existing)await proofRouter.verify(data,prepared.binding);
@@ -1298,7 +1335,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-enem-1.3.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-ingressos-1.4.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

@@ -1,18 +1,22 @@
 import crypto from 'node:crypto';
 import {createStore,enqueueJob,validWorkerSignature} from './cloud-store.js';
-const screens={retomar_etapa_enem:'CURSO_ENEM',avancar_curso_interesse:'CURSO_ENEM',conferir_prova_existente:'TELA_ORIENTACAO_PROVA',enviar_informacoes_complementares:'QUASE_LA',iniciar_redacao:'TELA_ORIENTACAO_PROVA',enviar_redacao:'TELA_REDACAO',verificar_entrega:'TELA_REDACAO'};
-const actions={CURSO_ENEM:'avancar_curso_interesse',QUASE_LA:'enviar_informacoes_complementares',TELA_ORIENTACAO_PROVA:'iniciar_redacao',TELA_REDACAO:'enviar_redacao'};
+const screens={avancar_curso_ingresso:'CURSO_INGRESSO',retomar_etapa_ingresso:'CURSO_INGRESSO',retomar_etapa_enem:'CURSO_ENEM',avancar_curso_interesse:'CURSO_ENEM',conferir_prova_existente:'TELA_ORIENTACAO_PROVA',enviar_informacoes_complementares:'QUASE_LA',iniciar_redacao:'TELA_ORIENTACAO_PROVA',enviar_redacao:'TELA_REDACAO',verificar_entrega:'TELA_REDACAO'};
+const actions={CURSO_INGRESSO:'avancar_curso_ingresso',CURSO_ENEM:'avancar_curso_interesse',QUASE_LA:'enviar_informacoes_complementares',TELA_ORIENTACAO_PROVA:'iniciar_redacao',TELA_REDACAO:'enviar_redacao'};
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,openState,render,clock=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),waitMs=5500}){
   function processing(job,extra={}){
     const trusted=openState(job.request.data.estado,job.request.screen);
-    const messages={retomar_etapa_enem:'Estamos consultando a próxima etapa do ENEM, sem reenviar suas notas.',avancar_curso_interesse:'Estamos registrando seu curso e suas notas do ENEM. Aguarde a próxima etapa.',conferir_prova_existente:'Estamos conferindo a prova já distribuída, sem repetir a inscrição.',enviar_informacoes_complementares:'Estamos concluindo sua inscrição e preparando sua próxima etapa.',iniciar_redacao:'Estamos abrindo o ambiente de redação. Aguarde a preparação da sua prova.',enviar_redacao:'Estamos enviando sua redação. Não é necessário enviar novamente.',verificar_entrega:'Estamos conferindo a atualização da sua redação no portal. O texto não será reenviado.'};
+    const messages={avancar_curso_ingresso:'Estamos registrando o curso da sua inscrição. Aguarde a próxima etapa.',retomar_etapa_ingresso:'Estamos consultando a próxima etapa, sem reenviar seus dados.',retomar_etapa_enem:'Estamos consultando a próxima etapa do ENEM, sem reenviar suas notas.',avancar_curso_interesse:'Estamos registrando seu curso e suas notas do ENEM. Aguarde a próxima etapa.',conferir_prova_existente:'Estamos conferindo a prova já distribuída, sem repetir a inscrição.',enviar_informacoes_complementares:'Estamos concluindo sua inscrição e preparando sua próxima etapa.',iniciar_redacao:'Estamos abrindo o ambiente de redação. Aguarde a preparação da sua prova.',enviar_redacao:'Estamos enviando sua redação. Não é necessário enviar novamente.',verificar_entrega:'Estamos conferindo a atualização da sua redação no portal. O texto não será reenviado.'};
     return render(job.request.screen,{...trusted,values:job.request.data,erro:'',job_id:job.id,processando:true,editavel:false,acao_rodape:'consultar_tarefa',rotulo_rodape:'Verificar andamento',mensagem_processamento:messages[job.request.data.acao]??'Estamos processando seus dados.',...extra});
   }
   async function poll(job,wait=waitMs){
     const until=clock()+wait;let current=job;
     while(true){
       if(current.result){
+        if(current.result.screen==='PENDENTE'&&current.request.screen==='CURSO_INGRESSO'&&current.audit?.ingressoContinuation){
+          const trusted=openState(current.request.data.estado,current.request.screen);
+          return render('CURSO_INGRESSO',{...trusted,values:current.request.data,continuacao_ingresso:current.audit.ingressoContinuation,processando:false,job_id:'',erro:'Seu curso foi recebido, mas não foi possível carregar a próxima etapa. Toque em Retomar inscrição.'});
+        }
         if(current.result.screen==='PENDENTE'&&current.request.screen==='CURSO_ENEM'&&current.audit?.enemContinuation){
           const trusted=openState(current.request.data.estado,current.request.screen);
           return render('CURSO_ENEM',{...trusted,values:current.request.data,continuacao_enem:current.audit.enemContinuation,processando:false,job_id:'',erro:'Suas notas foram recebidas, mas não foi possível carregar a próxima etapa. Toque em Retomar inscrição.'});
