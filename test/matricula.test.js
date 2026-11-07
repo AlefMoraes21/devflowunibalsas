@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {routeFlowRequest,flowContext,sealState,openState} from '../api/flow.js';
+import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
 import {SCREENS,summarizeStages,search,canAdvance} from '../api/matricula.js';
 
 const flowJson=()=>readFile(new URL('../flow-waba.json',import.meta.url)).then(JSON.parse);
@@ -18,7 +18,7 @@ test('telas novas respeitam limites de componentes da Meta e batem com o servido
  const j=await flowJson();
  for(const id of Object.keys(SCREENS)){
   const s=j.screens.find(x=>x.id===id);assert.ok(s,id);
-  assert.deepEqual(Object.keys(s.data).sort(),[...SCREENS[id]].sort(),id+': data do JSON = chaves do servidor');
+  process.env.FLOW_PRIVATE_KEY??='unit-schema-key';assert.deepEqual(Object.keys(s.data).sort(),Object.keys(responseForScreen(id,{}).data).sort(),id+': data do JSON = chaves do servidor');
   const comps=walk(s.layout);
   assert.equal(comps.filter(c=>c.type==='Footer').length,1,id+': um Footer');
   const links=comps.filter(c=>c.type==='EmbeddedLink');assert.ok(links.length<=2,id);links.forEach(l=>assert.ok(l.text.length<=25,l.text));
@@ -87,7 +87,9 @@ test('jornada de matrícula: login, responsável, endereço com busca de cidade,
   const first=sealState('ESCOLHA_PROCESSO',{});
   const bad=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',first,{modo:'continuar',login:'123',data_nascimento:'2007-03-15'}));
   assert.equal(bad.screen,'ESCOLHA_PROCESSO');assert.equal(bad.data.tem_erro,true);assert.equal(bad.data.valor_modo,'continuar');
-  const hub=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',first,{modo:'continuar',login:'111.444.777-35',data_nascimento:'2007-03-15'}));
+  const welcome=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',first,{modo:'continuar',login:'111.444.777-35',data_nascimento:'2007-03-15'}));
+  assert.equal(welcome.screen,'PORTAL_STATUS');assert.equal(welcome.data.acao_rodape,'carregar_jornada');assert.match(welcome.data.titulo,/Encontramos sua inscrição/);
+  const hub=await run(ask('PORTAL_STATUS','carregar_jornada',welcome.data.estado));
   assert.equal(hub.screen,'PORTAL_STATUS');assert.equal(hub.data.acao_rodape,'continuar_etapa');assert.match(hub.data.resumo,/Seleção resp\. financeiro/);
   assert.equal(openState(hub.data.estado,'PORTAL_STATUS').applyment_id,'14083470');
   const resp=await run(ask('PORTAL_STATUS','continuar_etapa',hub.data.estado));
@@ -122,6 +124,38 @@ test('etapa anterior na ordem do Flow encerra em STATUS_FINAL em vez de criar ro
  try{
   const state=sealState('IDENTIDADE',{token:'s',applyment_id:'1',processo_seletivo_id:'20383',campos:{rg:'38642',orgao_emissor:'38643',uf_rg:'38644',cor_raca:'38645',estado_civil:'38646'},button_id:'3940411',ocultos:[],ufs:[{id:'MA',title:'Maranhão'}],racas:[{id:'3',title:'Parda'}],estados_civis:[{id:'S',title:'Solteiro'}]});
   const r=await run(ask('IDENTIDADE','enviar_identidade',state,{rg:'1',orgao_emissor:'SSP',uf_rg:'MA',cor_raca:'3',estado_civil:'S'}));
-  assert.equal(submits.length,1);assert.equal(r.screen,'STATUS_FINAL');assert.match(r.data.mensagem,/Já me inscrevi: continuar/);
+  assert.equal(submits.length,1);assert.equal(r.screen,'STATUS_FINAL');assert.match(r.data.mensagem,/Já sou inscrito/);
+ }finally{globalThis.fetch=previous}
+});
+
+import {createJobEngine} from '../api/jobs.js';
+import {workerSignature} from '../api/cloud-store.js';
+function memoryStore(){const map=new Map();return {async create(id,record){if(map.has(id))return false;map.set(id,{record:structuredClone(record),version:1});return true},async get(id){return structuredClone(map.get(id)??null)},async update(id,record,version){const prev=map.get(id);if(prev.version!==version)return false;map.set(id,{record:structuredClone(record),version:version+1});return true}}}
+
+test('carregar jornada roda em segundo plano: tela de espera, worker e etapas sem estourar o prazo do WhatsApp',async()=>{
+ process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
+ const submits=[],previous=globalThis.fetch;
+ globalThis.fetch=rubeus([[stage('Inscrição',1,'Concluída'),stage('Seleção resp. financeiro',0,'Pendente',300676,'Verificar')]],{300676:radioForm},submits);
+ async function runJob(request,worker=false){request=structuredClone(request);const ctx={request,worker,write:null,deadline:Date.now()+120000};return flowContext.run(ctx,async()=>{const response=await routeFlowRequest(request);return worker?{response,audit:ctx.audit}:response})}
+ const engine=createJobEngine({store:memoryStore(),enqueue:async()=>{},run:runJob,render:responseForScreen,openState,waitMs:0});
+ try{
+  const state=sealState('PORTAL_STATUS',{token:'sessao-1',applyment_id:'14083470',processo_seletivo_id:'20383',cpf:'11144477735'});
+  const waiting=await engine.route({screen:'PORTAL_STATUS',action:'data_exchange',flow_token:'t',data:{acao:'carregar_jornada',estado:state}});
+  assert.equal(waiting.screen,'PORTAL_STATUS');assert.equal(waiting.data.processando,true);assert.equal(waiting.data.acao_rodape,'consultar_tarefa');assert.match(waiting.data.titulo_processamento,/Carregando sua jornada/);
+  await engine.worker(waiting.data.job_id,workerSignature(waiting.data.job_id));
+  const hub=await engine.route({screen:'PORTAL_STATUS',action:'data_exchange',flow_token:'t',data:{acao:'consultar_tarefa',estado:waiting.data.estado}});
+  assert.equal(hub.screen,'PORTAL_STATUS');assert.equal(hub.data.processando,false);assert.equal(hub.data.acao_rodape,'continuar_etapa');assert.match(hub.data.resumo,/Seleção resp\. financeiro/);
+  await assert.rejects(engine.route({screen:'ENDERECO',action:'data_exchange',flow_token:'t',data:{acao:'carregar_jornada',estado:sealState('ENDERECO',{})}}),/não permitida/);
+ }finally{globalThis.fetch=previous}
+});
+
+test('quando a Rubeus devolve o próximo passo no envio, abre direto sem consultar o portal',async()=>{
+ process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
+ const calls=[],previous=globalThis.fetch;const base=rubeus([],{300667:identityForm},[]);
+ globalThis.fetch=async(input,options)=>{const u=new URL(String(input));calls.push(u.pathname);if(u.pathname.endsWith('/submit'))return Response.json({success:true,data:{redirect:{place_id:300667,place_type_id:1,applyment_id:14083470}}});return base(input,options)};
+ try{
+  const state=sealState('ENDERECO',{token:'s',applyment_id:'14083470',processo_seletivo_id:'20383',campos:{rua:'38569',numero:'38570',bairro:'38571',cidade:'38574',uf:'38573',estado_natal:'38641',cidade_natal:'38640'},button_id:'3940407',ocultos:[],ufs:[{id:'MA',title:'Maranhão'}],cidades_natal:[{id:'00069',title:'Balsas'}]});
+  const r=await run(ask('ENDERECO','enviar_endereco',state,{rua:'Rua Teste',numero:'1',bairro:'Centro',cidade:'Balsas',uf:'MA',estado_natal:'MA',cidade_natal:'00069'}));
+  assert.equal(r.screen,'IDENTIDADE');assert.ok(!calls.some(p=>p.endsWith('/portal')),'não chamou /portal');
  }finally{globalThis.fetch=previous}
 });
