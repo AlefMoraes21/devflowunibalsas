@@ -60,8 +60,10 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     // to populate technical assessment fields, and do not send a blind empty form.
     const fields=(form.data?.form?.content?.inputs??[]).filter(i=>Number.isSafeInteger(Number(i.field_id))&&Number(i.field_id)>0).map(i=>({field_id:Number(i.field_id),value:i.value??i.value_now??i.data_value??null}));
     const result=await submitForm(button.button,fields,form.token??form.data?.token??data.token,9500);
-    const link=result.data?.redirect?.link;
-    if(!link)throw new Error('[PROVA_LINK] O Rubeus não retornou o link da prova.');
+    // O Rubeus às vezes confirma o envio sem devolver o link. O link oficial é
+    // reconstruído do formulário atual em buildCanonicalProof, então seguimos.
+    const link=result.data?.redirect?.link??'';
+    if(!link)console.warn(JSON.stringify({event:'proof_link_missing',step}));
     return {link,step,button,token:result.token??result.data?.token??form.token??form.data?.token??data.token};
   }
   async function prepare(data){

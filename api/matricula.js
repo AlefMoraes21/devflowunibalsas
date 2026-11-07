@@ -11,6 +11,7 @@
 //  - Documentos inscrição/matrícula, Contrato, Pagamento, Taxa de inscrição, Filiação: portal.
 
 export const PORTAL_URL = "https://vestibular.unibalsas.edu.br/presencial";
+const NENHUM_ENVIO = "Nenhum documento enviado ainda.";
 export const CONTINUAR_ID = "continuar_inscricao";
 const PORTAL_ID = 257;
 
@@ -19,8 +20,9 @@ const str = (v, f = "") => (v === null || v === undefined ? f : String(v));
 const title30 = v => str(v).replace(/-+\s*$/g, "").trim().slice(0, 30);
 
 export const SCREENS = {
-  LOGIN_CANDIDATO: ["erro", "tem_erro", "estado", "valor_login", "valor_data_nascimento", "data_maxima_nascimento"],
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
+  ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape"],
+  DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
   RESP_DADOS: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
     "valor_nome", "valor_email", "valor_cpf", "valor_data_nascimento", "valor_celular", "valor_cep", "valor_rua",
@@ -39,16 +41,18 @@ export const SCREENS = {
 
 // O routing_model da Meta só aceita rotas para frente. A jornada segue esta ordem;
 // quando a próxima etapa do portal fica "para trás", o Flow termina em STATUS_FINAL.
-export const ORDER = ["PORTAL_STATUS", "RESP_FINANCEIRO", "RESP_DADOS", "ENDERECO", "IDENTIDADE", "CUPOM", "ETAPA_PORTAL"];
+export const ORDER = ["PORTAL_STATUS", "DOCUMENTOS_INSCRICAO", "RESP_FINANCEIRO", "RESP_DADOS", "ENDERECO", "IDENTIDADE", "CUPOM", "ETAPA_PORTAL"];
+const HUBS = new Set(["PORTAL_STATUS", "ACOMPANHAMENTO"]);
+const rank = s => (HUBS.has(s) ? 0 : ORDER.indexOf(s));
 export function canAdvance(from, to) {
-  if (to === "ETAPA_PORTAL" && from === "ETAPA_PORTAL") return true; // atualização da mesma tela
+  if (from === to && (to === "ETAPA_PORTAL" || to === "DOCUMENTOS_INSCRICAO")) return true; // atualização da mesma tela
   if (to === "TELA_ORIENTACAO_PROVA") return from === "PORTAL_STATUS";
-  const a = ORDER.indexOf(from), b = ORDER.indexOf(to);
+  const a = rank(from), b = rank(to);
   return a >= 0 && b > a;
 }
 
 export const FORM_FIELDS = {
-  LOGIN_CANDIDATO: { login: "", data_nascimento: "" },
+  DOCUMENTOS_INSCRICAO: { documento: "" },
   RESP_FINANCEIRO: { responsavel: "" },
   RESP_DADOS: { nome: "", email: "", cpf: "", data_nascimento: "", celular: "", cep: "", rua: "", numero: "", complemento: "",
     bairro: "", cidade: "", uf: "", estado_natal: "", busca_cidade: "", cidade_natal: "" },
@@ -57,9 +61,9 @@ export const FORM_FIELDS = {
   CUPOM: { cupom: "" }
 };
 
-export const USER_FIELDS = new Set(Object.values(FORM_FIELDS).flatMap(Object.keys));
+export const USER_FIELDS = new Set([...Object.values(FORM_FIELDS).flatMap(Object.keys), "arquivo", "modo", "login"]);
 
-export const ACTIONS = new Set(["entrar_portal", "atualizar_portal", "continuar_etapa", "enviar_responsavel",
+export const ACTIONS = new Set(["atualizar_portal", "continuar_etapa", "encerrar", "enviar_documento", "enviar_responsavel",
   "buscar_cep", "buscar_cidade", "enviar_endereco", "enviar_resp_dados", "buscar_escola", "enviar_identidade", "enviar_cupom"]);
 
 // Campos por etapa, localizados pelo rótulo do formulário oficial (field_id observado como reserva).
@@ -128,6 +132,7 @@ export function screenForStep(stageTitle, form) {
   if (labels.has(norm("Cupom de Desconto"))) return "CUPOM";
   if (/resp.*financeiro/.test(t) && labels.has("cpf") && labels.has("rua")) return "RESP_DADOS";
   if (labels.has("rua") && labels.has(norm("Estado natal"))) return "ENDERECO";
+  if (/documentos?.*inscri/.test(t)) return "DOCUMENTOS_INSCRICAO";
   return "ETAPA_PORTAL";
 }
 
@@ -147,7 +152,7 @@ export function portalScreenData(stageTitle, step) {
   };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, context }) {
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null }) {
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
     try {
@@ -169,15 +174,39 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     return { token: str(r?.token ?? r?.data?.token, session.token), processo_seletivo_id: str(cur.id ?? cur.process ?? session.processo_seletivo_id), stages: cur.stages ?? r?.data?.stages ?? [] };
   }
 
-  async function status(session, erro = "") {
+  // Painel com a situação de cada etapa. PORTAL_STATUS vem do login; ACOMPANHAMENTO vem
+  // logo depois da inscrição ou da redação, sem fechar o Flow.
+  async function status(session, erro = "", hub = "PORTAL_STATUS", extra = {}) {
     const p = await portal(session);
     const s = summarizeStages(p.stages);
     const base = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id, proxima: s.next };
-    return render("PORTAL_STATUS", {
-      ...base, titulo: "Sua inscrição", resumo: s.resumo || "Nenhuma etapa disponível no momento.", erro,
-      acao_rodape: s.next ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: s.next ? `Continuar: ${title30(s.next.title)}`.slice(0, 30) : "Atualizar situação",
+    const waiting = s.rows.find(r => !r.conclusive && !(r.step && r.action));
+    return render(hub, {
+      ...base, titulo: hub === "ACOMPANHAMENTO" ? "Inscrição recebida ✅" : "Sua inscrição",
+      resumo: (s.resumo || "Nenhuma etapa disponível no momento.") + (!s.next && waiting ? `\n\n⏳ ${waiting.title}: aguardando a análise da equipe UniBalsas. Você pode tocar em Atualizar situação daqui a pouco ou voltar depois por "Já sou inscrito".` : ""),
+      erro, acao_rodape: s.next ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: s.next ? `Continuar: ${title30(s.next.title)}`.slice(0, 35) : "Atualizar situação",
+      link_portal: `${PORTAL_URL}/portal-inscrito`, ...extra
+    });
+  }
+
+  function finish(data) {
+    return render("STATUS_FINAL", {
+      titulo: "Até breve!", resumo: str(data.resumo, "Sua inscrição está salva."),
+      mensagem: "Quando quiser continuar, abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.",
       link_portal: `${PORTAL_URL}/portal-inscrito`
     });
+  }
+
+  async function sendDocument(data) {
+    if (!docs) throw new Error("Envio de documentos indisponível.");
+    if (!(data.documentos ?? []).some(d => d.id === str(data.documento))) throw new Error("Escolha qual documento você está enviando.");
+    if (!/^\d{11}$/.test(str(data.cpf))) throw new Error("Para enviar documentos, entre pela opção \"Já sou inscrito\" com seu CPF.");
+    const saved = await docs.saveDocument({ idps: academicId(data.processo_seletivo_id), cpf: data.cpf, codDocumento: data.documento, media: data.arquivo });
+    const nome = (data.documentos.find(d => d.id === str(data.documento))?.descricao) ?? "Documento";
+    const previous = str(data.enviados) === NENHUM_ENVIO ? "" : str(data.enviados);
+    const enviados = [previous, `✅ ${nome} recebido (${saved.nomeArquivo}). Aguardando conferência da equipe.`].filter(Boolean).join("\n");
+    const { arquivo, ...rest } = data; // a mídia (chaves de criptografia) nunca vai para o estado selado
+    return render("DOCUMENTOS_INSCRICAO", { ...rest, enviados, values: { documento: "" }, erro: "" });
   }
 
   // Depois de concluir uma etapa: abre a próxima etapa se a rota for permitida, senão encerra com a situação.
@@ -224,7 +253,14 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const screen = screenForStep(next.title, form);
     const base = { ...session, etapa_titulo: next.title, etapa_passo: str(next.step) };
     if (screen === "TELA_ORIENTACAO_PROVA") return render(screen, { ...base, tema_redacao: "", texto_motivador: "", erro: "" });
-    if (screen === "ETAPA_PORTAL") return render(screen, { ...base, ...portalScreenData(next.title, next.step) });
+    if (screen === "DOCUMENTOS_INSCRICAO") {
+      const list = docs && academicId(session.processo_seletivo_id) ? await docs.listDocuments(academicId(session.processo_seletivo_id)).catch(() => []) : [];
+      if (list.length && /^\d{11}$/.test(str(session.cpf))) return render(screen, {
+        ...base, documentos: list, enviados: NENHUM_ENVIO,
+        texto: `Envie pelo WhatsApp: ${list.map(d => d.descricao).join(", ")}.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez.`
+      });
+    }
+    if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO") return render("ETAPA_PORTAL", { ...base, ...portalScreenData(next.title, next.step) });
     const b = bind(screen, form);
     const data = { ...base, campos: b.ids, button_id: b.button, ocultos: b.hidden, target: b.target, values: {} };
     const pre = Object.fromEntries(inputsOf(form).map(i => [str(i.field_id), i.value ?? i.value_now ?? null]));
@@ -309,5 +345,5 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     return str(r?.token ?? r?.data?.token, data.token);
   }
 
-  return { login, portal, status, open, advance, cep, cities, schools, send };
+  return { login, portal, status, open, advance, finish, sendDocument, cep, cities, schools, send };
 }
