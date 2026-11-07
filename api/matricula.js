@@ -63,7 +63,7 @@ export const FORM_FIELDS = {
 
 export const USER_FIELDS = new Set([...Object.values(FORM_FIELDS).flatMap(Object.keys), "arquivo", "modo", "login"]);
 
-export const ACTIONS = new Set(["atualizar_portal", "continuar_etapa", "encerrar", "enviar_documento", "enviar_responsavel",
+export const ACTIONS = new Set(["carregar_jornada", "atualizar_portal", "continuar_etapa", "encerrar", "enviar_documento", "enviar_responsavel",
   "buscar_cep", "buscar_cidade", "enviar_endereco", "enviar_resp_dados", "buscar_escola", "enviar_identidade", "enviar_cupom"]);
 
 // Campos por etapa, localizados pelo rótulo do formulário oficial (field_id observado como reserva).
@@ -212,18 +212,35 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
   }
 
   // Depois de concluir uma etapa: abre a próxima etapa se a rota for permitida, senão encerra com a situação.
-  async function advance(from, session) {
+  // redirect: retorno do /submit. Quando a Rubeus já aponta o próximo passo (place_type_id 1),
+  // abrimos esse formulário direto, sem consultar o portal (que é lento).
+  async function advance(from, session, redirect = null) {
+    if (redirect && Number(redirect.place_type_id) === 1 && Number(redirect.place_id) > 0) {
+      try {
+        const response = await open(session, { step: Number(redirect.place_id), title: str(session.etapa_titulo) });
+        if (canAdvance(from, response.screen)) return response;
+      } catch (e) { console.warn(JSON.stringify({ event: "proximo_passo_direto_falhou", step: redirect.place_id, message: e.message })); }
+    }
     const p = await portal(session);
     const s = summarizeStages(p.stages);
     const sess = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id };
     const finish = mensagem => render("STATUS_FINAL", {
-      titulo: s.next ? "Etapa registrada" : "Tudo em dia por aqui", resumo: s.resumo || "Situação indisponível no momento.",
+      titulo: s.next ? "Etapa registrada ✅" : "Tudo em dia por aqui ✅", resumo: s.resumo || "Situação indisponível no momento.",
       mensagem, link_portal: `${PORTAL_URL}/portal-inscrito`
     });
-    if (!s.next) return finish("Não há outra etapa disponível agora. Quando houver novidade, abra este atendimento e escolha \"Já me inscrevi: continuar\".");
+    if (!s.next) return finish("Não há outra etapa disponível agora. Quando houver novidade, abra este atendimento e escolha \"Já sou inscrito\".");
     const response = await open(sess, s.next);
     if (canAdvance(from, response.screen)) return response;
-    return finish(`Próxima etapa: ${s.next.title}. Abra este atendimento novamente e escolha "Já me inscrevi: continuar" para seguir.`);
+    return finish(`Próxima etapa: ${s.next.title}. Abra este atendimento novamente e escolha "Já sou inscrito" para seguir.`);
+  }
+
+  // Logo após o login: resposta rápida, sem o /portal (que pode passar de 6 s).
+  function welcome(session) {
+    return render("PORTAL_STATUS", {
+      ...session, titulo: "Encontramos sua inscrição ✅",
+      resumo: "Toque em Ver minhas etapas para carregarmos a situação de cada etapa, igual ao Portal do candidato. Leva alguns segundinhos.",
+      erro: "", acao_rodape: "carregar_jornada", rotulo_rodape: "Ver minhas etapas", link_portal: `${PORTAL_URL}/portal-inscrito`
+    });
   }
 
   async function loadOptions(form, token, fieldId, filter = []) {
@@ -276,10 +293,10 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     if (screen === "ENDERECO" || screen === "RESP_DADOS") data.ufs = await loadOptions(form, session.token, b.ids.estado_natal);
     if (screen === "RESP_DADOS") data.data_maxima_nascimento = new Date().toISOString().slice(0, 10);
     if (screen === "IDENTIDADE") {
-      data.ufs = await loadOptions(form, session.token, b.ids.uf_rg);
-      data.racas = await loadOptions(form, session.token, b.ids.cor_raca);
-      data.estados_civis = await loadOptions(form, session.token, b.ids.estado_civil);
-      data.anos = b.ids.ano_conclusao ? (await loadOptions(form, session.token, b.ids.ano_conclusao)).sort((a, z) => z.id.localeCompare(a.id)) : [];
+      [data.ufs, data.racas, data.estados_civis, data.anos] = await Promise.all([
+        loadOptions(form, session.token, b.ids.uf_rg), loadOptions(form, session.token, b.ids.cor_raca), loadOptions(form, session.token, b.ids.estado_civil),
+        b.ids.ano_conclusao ? loadOptions(form, session.token, b.ids.ano_conclusao).then(l => l.sort((a, z) => z.id.localeCompare(a.id))) : []
+      ]);
     }
     if (screen === "CUPOM") data.texto = "Se você recebeu um cupom de desconto, informe abaixo. Deixe em branco para seguir sem cupom.";
     data.formulario = form ? { id: form.id, querys: form.querys ?? [] } : null;
@@ -340,12 +357,12 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       set("rg", onlyDigits(data.rg) || str(data.rg).trim()); set("orgao_emissor", str(data.orgao_emissor).trim().toUpperCase());
       set("uf_rg", data.uf_rg); set("cor_raca", data.cor_raca); set("estado_civil", data.estado_civil); set("escola", data.escola); set("ano_conclusao", data.ano_conclusao);
     } else if (screen === "CUPOM") {
-      if (!str(data.cupom).trim()) return null;
+      if (!str(data.cupom).trim()) return { token: str(data.token), redirect: null };
       set("cupom", str(data.cupom).trim().toUpperCase());
     }
     const r = await submitForm(data.button_id, fields, data.token);
-    return str(r?.token ?? r?.data?.token, data.token);
+    return { token: str(r?.token ?? r?.data?.token, data.token), redirect: r?.data?.redirect ?? (r?.data?.next ? { place_id: r.data.next, place_type_id: r.data.local === "step" ? 1 : 0 } : null) };
   }
 
-  return { login, portal, status, open, advance, finish, sendDocument, cep, cities, schools, send };
+  return { login, portal, status, welcome, open, advance, finish, sendDocument, cep, cities, schools, send };
 }

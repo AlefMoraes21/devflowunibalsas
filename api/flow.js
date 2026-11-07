@@ -130,6 +130,11 @@ SCREEN_KEYS.CURSO_INGRESSO=[...SCREEN_KEYS.CURSO_ENEM];
 
 // Telas da continuação (login do candidato e matrícula).
 Object.assign(SCREEN_KEYS, MATRICULA_SCREENS);
+// Telas que processam em segundo plano (fila durável), como QUASE_LA: Rubeus /portal e envios podem passar de 6 s.
+const PROCESSING_KEYS = ["processando", "editavel", "acao_rodape", "rotulo_rodape", "mensagem_processamento", "job_id", "titulo_processamento"];
+const MATRICULA_STEP_ACTIONS = { RESP_FINANCEIRO: "enviar_responsavel", RESP_DADOS: "enviar_resp_dados", ENDERECO: "enviar_endereco", IDENTIDADE: "enviar_identidade", CUPOM: "enviar_cupom", ETAPA_PORTAL: "atualizar_portal", DOCUMENTOS_INSCRICAO: "enviar_documento" };
+const MATRICULA_STEP_LABELS = { RESP_FINANCEIRO: "Continuar", RESP_DADOS: "Continuar", ENDERECO: "Continuar", IDENTIDADE: "Continuar", CUPOM: "Continuar", ETAPA_PORTAL: "Já concluí, atualizar situação", DOCUMENTOS_INSCRICAO: "Enviar documento" };
+for (const s of ["PORTAL_STATUS", "ACOMPANHAMENTO", ...Object.keys(MATRICULA_STEP_ACTIONS)]) SCREEN_KEYS[s] = [...new Set([...SCREEN_KEYS[s], ...PROCESSING_KEYS])];
 Object.assign(FORM_DEFAULTS, MATRICULA_FIELDS);
 const SEALED_SCREENS = ["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO", ...Object.keys(MATRICULA_SCREENS)];
 const PROXIMOS_PASSOS = "\n\nQuando houver uma nova etapa (resultado, pré-matrícula, documentos, contrato), abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.";
@@ -509,6 +514,7 @@ async function routeMatricula(screen, action, data) {
         return matricula.finish(data);
       case "enviar_documento":
         return await matricula.sendDocument(data);
+      case "carregar_jornada":
       case "atualizar_portal":
         if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO") return await matricula.advance(screen, sessaoDe(data));
         return await matricula.status(sessaoDe(data), "", screen === "ACOMPANHAMENTO" ? "ACOMPANHAMENTO" : "PORTAL_STATUS", screen === "ACOMPANHAMENTO" ? { mensagem: data.mensagem } : {});
@@ -526,9 +532,9 @@ async function routeMatricula(screen, action, data) {
         return responseForScreen(screen, { ...data, escolas: list, escola_visivel: true, values: { ...data, escola: list.length === 1 ? list[0].id : "" }, erro: "" });
       }
       case "enviar_responsavel": case "enviar_endereco": case "enviar_resp_dados": case "enviar_identidade": case "enviar_cupom": {
-        const token = await matricula.send(screen, data);
-        console.info(JSON.stringify({ event: "matricula_step", screen, applicationId: toStringValue(data.applyment_id), step: toStringValue(data.etapa_passo), sent: Boolean(token) }));
-        return await matricula.advance(screen, { ...sessaoDe(data), token: token ?? data.token });
+        const sent = await matricula.send(screen, data);
+        console.info(JSON.stringify({ event: "matricula_step", screen, applicationId: toStringValue(data.applyment_id), step: toStringValue(data.etapa_passo), next: sent.redirect?.place_id ?? null }));
+        return await matricula.advance(screen, { ...sessaoDe(data), token: sent.token || data.token }, sent.redirect);
       }
     }
   } catch (e) {
@@ -800,8 +806,8 @@ function responseForScreen(screen, data) {
   if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
-  const actionByScreen={CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao"};
-  const labelByScreen={CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação"};
+  const actionByScreen={CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao",...MATRICULA_STEP_ACTIONS};
+  const labelByScreen={CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação",...MATRICULA_STEP_LABELS};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
   // Navigation belongs to the destination screen, never to the previous form.
   if(actionByScreen[screen]){
@@ -820,7 +826,7 @@ function responseForScreen(screen, data) {
     next.editavel=false;next.acao_rodape="retomar_etapa_ingresso";next.rotulo_rodape="Retomar inscrição";
     next.mensagem_processamento="Seu curso foi recebido. Vamos consultar a próxima etapa sem enviar os dados novamente.";
   }
-  next.titulo_processamento=screen==="CURSO_INGRESSO"?"Só um instante ⏳ Gravando seu curso":screen==="CURSO_ENEM"?"Só um instante ⏳ Gravando suas notas":screen==="QUASE_LA"?"Só um instante ⏳ Concluindo sua inscrição":screen==="TELA_ORIENTACAO_PROVA"?"Só um instante ⏳ Preparando sua prova":"Só um instante ⏳ Enviando sua redação";
+  next.titulo_processamento={CURSO_INGRESSO:"Só um instante ⏳ Gravando seu curso",CURSO_ENEM:"Só um instante ⏳ Gravando suas notas",QUASE_LA:"Só um instante ⏳ Concluindo sua inscrição",TELA_ORIENTACAO_PROVA:"Só um instante ⏳ Preparando sua prova",TELA_REDACAO:"Só um instante ⏳ Enviando sua redação",PORTAL_STATUS:"Só um instante ⏳ Carregando sua jornada",ACOMPANHAMENTO:"Só um instante ⏳ Carregando sua jornada",ETAPA_PORTAL:"Só um instante ⏳ Conferindo sua situação",DOCUMENTOS_INSCRICAO:"Só um instante ⏳ Conferindo sua situação"}[screen]??"Só um instante ⏳ Gravando seus dados";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
     next.processando=true;next.editavel=false;next.job_id="";next.acao_rodape="verificar_entrega";next.rotulo_rodape="Verificar atualização";next.titulo_processamento="Redação recebida";
@@ -1044,8 +1050,8 @@ async function routeFlowRequest(requestData) {
           let session;
           try { session = await matricula.login(cpf, data.data_nascimento); }
           catch (e) { console.warn(JSON.stringify({ event: "login_falhou", message: e.message })); throw new Error("Não encontramos uma inscrição com esse CPF e data de nascimento. Confira os dados e tente de novo."); }
-          try { return await matricula.status({ ...session, cpf }); }
-          catch (e) { console.warn(JSON.stringify({ event: "portal_falhou", message: e.message })); throw new Error("Encontramos sua inscrição, mas não conseguimos carregar as etapas agora. Aguarde alguns segundinhos e toque em Continuar novamente."); }
+          // O /portal da Rubeus pode passar de 6 s: carregamos as etapas em segundo plano no próximo toque.
+          return matricula.welcome({ ...session, cpf });
         }
         processPolicy(raw);
         if (!raw) {
@@ -1422,7 +1428,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.1" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.2" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
