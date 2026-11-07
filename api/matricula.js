@@ -169,7 +169,9 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
   }
 
   async function portal(session) {
-    const r = await api("/login/portal", { method: "POST", body: { portal: PORTAL_ID, token: session.token, ...(session.applyment_id ? { applyment_id: Number(session.applyment_id) } : {}) } });
+    // A documentação cita /login/portal, mas no servidor essa rota responde 404; a rota real é /portal
+    // (conferido em 07/11/2026: POST /api/v1/portal → 401 sem chave; /login/portal → 404).
+    const r = await api("/portal", { method: "POST", body: { portal: PORTAL_ID, token: session.token, ...(session.applyment_id ? { applyment_id: Number(session.applyment_id) } : {}) } });
     const cur = r?.data?.current_process ?? {};
     return { token: str(r?.token ?? r?.data?.token, session.token), processo_seletivo_id: str(cur.id ?? cur.process ?? session.processo_seletivo_id), stages: cur.stages ?? r?.data?.stages ?? [] };
   }

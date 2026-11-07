@@ -1041,8 +1041,11 @@ async function routeFlowRequest(requestData) {
         const raw = data.processo_seletivo_id ?? data.processo_id;
         if (data.modo === "continuar") {
           const cpf = validarLogin(data);
-          const session = await matricula.login(cpf, data.data_nascimento);
-          return await matricula.status({ ...session, cpf });
+          let session;
+          try { session = await matricula.login(cpf, data.data_nascimento); }
+          catch (e) { console.warn(JSON.stringify({ event: "login_falhou", message: e.message })); throw new Error("Não encontramos uma inscrição com esse CPF e data de nascimento. Confira os dados e tente de novo."); }
+          try { return await matricula.status({ ...session, cpf }); }
+          catch (e) { console.warn(JSON.stringify({ event: "portal_falhou", message: e.message })); throw new Error("Encontramos sua inscrição, mas não conseguimos carregar as etapas agora. Aguarde alguns segundinhos e toque em Continuar novamente."); }
         }
         processPolicy(raw);
         if (!raw) {
@@ -1419,7 +1422,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
