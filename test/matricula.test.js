@@ -31,7 +31,9 @@ test('telas novas respeitam limites de componentes da Meta e batem com o servido
  assert.ok(!j.screens.some(s=>s.id==='LOGIN_CANDIDATO'));
  // A WABA exige que init-values tenha o mesmo tipo do input: campos "number" não aceitam ${data.valor_*} (string).
  for(const s of j.screens){const forms=walk(s.layout).filter(c=>c.type==='Form'&&c['init-values']);for(const f of forms)for(const c of walk(f.children))if(c.type==='TextInput'&&c['input-type']==='number')assert.ok(!(c.name in f['init-values']),`${s.id}.${c.name}`)}
- for(const s of ['QUASE_LA','TELA_REDACAO'])assert.ok(j.routing_model[s].includes('ACOMPANHAMENTO'),s);
+ assert.ok(j.routing_model.QUASE_LA.includes('ACOMPANHAMENTO'));
+ assert.ok(j.routing_model.TELA_REDACAO.includes('ACOMPANHAMENTO_POS_PROVA'));
+ assert.ok(j.routing_model.ACOMPANHAMENTO.includes('TELA_ORIENTACAO_PROVA'));
  const doc=walk(j.screens.find(s=>s.id==='DOCUMENTOS_INSCRICAO').layout).find(c=>c.type==='DocumentPicker');assert.equal(doc['max-uploaded-documents'],1);assert.ok(doc['max-file-size-kb']<=740);
 });
 
@@ -71,6 +73,30 @@ function rubeus(portalSequence,forms,submits){
 }
 async function run(request){request=structuredClone(request);return flowContext.run({request,write:null,deadline:Date.now()+60000},()=>routeFlowRequest(request))}
 const ask=(screen,acao,estado,user={})=>({screen,action:'data_exchange',flow_token:'t',data:{acao,estado,...user}});
+
+test('acompanhamento abre a prova e o painel pós-prova mantém apenas rotas permitidas',async()=>{
+ process.env.FLOW_PRIVATE_KEY='unit-routing-key';process.env.RBS_TOKEN='unit';
+ const previous=globalThis.fetch,submits=[];
+ const proof=stage('Prova online',0,'Prova disponível',33);
+ globalThis.fetch=rubeus([[proof,stage('Seleção resp. financeiro',0,'Pendente',300676)]],{33:{id:33,content:{inputs:[]}},300676:radioForm},submits);
+ try{
+  const j=await flowJson(),base={token:'unit',applyment_id:'123',processo_seletivo_id:'20383',proxima:{step:33,title:'Prova online'}};
+  const pre=await run(ask('ACOMPANHAMENTO','continuar_etapa',sealState('ACOMPANHAMENTO',base)));
+  assert.equal(pre.screen,'TELA_ORIENTACAO_PROVA');assert.ok(j.routing_model.ACOMPANHAMENTO.includes(pre.screen));
+  assert.equal(canAdvance('ACOMPANHAMENTO','TELA_ORIENTACAO_PROVA'),true);
+  assert.equal(canAdvance('ACOMPANHAMENTO_POS_PROVA','TELA_ORIENTACAO_PROVA'),false);
+  const post=await run(ask('ACOMPANHAMENTO_POS_PROVA','atualizar_portal',sealState('ACOMPANHAMENTO_POS_PROVA',base)));
+  assert.equal(post.screen,'ACOMPANHAMENTO_POS_PROVA');
+  assert.equal(openState(post.data.estado,post.screen).proxima.step,300676);
+  const next=await run(ask(post.screen,'continuar_etapa',post.data.estado));
+  assert.equal(next.screen,'RESP_FINANCEIRO');assert.ok(j.routing_model[post.screen].includes(next.screen));
+  const stale=await run(ask(post.screen,'continuar_etapa',sealState(post.screen,base)));
+  assert.equal(stale.screen,post.screen);assert.equal(stale.data.acao_rodape,'atualizar_portal');assert.equal(stale.data.tem_erro,true);
+  const empty=await run(ask(post.screen,'continuar_etapa',sealState(post.screen,{...base,proxima:null})));
+  assert.equal(empty.screen,post.screen);
+  assert.equal(submits.length,0);
+ }finally{globalThis.fetch=previous}
+});
 
 test('jornada de matrícula: login, responsável, endereço e tela nativa de documentos sem sessão de portal simulada',async()=>{
  process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
