@@ -72,7 +72,7 @@ function rubeus(portalSequence,forms,submits){
 async function run(request){request=structuredClone(request);return flowContext.run({request,write:null,deadline:Date.now()+60000},()=>routeFlowRequest(request))}
 const ask=(screen,acao,estado,user={})=>({screen,action:'data_exchange',flow_token:'t',data:{acao,estado,...user}});
 
-test('jornada de matrícula: login, responsável, endereço com busca de cidade, documentos no portal e situação final',async()=>{
+test('jornada de matrícula: login, responsável, endereço e tela nativa de documentos sem sessão de portal simulada',async()=>{
  process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
  const submits=[],previous=globalThis.fetch;
  const done=[stage('Inscrição',1,'Concluída'),stage('Prova online',1,'Aprovado')];
@@ -111,8 +111,8 @@ test('jornada de matrícula: login, responsável, endereço com busca de cidade,
   assert.equal(identity.screen,'IDENTIDADE');assert.deepEqual(identity.data.anos.map(a=>a.id),['2026','2025']);
   const docs=await run(ask('IDENTIDADE','enviar_identidade',identity.data.estado,{rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'3',estado_civil:'S',ano_conclusao:'2025'}));
   assert.equal(submits.length,3);const idSent=Object.fromEntries(submits[2].data.map(f=>[f.field_id,f.value]));assert.equal(idSent[38642],'123456789');assert.equal(idSent[38643],'SSP');assert.equal(idSent[38699],undefined);
-  assert.equal(docs.screen,'ETAPA_PORTAL');assert.match(docs.data.titulo,/documentos/i);assert.match(docs.data.link_portal,/passo\/300671$/);
-  const end=await run(ask('ETAPA_PORTAL','atualizar_portal',docs.data.estado));
+  assert.equal(docs.screen,'DOCUMENTOS_MATRICULA');assert.match(docs.data.titulo,/documentos/i);assert.equal(docs.data.tem_erro,true,'fixture does not provide a portal session; no false upload availability');
+  const end=await run(ask('DOCUMENTOS_MATRICULA','atualizar_portal',docs.data.estado));
   assert.equal(end.screen,'STATUS_FINAL');assert.match(end.data.resumo,/Contrato: Em análise/);assert.equal(submits.length,3);
  }finally{globalThis.fetch=previous}
 });

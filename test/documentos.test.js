@@ -26,7 +26,7 @@ test('transferência: conclui, abre acompanhamento sem fechar o Flow e envia o h
  const calls=[];const previous=globalThis.fetch;
  globalThis.fetch=async(input,options={})=>{
   const u=new URL(String(input));calls.push(u.origin+u.pathname);
-  if(u.origin==='https://cdn.whatsapp.test')return new Response(file);
+  if(u.origin==='https://mmg.whatsapp.net')return new Response(file);
   if(u.origin==='https://api.unibalsas.edu.br'){
    if(u.pathname==='/rm/documents'){assert.equal(u.searchParams.get('idps'),'225');return Response.json({resultado:[{CODDOCUMENTO:'28',DESCRICAO:'HISTÓRICO ACADÊMICO'}]})}
    if(u.pathname==='/blip/inscritos/225/11144477735')return Response.json({CODCOLIGADA:'1',IDPS:'225',NUMEROINSCRICAO:'77',NOME:'TESTE',CPF:'11144477735'});
@@ -51,7 +51,7 @@ test('transferência: conclui, abre acompanhamento sem fechar o Flow e envia o h
   assert.equal(hub.screen,'ACOMPANHAMENTO');assert.match(hub.data.mensagem,/Transferência/);assert.equal(hub.data.acao_rodape,'continuar_etapa');assert.match(hub.data.resumo,/👉 Documentos inscrição/);
   const docs=await run(ask('ACOMPANHAMENTO','continuar_etapa',hub.data.estado));
   assert.equal(docs.screen,'DOCUMENTOS_INSCRICAO');assert.deepEqual(docs.data.documentos.map(d=>d.id),['28']);assert.equal(docs.data.enviados,'Nenhum documento enviado ainda.');
-  const media=[{media_id:'m1',cdn_url:'https://cdn.whatsapp.test/f',file_name:'historico.pdf',encryption_metadata:meta}];
+  const media=[{media_id:'m1',cdn_url:'https://mmg.whatsapp.net/f',file_name:'historico.pdf',encryption_metadata:meta}];
   const noType=await run(ask('DOCUMENTOS_INSCRICAO','enviar_documento',docs.data.estado,{documento:'',arquivo:media}));
   assert.equal(noType.data.tem_erro,true);assert.ok(!calls.includes('https://api.unibalsas.edu.br/blip/documents'));
   const sent=await run(ask('DOCUMENTOS_INSCRICAO','enviar_documento',docs.data.estado,{documento:'28',arquivo:media}));
@@ -71,3 +71,4 @@ test('se o portal não responder logo após a inscrição, mantém a confirmaç�
   assert.equal(r.screen,'CONFIRMACAO');assert.match(r.data.mensagem,/Já sou inscrito/);
  }finally{globalThis.fetch=previous}
 });
+
