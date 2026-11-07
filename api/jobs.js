@@ -5,7 +5,7 @@ const actions={CURSO_INGRESSO:'avancar_curso_ingresso',CURSO_ENEM:'avancar_curso
 const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 // Jornada de matrícula: ações que podem ocorrer em mais de uma tela e dependem do /portal
 // da Rubeus (que pode passar de 6 s). Rodam no worker, com prazo maior.
-const multiScreens={selecionar_processo:['ESCOLHA_PROCESSO'],enviar_documento_matricula:['DOCUMENTOS_MATRICULA'],atualizar_documentos_matricula:['DOCUMENTOS_MATRICULA'],enviar_documento:['DOCUMENTOS_INSCRICAO'],carregar_jornada:['PORTAL_STATUS','ACOMPANHAMENTO'],continuar_etapa:['PORTAL_STATUS','ACOMPANHAMENTO'],atualizar_portal:['PORTAL_STATUS','ACOMPANHAMENTO','ETAPA_PORTAL','DOCUMENTOS_INSCRICAO','DOCUMENTOS_MATRICULA'],enviar_responsavel:['RESP_FINANCEIRO'],enviar_resp_dados:['RESP_DADOS'],enviar_endereco:['ENDERECO'],enviar_identidade:['IDENTIDADE'],enviar_cupom:['CUPOM']};
+const multiScreens={selecionar_processo:['ESCOLHA_PROCESSO'],enviar_documento_matricula:['DOCUMENTOS_MATRICULA'],atualizar_documentos_matricula:['DOCUMENTOS_MATRICULA'],enviar_documento:['DOCUMENTOS_INSCRICAO'],carregar_jornada:['PORTAL_STATUS','ACOMPANHAMENTO','ACOMPANHAMENTO_POS_PROVA'],continuar_etapa:['PORTAL_STATUS','ACOMPANHAMENTO','ACOMPANHAMENTO_POS_PROVA'],atualizar_portal:['PORTAL_STATUS','ACOMPANHAMENTO','ACOMPANHAMENTO_POS_PROVA','ETAPA_PORTAL','DOCUMENTOS_INSCRICAO','DOCUMENTOS_MATRICULA'],enviar_responsavel:['RESP_FINANCEIRO'],enviar_resp_dados:['RESP_DADOS'],enviar_endereco:['ENDERECO'],enviar_identidade:['IDENTIDADE'],enviar_cupom:['CUPOM']};
 const isDocumentSend=action=>['enviar_documento','enviar_documento_matricula'].includes(action);
 const isLogin=job=>job.request.data.acao==='selecionar_processo'&&job.request.data.modo==='continuar';
 const isImmediate=job=>isDocumentSend(job.request.data.acao)||job.request.data.acao==='atualizar_documentos_matricula'||isLogin(job);
@@ -45,6 +45,11 @@ export function createJobEngine({store=createStore(),enqueue=enqueueJob,run,open
         }
         if(current.result.screen==='PENDENTE')return processing(current,{erro:current.result.data.mensagem,tem_erro:true,mensagem_processamento:'O resultado precisa de conferência no Portal do candidato. Não reenviamos esta operação.'});
         const result=current.result;
+        // Compatibilidade com resultados já persistidos antes da separação dos painéis.
+        if(current.request.screen==='TELA_REDACAO'&&result.screen==='ACOMPANHAMENTO'&&result.data?.estado){
+          const trusted=openState(result.data.estado,'ACOMPANHAMENTO');
+          return render('ACOMPANHAMENTO_POS_PROVA',{...trusted,...result.data,proxima:null,processando:false,job_id:'',acao_rodape:'atualizar_portal',rotulo_rodape:'Atualizar situação'});
+        }
         // Refresh results persisted by 1.1.0 so its inherited footer cannot leak
         // the previous screen's action into a completed transition.
         if(actions[result.screen]&&result.data?.estado){

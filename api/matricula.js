@@ -22,6 +22,7 @@ const title30 = v => str(v).replace(/-+\s*$/g, "").trim().slice(0, 30);
 export const SCREENS = {
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
   ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape"],
+  ACOMPANHAMENTO_POS_PROVA: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape"],
   DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "erro", "tem_erro", "estado", "valor_documento"],
   DOCUMENTOS_MATRICULA: ["titulo", "documentos", "texto", "documentos_resumo", "mensagem_envio", "tem_pendentes", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
@@ -43,11 +44,11 @@ export const SCREENS = {
 // O routing_model da Meta só aceita rotas para frente. A jornada segue esta ordem;
 // quando a próxima etapa do portal fica "para trás", o Flow termina em STATUS_FINAL.
 export const ORDER = ["PORTAL_STATUS", "DOCUMENTOS_INSCRICAO", "RESP_FINANCEIRO", "RESP_DADOS", "ENDERECO", "IDENTIDADE", "CUPOM", "DOCUMENTOS_MATRICULA", "ETAPA_PORTAL"];
-const HUBS = new Set(["PORTAL_STATUS", "ACOMPANHAMENTO"]);
+const HUBS = new Set(["PORTAL_STATUS", "ACOMPANHAMENTO", "ACOMPANHAMENTO_POS_PROVA"]);
 const rank = s => (HUBS.has(s) ? 0 : ORDER.indexOf(s));
 export function canAdvance(from, to) {
   if (from === to && ["ETAPA_PORTAL", "DOCUMENTOS_INSCRICAO", "DOCUMENTOS_MATRICULA"].includes(to)) return true;
-  if (to === "TELA_ORIENTACAO_PROVA") return from === "PORTAL_STATUS";
+  if (to === "TELA_ORIENTACAO_PROVA") return ["PORTAL_STATUS", "ACOMPANHAMENTO"].includes(from);
   const a = rank(from), b = rank(to);
   return a >= 0 && b > a;
 }
@@ -185,10 +186,13 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
   }
 
   // Painel com a situação de cada etapa. PORTAL_STATUS vem do login; ACOMPANHAMENTO vem
-  // logo depois da inscrição ou da redação, sem fechar o Flow.
+  // logo depois da inscrição. Após a redação usamos outro painel, sem rota de volta à prova.
   async function status(session, erro = "", hub = "PORTAL_STATUS", extra = {}) {
     const p = await portal(session);
     const s = summarizeStages(p.stages);
+    if (hub === "ACOMPANHAMENTO_POS_PROVA") {
+      s.next = s.rows.find(r => !r.conclusive && r.step && r.action && !/prova|avaliacao|redacao/.test(norm(r.title))) ?? null;
+    }
     const base = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id, proxima: s.next };
     const documentStage=s.rows.find(row=>/documentos?.*matric/.test(norm(row.title)));
     if(nativeDocs&&session.portal_session&&documentStage&&!s.next){
@@ -197,11 +201,20 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     }
     const waiting = s.rows.find(r => !r.conclusive && !(r.step && r.action));
     return render(hub, {
-      ...base, titulo: hub === "ACOMPANHAMENTO" ? "Inscrição recebida ✅" : "Sua inscrição",
+      ...base, titulo: hub === "ACOMPANHAMENTO_POS_PROVA" ? "Redação recebida ✅" : hub === "ACOMPANHAMENTO" ? "Inscrição recebida ✅" : "Sua inscrição",
       resumo: (s.resumo || "Nenhuma etapa disponível no momento.") + (!s.next && waiting ? `\n\n⏳ ${waiting.title}: aguardando a análise da equipe UniBalsas. Você pode tocar em Atualizar situação daqui a pouco ou voltar depois por "Já sou inscrito".` : ""),
       erro, acao_rodape: base.proxima ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: base.proxima ? `Continuar: ${title30(base.proxima.title)}`.slice(0, 35) : "Atualizar situação",
       link_portal: `${PORTAL_URL}/portal-inscrito`, ...extra
     });
+  }
+
+  async function continueStep(from, session, next, extra = {}) {
+    if (!HUBS.has(from)) throw new Error("Ação não permitida nesta tela.");
+    if (!next) return status(session, "", from, extra);
+    const response = await open(session, next);
+    if (canAdvance(from, response.screen)) return response;
+    // Atualiza o próprio painel quando o portal ainda anuncia uma etapa já percorrida.
+    return render(from, { ...session, ...extra, proxima: null, erro: "A situação desta etapa precisa ser atualizada. Toque em Atualizar situação.", acao_rodape: "atualizar_portal", rotulo_rodape: "Atualizar situação" });
   }
 
   function finish(data) {
@@ -391,5 +404,5 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const current=data.portal_document_step?await nativeDocs.refresh(data):await nativeDocs.open(data,{step:data.etapa_passo});
     return render('DOCUMENTOS_MATRICULA',current);
   }
-  return { login, portal, status, welcome, open, advance, finish, sendDocument, sendEnrollmentDocument, refreshEnrollmentDocuments, cep, cities, schools, send };
+  return { login, portal, status, welcome, open, advance, continueStep, finish, sendDocument, sendEnrollmentDocument, refreshEnrollmentDocuments, cep, cities, schools, send };
 }

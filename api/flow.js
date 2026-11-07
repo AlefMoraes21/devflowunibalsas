@@ -135,7 +135,7 @@ Object.assign(SCREEN_KEYS, MATRICULA_SCREENS);
 const PROCESSING_KEYS = ["processando", "editavel", "acao_rodape", "rotulo_rodape", "mensagem_processamento", "job_id", "titulo_processamento"];
 const MATRICULA_STEP_ACTIONS = { RESP_FINANCEIRO: "enviar_responsavel", RESP_DADOS: "enviar_resp_dados", ENDERECO: "enviar_endereco", IDENTIDADE: "enviar_identidade", CUPOM: "enviar_cupom", ETAPA_PORTAL: "atualizar_portal", DOCUMENTOS_INSCRICAO: "enviar_documento", DOCUMENTOS_MATRICULA: "enviar_documento_matricula" };
 const MATRICULA_STEP_LABELS = { RESP_FINANCEIRO: "Continuar", RESP_DADOS: "Continuar", ENDERECO: "Continuar", IDENTIDADE: "Continuar", CUPOM: "Continuar", ETAPA_PORTAL: "Já concluí, atualizar situação", DOCUMENTOS_INSCRICAO: "Enviar documento", DOCUMENTOS_MATRICULA: "Enviar documento" };
-for (const s of ["PORTAL_STATUS", "ACOMPANHAMENTO", ...Object.keys(MATRICULA_STEP_ACTIONS)]) SCREEN_KEYS[s] = [...new Set([...SCREEN_KEYS[s], ...PROCESSING_KEYS])];
+for (const s of ["PORTAL_STATUS", "ACOMPANHAMENTO", "ACOMPANHAMENTO_POS_PROVA", ...Object.keys(MATRICULA_STEP_ACTIONS)]) SCREEN_KEYS[s] = [...new Set([...SCREEN_KEYS[s], ...PROCESSING_KEYS])];
 Object.assign(FORM_DEFAULTS, MATRICULA_FIELDS);
 const SEALED_SCREENS = ["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO", ...Object.keys(MATRICULA_SCREENS)];
 const PROXIMOS_PASSOS = "\n\nQuando houver uma nova etapa (resultado, pré-matrícula, documentos, contrato), abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.";
@@ -500,9 +500,9 @@ function validarLogin(data) {
 
 // Depois da inscrição/redação: painel de acompanhamento sem fechar o Flow.
 // Se o portal ainda não responder para esta sessão, mantém a confirmação tradicional.
-async function acompanhamento(data, confirmation) {
+async function acompanhamento(data, confirmation, hub = "ACOMPANHAMENTO") {
   try {
-    return await matricula.status(sessaoDe(data), "", "ACOMPANHAMENTO", { mensagem: confirmation.mensagem });
+    return await matricula.status(sessaoDe(data), "", hub, { mensagem: confirmation.mensagem });
   } catch (e) {
     console.warn(JSON.stringify({ event: "acompanhamento_indisponivel", applicationId: toStringValue(data.applyment_id), message: e.message }));
     return responseForScreen("CONFIRMACAO", confirmation);
@@ -525,10 +525,9 @@ async function routeMatricula(screen, action, data) {
       case "carregar_jornada":
       case "atualizar_portal":
         if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO" || screen === "DOCUMENTOS_MATRICULA") return await matricula.advance(screen, sessaoDe(data));
-        return await matricula.status(sessaoDe(data), "", screen === "ACOMPANHAMENTO" ? "ACOMPANHAMENTO" : "PORTAL_STATUS", screen === "ACOMPANHAMENTO" ? { mensagem: data.mensagem } : {});
+        return await matricula.status(sessaoDe(data), "", screen.startsWith("ACOMPANHAMENTO") ? screen : "PORTAL_STATUS", screen.startsWith("ACOMPANHAMENTO") ? { mensagem: data.mensagem } : {});
       case "continuar_etapa":
-        if (!data.proxima) return await matricula.status(sessaoDe(data));
-        return await matricula.open(sessaoDe(data), data.proxima);
+        return await matricula.continueStep(screen, sessaoDe(data), data.proxima, { mensagem: data.mensagem, resumo: data.resumo, titulo: data.titulo });
       case "buscar_cep":
         return responseForScreen(screen, { ...data, values: { ...data, ...(await matricula.cep(data)) }, erro: "" });
       case "buscar_cidade": {
@@ -554,7 +553,7 @@ async function routeMatricula(screen, action, data) {
     const p = pendingAfterWrite(data);
     if (p) return p;
     const { arquivo, ...safe } = data; // mídia do DocumentPicker não entra no estado selado
-    if (["PORTAL_STATUS", "ACOMPANHAMENTO", "ETAPA_PORTAL"].includes(screen)) return responseForScreen(screen, { ...safe, erro: e.message });
+    if (["PORTAL_STATUS", "ACOMPANHAMENTO", "ACOMPANHAMENTO_POS_PROVA", "ETAPA_PORTAL"].includes(screen)) return responseForScreen(screen, { ...safe, erro: e.message });
     return responseForScreen(screen, { ...safe, values: safe, erro: e.message });
   }
   return { data: { status: "active" } };
@@ -1392,7 +1391,7 @@ async function followReceipt(data,receipt){
   const checked=await proofRouter.verify(data,data.sessao_avaliacao?.binding);
   flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt??data.recibo_avaliacao,portal:checked.portal};
   console.info(JSON.stringify({event:"proof_portal_check",applicationId:String(data.applyment_id),confirmed:portalConfirmsDelivery(checked.portal)}));
-  if(portalConfirmsDelivery(checked.portal))return await acompanhamento(data,{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)});
+  if(portalConfirmsDelivery(checked.portal))return await acompanhamento(data,{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)},"ACOMPANHAMENTO_POS_PROVA");
   return receiptScreen(data,receipt);
  }catch(e){return receiptScreen(data,receipt,e.message)}
 }
@@ -1446,7 +1445,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
