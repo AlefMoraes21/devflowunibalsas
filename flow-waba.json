@@ -234,7 +234,7 @@
                     "type": "TextInput",
                     "name": "login",
                     "label": "CPF",
-                    "input-type": "number",
+                    "input-type": "text",
                     "helper-text": "Somente os 11 números",
                     "required": true
                   },
@@ -2551,7 +2551,7 @@
                 "type": "TextInput",
                 "name": "cpf",
                 "label": "CPF",
-                "input-type": "number",
+                "input-type": "text",
                 "helper-text": "Somente os 11 números",
                 "required": true
               },
@@ -2575,7 +2575,7 @@
                 "type": "TextInput",
                 "name": "cep",
                 "label": "CEP",
-                "input-type": "number",
+                "input-type": "text",
                 "helper-text": "Somente números",
                 "required": false
               },
@@ -2862,7 +2862,7 @@
                 "type": "TextInput",
                 "name": "cep",
                 "label": "CEP",
-                "input-type": "number",
+                "input-type": "text",
                 "helper-text": "Somente números",
                 "required": false
               },
