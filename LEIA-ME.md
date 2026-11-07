@@ -1,3 +1,103 @@
+# UniBalsas Flow 1.7.0 — documentos de matrícula dentro do WhatsApp
+
+Esta entrega implementa o envio nativo da matrícula no código do Flow. A etapa deixa de encaminhar o candidato ao site para anexar: abre `DOCUMENTOS_MATRICULA`, consulta o formulário da inscrição autenticada e envia o arquivo binário ao mesmo endpoint utilizado pelo portal.
+
+Não houve publicação desta versão no GitHub, no Cloud Run ou na Meta. A confirmação de funcionamento do código usa APIs simuladas; o teste manual anterior confirmou a jornada do site e a situação Em análise, não uma execução desta versão dentro do WhatsApp.
+
+## Experiência implementada
+
+1. O candidato entra em “Já sou inscrito” com CPF/data de nascimento. O login passa pela fila durável e prepara também uma sessão própria do portal.
+2. Ao chegar aos documentos de matrícula, o Flow carrega os tipos, obrigatoriedade e estados do formulário autenticado. Não há códigos de documento fixados no código.
+3. O candidato escolhe um documento pendente ou com reenvio liberado e anexa PDF, JPG, JPEG ou PNG de até 5 MiB (5120 KiB no DocumentPicker).
+4. O backend baixa a mídia nativa da Meta, verifica a integridade e o formato e monta o multipart do portal com os metadados reais dos documentos.
+5. O envio é executado na fila persistida, sem manter o WhatsApp aguardando a API acadêmica. O candidato consulta o andamento após 15–20 segundos.
+6. O backend relê a mesma etapa e verifica arquivo/caminho novo, na inscrição e no documento corretos, antes de confirmar recebimento. Um HTTP 200 isolado não basta.
+7. A tela mostra pendente, em análise, recusado com motivo ou aprovado. Não pede outro arquivo para documento já recebido.
+8. Ao voltar em outra sessão, o candidato recupera a etapa conhecida e a situação consultada no portal. O bloqueio de gravação por inscrição/documento também vale entre sessões e arquivos diferentes.
+9. Quando houver recusa e o formulário permitir novo envio, o documento volta à lista de anexação. O contrato continua bloqueado enquanto o portal indicar aguardando documentação.
+
+A jornada nova de inscrição preserva a data já preenchida em estado criptografado até preparar a sessão do portal; não exige uma segunda digitação para esse caso. A identidade do candidato fica separada do CPF do responsável financeiro para impedir que a matrícula seja associada ao responsável por engano.
+
+## Contrato usado
+
+Base do portal: `https://vestibular.unibalsas.edu.br/api/applyment/`.
+
+| Rota | Método/corpo | Finalidade |
+|---|---|---|
+| `settings/` | POST JSON com domínio/token | Configuração e token próprio do portal. |
+| `login-info` | POST JSON com domínio/token | Campos dinâmicos de CPF/data. |
+| `login-portal` | POST JSON com `user_data` como objeto | Autenticar a sessão sem tentar converter o token `/api/v1`. |
+| `check-login` | POST JSON com token | Conferir pessoa/inscrição e CPF/processo quando retornados. |
+| `getApplymentDataByStep/{step}` | POST JSON com token/processo | Ler o formulário e reler a entrega. |
+| `button-click` | POST multipart com `file_0` e `data` JSON texto | Gravar o documento com código/CHAVERM do formulário. |
+
+O multipart inclui os registros de todos os documentos do componente, preservando os demais com `value: null`, como o cliente do site. Os bytes seguem em `file_0`; a referência do documento aponta para essa parte. Cookies/XSRF pertencem à mesma sessão e ao mesmo domínio. Nenhuma credencial ou conteúdo de arquivo entra nos logs novos.
+
+O antigo endpoint acadêmico `/blip/documents` continua atendendo documentos de inscrição com seu limite de 740 KiB. Ele não é usado para o upload nativo da matrícula. As funcionalidades existentes de contrato/pagamento e demais etapas foram preservadas; esta implementação concentra a equivalência da jornada de documentos.
+
+## Persistência e falhas
+
+- Jobs existentes: Firestore criptografado e Cloud Tasks, com controle de execução concorrente.
+- `flowDocumentOperations`: ledger criptografado por CPF/processo/inscrição/documento, com estados running, received, uncertain e rejected. O identificador é um hash; não contém CPF em claro.
+- `flowPortalDocumentBindings`: passo de documentos conhecido para retomar a consulta entre sessões.
+- Timeout não causa novo POST automático. Uma leitura pode confirmar a entrega cuja resposta se perdeu.
+- Arquivo antigo com mesmo nome não é aceito como recibo de uma substituição: a confirmação exige mudança da lista persistida ou do caminho em relação ao estado anterior.
+- Um segundo clique com outro arquivo não sobrescreve os metadados da operação incerta original.
+- A reconciliação entre sessões conserva a referência do arquivo original e permite reenvio somente após recusa comprovada e liberação pelo portal.
+
+Não habilitar remoção automática de locks incertos sem uma política de reconciliação. Os registros têm prazo informativo de 30 dias, mas um registro incerto ainda presente continua impedindo novo envio. O script de implantação existente habilita TTL somente nas coleções antigas de jobs/provas, não no ledger novo.
+
+## Validação realizada
+
+**162 testes passaram, zero falhas**, executados com `node --test "test/*.test.js"` no projeto revisado.
+
+Os testes integrados percorrem a rota real do Flow com estado selado, o cliente do portal, o mapper, o download/descriptografia da mídia, o multipart, o armazenamento simulado e a fila. Incluem:
+
+- Login assíncrono e cliques repetidos sem dupla autenticação.
+- Tela de matrícula sem ação de abrir site para anexar.
+- Upload acima de 740 KiB e no limite exato de 5 MiB; excesso bloqueado antes do POST.
+- Confirmação por reconsulta, resposta perdida, sucesso HTTP sem recibo e documento antigo com nome igual.
+- Retomada, recusa, reenvio autorizado e aprovação.
+- Bloqueio de outra mídia em nova sessão quando existe gravação incerta.
+- Preservação do CPF do candidato quando o responsável informa outro CPF.
+- Jornada anterior, ENEM, redação, navegação e controle de concorrência.
+
+O JSON está na versão 7.3, com 23 telas. Os testes verificam referências, chaves do servidor, um picker por tela, tamanho, ações e routing_model sem ciclos, com até dez destinos. A tela PORTAL_STATUS usa os erros recuperáveis na própria tela, liberando o destino necessário à matrícula sem exceder o limite de rotas.
+
+## Arquivos principais
+
+| Arquivo | Alteração |
+|---|---|
+| `api/portal-client.js` | Sessão própria, cookies, identidade, consultas e upload multipart. |
+| `api/portal-documentos.js` | Interpretação inerte dos registros do formulário, condições declarativas, estados e encoder. |
+| `api/matricula-documentos.js` | Jornada nativa, confirmação de persistência, retomada e reconciliação. |
+| `api/document-ledger.js` | Bloqueio durável entre sessões e contexto da operação original. |
+| `api/documentos.js` | Download Meta com limite específico por caminho; matrícula até 5 MiB. |
+| `api/matricula.js` | Entrada na tela nativa, sessão auxiliar, consulta e envio. |
+| `api/flow.js` | Roteamento, identidade protegida, estado e versão 1.7.0. |
+| `api/jobs.js` | Login e envio/consulta nativos na fila existente. |
+| `api/cloud-store.js` | Update condicional em coleção opcional, mantendo o padrão existente. |
+| `flow-waba.json` | Nova tela de matrícula, 5 MiB, acompanhamento e espera de login. |
+| `package.json` | Versão 1.7.0. |
+| `test/` | Casos de cliente, mapper, ledger, jornada integrada e regressões. |
+
+## Para ativar no atendimento
+
+1. Revisar o patch e executar os testes no ambiente de implantação.
+2. Validar o JSON revisado em um rascunho da Meta. O Flow publicado anterior foi preservado.
+3. Homologar uma inscrição de teste autorizada usando o backend revisado, incluindo upload real e reconsulta. O limite de 5 MiB foi validado com mocks; o limite efetivo do endpoint do portal ainda requer essa homologação.
+4. Publicar o backend e o JSON compatíveis e, se a Meta exigir outro ID de Flow, atualizar a referência correspondente no atendimento.
+
+Versão esperada em `GET /api/flow` após a implantação: `unibalsas-cloudrun-jornada-1.7.0`.
+
+CAPTCHA, LGPD adicional ou condições arbitrárias do formulário não são ignorados. Se o portal exigir uma dessas etapas não representadas no contrato suportado, o backend bloqueia o envio e apresenta erro de acesso/etapa, preservando a identidade e os dados. O cliente publicado pode mudar; falhas de contrato são tratadas sem fabricar códigos ou confirmar recebimento.
+
+Esta é a implementação conectada do upload, e não apenas o relatório de engenharia reversa. Ela ainda não foi publicada nem homologada contra uma gravação real pelo WhatsApp nesta sessão.
+
+
+---
+# Histórico das entregas anteriores
+
 # Versão 1.6.0 — Login na tela inicial, acompanhamento e documentos pelo WhatsApp
 
 ## O que mudou
@@ -139,3 +239,4 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 ```
 
 A evidência de conclusão esperada é ingresso_registration com process 20384 ou 20385, confirmed true e applicationId da inscrição, acompanhada de flow_job done / CONFIRMACAO e conferência no CRM.
+
