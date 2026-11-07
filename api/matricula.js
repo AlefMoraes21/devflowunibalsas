@@ -23,6 +23,7 @@ export const SCREENS = {
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
   ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape"],
   DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "erro", "tem_erro", "estado", "valor_documento"],
+  DOCUMENTOS_MATRICULA: ["titulo", "documentos", "texto", "documentos_resumo", "mensagem_envio", "tem_pendentes", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
   RESP_DADOS: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
     "valor_nome", "valor_email", "valor_cpf", "valor_data_nascimento", "valor_celular", "valor_cep", "valor_rua",
@@ -41,11 +42,11 @@ export const SCREENS = {
 
 // O routing_model da Meta só aceita rotas para frente. A jornada segue esta ordem;
 // quando a próxima etapa do portal fica "para trás", o Flow termina em STATUS_FINAL.
-export const ORDER = ["PORTAL_STATUS", "DOCUMENTOS_INSCRICAO", "RESP_FINANCEIRO", "RESP_DADOS", "ENDERECO", "IDENTIDADE", "CUPOM", "ETAPA_PORTAL"];
+export const ORDER = ["PORTAL_STATUS", "DOCUMENTOS_INSCRICAO", "RESP_FINANCEIRO", "RESP_DADOS", "ENDERECO", "IDENTIDADE", "CUPOM", "DOCUMENTOS_MATRICULA", "ETAPA_PORTAL"];
 const HUBS = new Set(["PORTAL_STATUS", "ACOMPANHAMENTO"]);
 const rank = s => (HUBS.has(s) ? 0 : ORDER.indexOf(s));
 export function canAdvance(from, to) {
-  if (from === to && (to === "ETAPA_PORTAL" || to === "DOCUMENTOS_INSCRICAO")) return true; // atualização da mesma tela
+  if (from === to && ["ETAPA_PORTAL", "DOCUMENTOS_INSCRICAO", "DOCUMENTOS_MATRICULA"].includes(to)) return true;
   if (to === "TELA_ORIENTACAO_PROVA") return from === "PORTAL_STATUS";
   const a = rank(from), b = rank(to);
   return a >= 0 && b > a;
@@ -53,6 +54,7 @@ export function canAdvance(from, to) {
 
 export const FORM_FIELDS = {
   DOCUMENTOS_INSCRICAO: { documento: "" },
+  DOCUMENTOS_MATRICULA: { documento: "" },
   RESP_FINANCEIRO: { responsavel: "" },
   RESP_DADOS: { nome: "", email: "", cpf: "", data_nascimento: "", celular: "", cep: "", rua: "", numero: "", complemento: "",
     bairro: "", cidade: "", uf: "", estado_natal: "", busca_cidade: "", cidade_natal: "" },
@@ -63,7 +65,7 @@ export const FORM_FIELDS = {
 
 export const USER_FIELDS = new Set([...Object.values(FORM_FIELDS).flatMap(Object.keys), "arquivo", "modo", "login"]);
 
-export const ACTIONS = new Set(["carregar_jornada", "atualizar_portal", "continuar_etapa", "encerrar", "enviar_documento", "enviar_responsavel",
+export const ACTIONS = new Set(["carregar_jornada", "atualizar_portal", "continuar_etapa", "encerrar", "enviar_documento", "enviar_documento_matricula", "atualizar_documentos_matricula", "enviar_responsavel",
   "buscar_cep", "buscar_cidade", "enviar_endereco", "enviar_resp_dados", "buscar_escola", "enviar_identidade", "enviar_cupom"]);
 
 // Campos por etapa, localizados pelo rótulo do formulário oficial (field_id observado como reserva).
@@ -133,11 +135,12 @@ export function screenForStep(stageTitle, form) {
   if (/resp.*financeiro/.test(t) && labels.has("cpf") && labels.has("rua")) return "RESP_DADOS";
   if (labels.has("rua") && labels.has(norm("Estado natal"))) return "ENDERECO";
   if (/documentos?.*inscri/.test(t)) return "DOCUMENTOS_INSCRICAO";
+  if (/documentos?.*matric/.test(t)) return "DOCUMENTOS_MATRICULA";
   return "ETAPA_PORTAL";
 }
 
 const PORTAL_TEXT = [
-  [/documento/, "Envie seus documentos", "Envie os documentos solicitados (PNG, JPG ou PDF, até 5 MB no total) pelo Portal do candidato. A análise ocorre em até 48 horas úteis."],
+  [/documento/, "Envie seus documentos", "Envie os documentos solicitados (PNG, JPG, JPEG ou PDF, até 5 MB por arquivo) pelo Portal do candidato. Inclua todas as páginas, frente e verso. Os itens com asterisco são obrigatórios e devem ser enviados em até 30 dias. A análise ocorre em até 48 horas úteis."],
   [/contrato/, "Contrato", "Leia o contrato e registre o seu aceite no Portal do candidato."],
   [/pagamento|taxa/, "Pagamento", "Escolha Pix, cartão ou boleto e conclua o pagamento pelo ambiente seguro do Portal do candidato."],
   [/filiacao/, "Filiação", "Cadastre os nomes dos seus responsáveis pelo Portal do candidato."]
@@ -152,7 +155,7 @@ export function portalScreenData(stageTitle, step) {
   };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null }) {
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, nativeDocs = null }) {
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
     try {
@@ -165,7 +168,12 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const r = await api("/login", { method: "POST", body: { portal: PORTAL_ID, user_data: [{ key: keys.login, value: str(loginValue).trim() }, { key: keys.birth, value: `${d}/${m}/${y}` }] } });
     const token = r?.token ?? r?.data?.token ?? r?.data?.session_id;
     if (!token) throw new Error("Não encontramos uma inscrição com esses dados.");
-    return { token: str(token), person_id: str(r?.data?.person_id), applyment_id: str(r?.data?.applyment_id) };
+    const session={ token: str(token), person_id: str(r?.data?.person_id), applyment_id: str(r?.data?.applyment_id) };
+    if(nativeDocs){
+      try{session.portal_session=await nativeDocs.login(onlyDigits(loginValue),birth,session);session.person_id ||= str(session.portal_session.person_id);session.applyment_id ||= str(session.portal_session.applyment_id)}
+      catch(error){session.portal_document_error=error.message;console.warn(JSON.stringify({event:'portal_document_login',code:error.code??'unavailable'}))}
+    }
+    return session;
   }
 
   async function portal(session) {
@@ -182,18 +190,23 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const p = await portal(session);
     const s = summarizeStages(p.stages);
     const base = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id, proxima: s.next };
+    const documentStage=s.rows.find(row=>/documentos?.*matric/.test(norm(row.title)));
+    if(nativeDocs&&session.portal_session&&documentStage&&!s.next){
+      const known=documentStage.step?{step:documentStage.step,title:documentStage.title}:await nativeDocs.lookup(base).catch(()=>null);
+      if(known)base.proxima={...known,title:documentStage.title};
+    }
     const waiting = s.rows.find(r => !r.conclusive && !(r.step && r.action));
     return render(hub, {
       ...base, titulo: hub === "ACOMPANHAMENTO" ? "Inscrição recebida ✅" : "Sua inscrição",
       resumo: (s.resumo || "Nenhuma etapa disponível no momento.") + (!s.next && waiting ? `\n\n⏳ ${waiting.title}: aguardando a análise da equipe UniBalsas. Você pode tocar em Atualizar situação daqui a pouco ou voltar depois por "Já sou inscrito".` : ""),
-      erro, acao_rodape: s.next ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: s.next ? `Continuar: ${title30(s.next.title)}`.slice(0, 35) : "Atualizar situação",
+      erro, acao_rodape: base.proxima ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: base.proxima ? `Continuar: ${title30(base.proxima.title)}`.slice(0, 35) : "Atualizar situação",
       link_portal: `${PORTAL_URL}/portal-inscrito`, ...extra
     });
   }
 
   function finish(data) {
     return render("STATUS_FINAL", {
-      titulo: "Até breve!", resumo: str(data.resumo, "Sua inscrição está salva."),
+      titulo: "Até breve!", resumo: str(data.resumo ?? data.documentos_resumo, "Sua inscrição está salva."),
       mensagem: "Quando quiser continuar, abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.",
       link_portal: `${PORTAL_URL}/portal-inscrito`
     });
@@ -208,7 +221,7 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const previous = str(data.enviados) === NENHUM_ENVIO ? "" : str(data.enviados);
     const enviados = [previous, `✅ ${nome} recebido (${saved.nomeArquivo}). Aguardando conferência da equipe.`].filter(Boolean).join("\n");
     const { arquivo, ...rest } = data; // a mídia (chaves de criptografia) nunca vai para o estado selado
-    return render("DOCUMENTOS_INSCRICAO", { ...rest, enviados, values: { documento: "" }, erro: "" });
+    return render("DOCUMENTOS_INSCRICAO", { ...rest, enviados, documento: "", values: { documento: "" }, processando: false, job_id: "", erro: "" });
   }
 
   // Depois de concluir uma etapa: abre a próxima etapa se a rota for permitida, senão encerra com a situação.
@@ -225,7 +238,7 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const s = summarizeStages(p.stages);
     const sess = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id };
     const finish = mensagem => render("STATUS_FINAL", {
-      titulo: s.next ? "Etapa registrada ✅" : "Tudo em dia por aqui ✅", resumo: s.resumo || "Situação indisponível no momento.",
+      titulo: s.next ? "Etapa registrada ✅" : s.rows.some(row=>!row.conclusive) ? "Aguardando próximas etapas" : "Tudo em dia por aqui ✅", resumo: s.resumo || "Situação indisponível no momento.",
       mensagem, link_portal: `${PORTAL_URL}/portal-inscrito`
     });
     if (!s.next) return finish("Não há outra etapa disponível agora. Quando houver novidade, abra este atendimento e escolha \"Já sou inscrito\".");
@@ -268,6 +281,11 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
   }
 
   async function open(session, next) {
+    if(nativeDocs&&/documentos?.*matric/.test(norm(next.title))){
+      const base={...session,etapa_titulo:next.title,etapa_passo:str(next.step)};
+      try{return render('DOCUMENTOS_MATRICULA',await nativeDocs.open(base,next))}
+      catch(error){return render('DOCUMENTOS_MATRICULA',{...base,...(error.session?{portal_session:error.session}:{}),titulo:'Documentos da matrícula',texto:'Envie seus documentos por aqui. Não é necessário abrir o site para anexar.',documentos:[],documentos_resumo:'',tem_pendentes:false,mensagem_envio:'',erro:error.message})}
+    }
     const form = (await getForm(next.step, "step", session.token)).data?.form ?? null;
     const screen = screenForStep(next.title, form);
     const base = { ...session, etapa_titulo: next.title, etapa_passo: str(next.step) };
@@ -279,7 +297,7 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
         texto: `Envie pelo WhatsApp: ${list.map(d => d.descricao).join(", ")}.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez.`
       });
     }
-    if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO") return render("ETAPA_PORTAL", { ...base, ...portalScreenData(next.title, next.step) });
+    if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO" || screen === "DOCUMENTOS_MATRICULA") return render("ETAPA_PORTAL", { ...base, ...portalScreenData(next.title, next.step) });
     const b = bind(screen, form);
     const data = { ...base, campos: b.ids, button_id: b.button, ocultos: b.hidden, target: b.target, values: {} };
     const pre = Object.fromEntries(inputsOf(form).map(i => [str(i.field_id), i.value ?? i.value_now ?? null]));
@@ -364,5 +382,14 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     return { token: str(r?.token ?? r?.data?.token, data.token), redirect: r?.data?.redirect ?? (r?.data?.next ? { place_id: r.data.next, place_type_id: r.data.local === "step" ? 1 : 0 } : null) };
   }
 
-  return { login, portal, status, welcome, open, advance, finish, sendDocument, cep, cities, schools, send };
+  async function sendEnrollmentDocument(data){
+    if(!nativeDocs)throw new Error('Envio de matrícula indisponível neste atendimento.');
+    return render('DOCUMENTOS_MATRICULA',await nativeDocs.send(data));
+  }
+  async function refreshEnrollmentDocuments(data){
+    if(!nativeDocs)throw new Error('Consulta de matrícula indisponível neste atendimento.');
+    const current=data.portal_document_step?await nativeDocs.refresh(data):await nativeDocs.open(data,{step:data.etapa_passo});
+    return render('DOCUMENTOS_MATRICULA',current);
+  }
+  return { login, portal, status, welcome, open, advance, finish, sendDocument, sendEnrollmentDocument, refreshEnrollmentDocuments, cep, cities, schools, send };
 }
