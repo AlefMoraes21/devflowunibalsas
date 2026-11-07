@@ -27,7 +27,10 @@ test('telas novas respeitam limites de componentes da Meta e batem com o servido
   for(const c of comps)for(const v of [c.text,c.label])if(typeof v==='string'&&v.includes('${data.')){const k=v.match(/\$\{data\.([a-z_]+)\}/)[1];assert.ok(k in s.data,`${id}: ${k}`)}
   for(const c of comps)if(typeof c['data-source']==='string'){const k=c['data-source'].match(/\$\{data\.([a-z_]+)\}/)[1];assert.equal(s.data[k].type,'array',`${id}: ${k}`)}
  }
- const first=j.screens.find(s=>s.id==='ESCOLHA_PROCESSO');assert.ok(j.routing_model.ESCOLHA_PROCESSO.includes('LOGIN_CANDIDATO'));assert.ok(JSON.stringify(first).includes('Já me inscrevi'));
+ const first=j.screens.find(s=>s.id==='ESCOLHA_PROCESSO');assert.ok(j.routing_model.ESCOLHA_PROCESSO.includes('PORTAL_STATUS'));assert.ok(JSON.stringify(first).includes('Já sou inscrito'));
+ assert.ok(!j.screens.some(s=>s.id==='LOGIN_CANDIDATO'));
+ for(const s of ['QUASE_LA','TELA_REDACAO'])assert.ok(j.routing_model[s].includes('ACOMPANHAMENTO'),s);
+ const doc=walk(j.screens.find(s=>s.id==='DOCUMENTOS_INSCRICAO').layout).find(c=>c.type==='DocumentPicker');assert.equal(doc['max-uploaded-documents'],1);assert.ok(doc['max-file-size-kb']<=740);
 });
 
 test('resumo do portal escolhe a primeira etapa pendente com ação',()=>{
@@ -79,11 +82,10 @@ test('jornada de matrícula: login, responsável, endereço com busca de cidade,
   [...done,stage('Pré-matrícula',1,'Concluída'),stage('Documentos matrícula',1,'Aprovados'),stage('Contrato',0,'Em análise')]
  ],{300676:radioForm,300666:addressForm,300667:identityForm,300671:docsForm},submits);
  try{
-  const choose=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',sealState('ESCOLHA_PROCESSO',{}),{processo_seletivo_id:'continuar_inscricao'}));
-  assert.equal(choose.screen,'LOGIN_CANDIDATO');
-  const bad=await run(ask('LOGIN_CANDIDATO','entrar_portal',choose.data.estado,{login:'123',data_nascimento:'2007-03-15'}));
-  assert.equal(bad.screen,'LOGIN_CANDIDATO');assert.equal(bad.data.tem_erro,true);
-  const hub=await run(ask('LOGIN_CANDIDATO','entrar_portal',choose.data.estado,{login:'111.444.777-35',data_nascimento:'2007-03-15'}));
+  const first=sealState('ESCOLHA_PROCESSO',{});
+  const bad=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',first,{modo:'continuar',login:'123',data_nascimento:'2007-03-15'}));
+  assert.equal(bad.screen,'ESCOLHA_PROCESSO');assert.equal(bad.data.tem_erro,true);assert.equal(bad.data.valor_modo,'continuar');
+  const hub=await run(ask('ESCOLHA_PROCESSO','selecionar_processo',first,{modo:'continuar',login:'111.444.777-35',data_nascimento:'2007-03-15'}));
   assert.equal(hub.screen,'PORTAL_STATUS');assert.equal(hub.data.acao_rodape,'continuar_etapa');assert.match(hub.data.resumo,/Seleção resp\. financeiro/);
   assert.equal(openState(hub.data.estado,'PORTAL_STATUS').applyment_id,'14083470');
   const resp=await run(ask('PORTAL_STATUS','continuar_etapa',hub.data.estado));
