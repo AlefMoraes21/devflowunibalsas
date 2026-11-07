@@ -1,3 +1,9 @@
+# UniBalsas Flow 1.7.1 — correção do roteamento da prova
+
+O acompanhamento anterior à prova agora pode abrir a orientação. Depois da entrega confirmada da redação, o servidor retorna ACOMPANHAMENTO_POS_PROVA, com as etapas posteriores e sem rota de retorno à prova. Atualizar backend e flow-waba.json juntos e reabrir o teste do Flow. Mantida a correção de data_nascimento sem valor inicial vazio no CalendarPicker.
+
+166 testes automatizados passaram. Sem publicação no Cloud Run ou na Meta nesta revisão.
+
 # UniBalsas Flow 1.7.0 — documentos de matrícula dentro do WhatsApp
 
 Esta entrega implementa o envio nativo da matrícula no código do Flow. A etapa deixa de encaminhar o candidato ao site para anexar: abre `DOCUMENTOS_MATRICULA`, consulta o formulário da inscrição autenticada e envia o arquivo binário ao mesmo endpoint utilizado pelo portal.
