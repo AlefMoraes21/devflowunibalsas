@@ -6,6 +6,7 @@ import {createJobEngine} from "./jobs.js";
 import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
+import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, CONTINUAR_ID, validCpf } from "./matricula.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -126,6 +127,13 @@ SCREEN_KEYS.CURSO_ENEM=[...SCREEN_KEYS.CURSO_INTERESSE,"processando","editavel",
 FORM_DEFAULTS.CURSO_INGRESSO=FORM_DEFAULTS.CURSO_INTERESSE;
 SCREEN_KEYS.CURSO_INGRESSO=[...SCREEN_KEYS.CURSO_ENEM];
 
+// Telas da continuação (login do candidato e matrícula).
+Object.assign(SCREEN_KEYS, MATRICULA_SCREENS);
+Object.assign(FORM_DEFAULTS, MATRICULA_FIELDS);
+const SEALED_SCREENS = ["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO", ...Object.keys(MATRICULA_SCREENS)];
+const CONTINUAR_OPCAO = { id: CONTINUAR_ID, title: "Já me inscrevi: continuar" };
+const PROXIMOS_PASSOS = "\n\nQuando houver uma nova etapa (resultado, pré-matrícula, documentos, contrato), abra este atendimento e escolha \"Já me inscrevi: continuar\".";
+
 const USER_FIELDS = new Set([
   "aceite_privacidade",
   "ano_enem",
@@ -157,6 +165,7 @@ const USER_FIELDS = new Set([
   "tipos_deficiencia",
   "turno_id",
   "texto_redacao",
+  ...MATRICULA_USER_FIELDS,
 ]);
 
 const RUBEUS_BASE_URL = "https://admin.portal.apprbs.com.br/api/v1";
@@ -297,18 +306,13 @@ function normalizeCpf(v) {
   return d;
 }
 
+// O site oficial (máscara do formulário) envia o celular apenas com dígitos: DDD + número.
 function formatBrazilianPhone(v) {
   let d = String(v ?? "").replace(/\D/g, "");
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) {
     d = d.slice(2);
   }
-  if (d.length === 11) {
-    return d.replace(/(\d{2})(\d{5})(\d{4})/, "($1) $2-$3");
-  }
-  if (d.length === 10) {
-    return d.replace(/(\d{2})(\d{4})(\d{4})/, "($1) $2-$3");
-  }
-  return String(v ?? "");
+  return d;
 }
 
 function fieldItem(id, val) {
@@ -465,10 +469,59 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 function assessmentClient(){return createAssessment({maxRequestMs:flowContext.getStore()?.worker?30000:4500,observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
 const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
 async function linkDaInscricao(data){return proofRouter.prepare(data)}
+const matricula=createMatricula({api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data)});
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
-  return (r.data ?? []).map(p => ({ id: String(p.id), title: String(p.name) }));
+  return [...(r.data ?? []).map(p => ({ id: String(p.id), title: String(p.name) })), CONTINUAR_OPCAO];
+}
+
+// Sessão do candidato já inscrito, carregada no estado selado (nunca vinda do cliente).
+const sessaoDe = d => ({ token: toStringValue(d.token), applyment_id: toStringValue(d.applyment_id), person_id: toStringValue(d.person_id), processo_seletivo_id: toStringValue(d.processo_seletivo_id) });
+function validarLogin(data) {
+  const login = String(data.login ?? "").trim();
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login);
+  if (!isEmail && !validCpf(login)) throw new Error("Informe o CPF (11 números) ou o e-mail usado na inscrição.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(data.data_nascimento ?? ""))) throw new Error("Informe sua data de nascimento.");
+  return isEmail ? login : login.replace(/\D/g, "");
+}
+
+async function routeMatricula(screen, action, data) {
+  try {
+    switch (action) {
+      case "entrar_portal": {
+        const login = validarLogin(data);
+        return await matricula.status(await matricula.login(login, data.data_nascimento));
+      }
+      case "atualizar_portal":
+        if (screen === "ETAPA_PORTAL") return await matricula.advance("ETAPA_PORTAL", sessaoDe(data));
+        return await matricula.status(sessaoDe(data));
+      case "continuar_etapa":
+        if (!data.proxima) return await matricula.status(sessaoDe(data));
+        return await matricula.open(sessaoDe(data), data.proxima);
+      case "buscar_cep":
+        return responseForScreen(screen, { ...data, values: { ...data, ...(await matricula.cep(data)) }, erro: "" });
+      case "buscar_cidade": {
+        const list = await matricula.cities(data);
+        return responseForScreen(screen, { ...data, cidades_natal: list, cidade_visivel: true, values: { ...data, cidade_natal: list.length === 1 ? list[0].id : "" }, erro: "" });
+      }
+      case "buscar_escola": {
+        const list = await matricula.schools(data);
+        return responseForScreen(screen, { ...data, escolas: list, escola_visivel: true, values: { ...data, escola: list.length === 1 ? list[0].id : "" }, erro: "" });
+      }
+      case "enviar_responsavel": case "enviar_endereco": case "enviar_resp_dados": case "enviar_identidade": case "enviar_cupom": {
+        const token = await matricula.send(screen, data);
+        console.info(JSON.stringify({ event: "matricula_step", screen, applicationId: toStringValue(data.applyment_id), step: toStringValue(data.etapa_passo), sent: Boolean(token) }));
+        return await matricula.advance(screen, { ...sessaoDe(data), token: token ?? data.token });
+      }
+    }
+  } catch (e) {
+    const p = pendingAfterWrite(data);
+    if (p) return p;
+    if (screen === "PORTAL_STATUS" || screen === "ETAPA_PORTAL") return responseForScreen(screen, { ...data, erro: e.message });
+    return responseForScreen(screen, { ...data, values: data, erro: e.message });
+  }
+  return { data: { status: "active" } };
 }
 
 async function startApplication(id) {
@@ -779,7 +832,7 @@ function responseForScreen(screen, data) {
     Object.entries(next).filter(([k]) => !k.startsWith("valor_") && k !== "estado" && k !== "values")
   );
 
-  if (["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO"].includes(screen)) {
+  if (SEALED_SCREENS.includes(screen)) {
     next.estado = sealState(screen, trusted);
   }
 
@@ -790,8 +843,8 @@ function responseForScreen(screen, data) {
         k,
         next[k] ?? (
           k.startsWith("valor_") ? "" :
-          k === "tem_erro" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" ? false :
-          k === "cursos" || k === "turnos" || k === "anos_enem" || k === "origens" ? [] : ""
+          k === "tem_erro" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
+          ["cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"].includes(k) ? [] : ""
         )
       ])
     )
@@ -910,7 +963,7 @@ async function routeFlowRequest(requestData) {
       "conferir_prova_existente",
       "enviar_redacao",
       "verificar_entrega"
-    ].includes(customAction)) {
+    ].includes(customAction) || MATRICULA_ACTIONS.has(customAction)) {
       const trusted = openState(data.estado, requestData.screen);
       const user = Object.fromEntries(Object.entries(data).filter(([k]) => USER_FIELDS.has(k)));
       data = { ...trusted, ...user, acao: customAction };
@@ -936,10 +989,10 @@ async function routeFlowRequest(requestData) {
       });
     } catch {
       return responseForScreen("ESCOLHA_PROCESSO", {
-        processo_seletivo_id: [],
-        tem_processos: false,
+        processo_seletivo_id: [CONTINUAR_OPCAO],
+        tem_processos: true,
         mensagem_vazio: "Não conseguimos carregar os processos.",
-        erro: "Indisponível."
+        erro: "Não conseguimos carregar os processos abertos agora. Se você já se inscreveu, pode continuar."
       });
     }
   }
@@ -959,10 +1012,17 @@ async function routeFlowRequest(requestData) {
     return { data: { status: "active" } };
   }
 
+  if (MATRICULA_ACTIONS.has(customAction)) {
+    return routeMatricula(requestData.screen, customAction, data);
+  }
+
   switch (customAction) {
     case "selecionar_processo": {
       try {
         const raw = data.processo_seletivo_id ?? data.processo_id;
+        if (String(raw) === CONTINUAR_ID) {
+          return responseForScreen("LOGIN_CANDIDATO", { data_maxima_nascimento: currentIsoDate(), erro: "" });
+        }
         processPolicy(raw);
         if (!raw) {
           throw new Error("Selecione um processo seletivo.");
@@ -1188,8 +1248,9 @@ async function routeFlowRequest(requestData) {
         if (requiresEssay(data.processo_seletivo_id)) {
           return responseForScreen("TELA_ORIENTACAO_PROVA", {
             ...data,
-            tema_redacao: "Tema: A romantização da produtividade e o esgotamento mental",
-            texto_motivador: "A sociedade contemporânea tem exaltado a produtividade como fator essencial para o sucesso, levando muitas pessoas a negligenciarem o descanso e a saúde mental.",
+            // O tema é sorteado pelo módulo de avaliação e só é lido em iniciar_redacao.
+            tema_redacao: "",
+            texto_motivador: "",
             applyment_id: String(redirect.applyment_id),
             token: submitResult.data?.token??data.token,
             erro: "",
@@ -1199,13 +1260,13 @@ async function routeFlowRequest(requestData) {
 
         if(isDirectRegistration(data.processo_seletivo_id)){
           console.info(JSON.stringify({event:"ingresso_registration",applicationId:String(redirect.applyment_id),process:data.processo_seletivo_id,confirmed:true}));
-          return responseForScreen("CONFIRMACAO",{titulo:"Obrigado pelo seu cadastro!",mensagem:`Sua inscrição de ${processPolicy(data.processo_seletivo_id).name} foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve.`,inscricao_id:String(redirect.applyment_id)});
+          return responseForScreen("CONFIRMACAO",{titulo:"Obrigado pelo seu cadastro!",mensagem:`Sua inscrição de ${processPolicy(data.processo_seletivo_id).name} foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve.${PROXIMOS_PASSOS}`,inscricao_id:String(redirect.applyment_id)});
         }
         if(!isNotaEnemContext(data))throw new Error("Este processo não possui um destino de conclusão validado.");
         console.info(JSON.stringify({event:"enem_registration",applicationId:String(redirect.applyment_id),process:data.processo_seletivo_id,confirmed:true}));
         return responseForScreen("CONFIRMACAO", {
           titulo: "Obrigado pelo seu cadastro!",
-          mensagem: `Sua inscrição pelo ENEM foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve. A validação das notas e os documentos são acompanhados no Portal do candidato.`,
+          mensagem: `Sua inscrição pelo ENEM foi concluída. Protocolo: ${redirect.applyment_id}.\nNossos consultores entrarão em contato com você em breve. A validação das notas e os documentos são acompanhados no Portal do candidato.${PROXIMOS_PASSOS}`,
           inscricao_id: String(redirect.applyment_id || "")
         });
       } catch (e) {
@@ -1281,7 +1342,7 @@ async function followReceipt(data,receipt){
   const checked=await proofRouter.verify(data,data.sessao_avaliacao?.binding);
   flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt??data.recibo_avaliacao,portal:checked.portal};
   console.info(JSON.stringify({event:"proof_portal_check",applicationId:String(data.applyment_id),confirmed:portalConfirmsDelivery(checked.portal)}));
-  if(portalConfirmsDelivery(checked.portal))return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}`,inscricao_id:String(data.applyment_id)});
+  if(portalConfirmsDelivery(checked.portal))return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)});
   return receiptScreen(data,receipt);
  }catch(e){return receiptScreen(data,receipt,e.message)}
 }
@@ -1335,7 +1396,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-ingressos-1.4.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-matricula-1.5.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
