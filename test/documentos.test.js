@@ -37,7 +37,7 @@ test('transferência: conclui, abre acompanhamento sem fechar o Flow e envia o h
   }
   assert.equal(u.origin,'https://admin.portal.apprbs.com.br');const b=options.body?JSON.parse(options.body):{};
   if(u.pathname.endsWith('/submit'))return Response.json({success:true,token:'apos-inscricao',data:{redirect:{applyment_id:'990001'}}});
-  if(u.pathname.endsWith('/login/portal')){assert.equal(b.token,'apos-inscricao');return Response.json({success:true,data:{current_process:{id:20385,stages:[
+  if(u.pathname.endsWith('/portal')){assert.equal(b.token,'apos-inscricao');return Response.json({success:true,data:{current_process:{id:20385,stages:[
    {title:'Inscrição',feedback:{conclusive:1,complementary_text:'Concluída'}},
    {title:'Documentos inscrição',feedback:{conclusive:0,complementary_text:'Pendentes',cta_text:'Enviar'},cta_link:'presencial/passo/300696'}]}}})}
   if(u.pathname.endsWith('/form'))return Response.json({success:true,token:'apos-inscricao',data:{form:{id:300696,content:{inputs:[],buttons:[{button:3940675,label:'Enviar'}]},querys:[]}}});

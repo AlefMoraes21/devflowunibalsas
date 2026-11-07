@@ -29,6 +29,8 @@ test('telas novas respeitam limites de componentes da Meta e batem com o servido
  }
  const first=j.screens.find(s=>s.id==='ESCOLHA_PROCESSO');assert.ok(j.routing_model.ESCOLHA_PROCESSO.includes('PORTAL_STATUS'));assert.ok(JSON.stringify(first).includes('Já sou inscrito'));
  assert.ok(!j.screens.some(s=>s.id==='LOGIN_CANDIDATO'));
+ // A WABA exige que init-values tenha o mesmo tipo do input: campos "number" não aceitam ${data.valor_*} (string).
+ for(const s of j.screens){const forms=walk(s.layout).filter(c=>c.type==='Form'&&c['init-values']);for(const f of forms)for(const c of walk(f.children))if(c.type==='TextInput'&&c['input-type']==='number')assert.ok(!(c.name in f['init-values']),`${s.id}.${c.name}`)}
  for(const s of ['QUASE_LA','TELA_REDACAO'])assert.ok(j.routing_model[s].includes('ACOMPANHAMENTO'),s);
  const doc=walk(j.screens.find(s=>s.id==='DOCUMENTOS_INSCRICAO').layout).find(c=>c.type==='DocumentPicker');assert.equal(doc['max-uploaded-documents'],1);assert.ok(doc['max-file-size-kb']<=740);
 });
@@ -56,7 +58,7 @@ function rubeus(portalSequence,forms,submits){
   const u=new URL(String(input));assert.equal(u.origin,'https://admin.portal.apprbs.com.br');const b=options.body?JSON.parse(options.body):{};
   if(u.pathname.endsWith('/login/info'))return Response.json({success:true,data:[{key:'LOGIN',label:'CPF ou EMAIL',type:'text'},{key:'DATANASCIMENTO',label:'Data de Nascimento',type:'date'}]});
   if(u.pathname.endsWith('/login')){assert.deepEqual(b.user_data,[{key:'LOGIN',value:'11144477735'},{key:'DATANASCIMENTO',value:'15/03/2007'}]);return Response.json({success:true,data:{person_id:9985265,applyment_id:14083470,session_id:'sessao-1'}})}
-  if(u.pathname.endsWith('/login/portal')){assert.ok(b.token);const stages=portalSequence[Math.min(portalCall++,portalSequence.length-1)];return Response.json({success:true,data:{current_process:{id:20383,stages}}})}
+  if(u.pathname.endsWith('/portal')){assert.ok(b.token);const stages=portalSequence[Math.min(portalCall++,portalSequence.length-1)];return Response.json({success:true,data:{current_process:{id:20383,stages}}})}
   if(u.pathname.endsWith('/form'))return Response.json({success:true,token:b.token,data:{form:structuredClone(forms[b.target])}});
   if(u.pathname.endsWith('/data-source')){
    if(b.datasource==='q-endereco'&&Number(b.target)===38641)return Response.json({success:true,data:[{value:'MA',label:'Maranhão'},{value:'PI',label:'Piauí'}]});
