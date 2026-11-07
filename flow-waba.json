@@ -5,7 +5,7 @@
     "ESCOLHA_PROCESSO": [
       "DADOS_BASICOS",
       "PENDENTE",
-      "LOGIN_CANDIDATO"
+      "PORTAL_STATUS"
     ],
     "DADOS_BASICOS": [
       "CURSO_INTERESSE",
@@ -27,6 +27,7 @@
     "QUASE_LA": [
       "TELA_ORIENTACAO_PROVA",
       "CONFIRMACAO",
+      "ACOMPANHAMENTO",
       "PENDENTE"
     ],
     "TELA_ORIENTACAO_PROVA": [
@@ -35,6 +36,7 @@
     ],
     "TELA_REDACAO": [
       "CONFIRMACAO",
+      "ACOMPANHAMENTO",
       "PENDENTE"
     ],
     "CONFIRMACAO": [],
@@ -47,11 +49,8 @@
       "QUASE_LA",
       "PENDENTE"
     ],
-    "LOGIN_CANDIDATO": [
-      "PORTAL_STATUS",
-      "PENDENTE"
-    ],
     "PORTAL_STATUS": [
+      "DOCUMENTOS_INSCRICAO",
       "RESP_FINANCEIRO",
       "RESP_DADOS",
       "ENDERECO",
@@ -59,6 +58,7 @@
       "CUPOM",
       "ETAPA_PORTAL",
       "TELA_ORIENTACAO_PROVA",
+      "STATUS_FINAL",
       "PENDENTE"
     ],
     "RESP_FINANCEIRO": [
@@ -100,7 +100,28 @@
       "STATUS_FINAL",
       "PENDENTE"
     ],
-    "STATUS_FINAL": []
+    "STATUS_FINAL": [],
+    "ACOMPANHAMENTO": [
+      "DOCUMENTOS_INSCRICAO",
+      "RESP_FINANCEIRO",
+      "RESP_DADOS",
+      "ENDERECO",
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "DOCUMENTOS_INSCRICAO": [
+      "RESP_FINANCEIRO",
+      "RESP_DADOS",
+      "ENDERECO",
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ]
   },
   "screens": [
     {
@@ -146,6 +167,18 @@
         "valor_processo_id": {
           "type": "string",
           "__example__": ""
+        },
+        "valor_modo": {
+          "type": "string",
+          "__example__": "nova"
+        },
+        "valor_login": {
+          "type": "string",
+          "__example__": ""
+        },
+        "data_maxima_nascimento": {
+          "type": "string",
+          "__example__": "2026-11-06"
         }
       },
       "layout": {
@@ -154,14 +187,19 @@
           {
             "type": "Form",
             "name": "form_processo",
+            "init-values": {
+              "processo_id": "${data.valor_processo_id}",
+              "modo": "${data.valor_modo}",
+              "login": "${data.valor_login}"
+            },
             "children": [
               {
                 "type": "TextHeading",
-                "text": "Processos Seletivos Abertos"
+                "text": "Bem-vindo(a) à UniBalsas"
               },
               {
                 "type": "TextBody",
-                "text": "Selecione a forma de ingresso para iniciar sua inscrição. Se você já se inscreveu, escolha \"Já me inscrevi: continuar\"."
+                "text": "Faça uma nova inscrição ou continue a sua de onde parou."
               },
               {
                 "type": "TextBody",
@@ -169,28 +207,73 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
-                "label": "Forma de ingresso",
-                "name": "processo_id",
-                "data-source": "${data.processo_seletivo_id}",
-                "required": true
+                "type": "RadioButtonsGroup",
+                "name": "modo",
+                "label": "O que você deseja?",
+                "required": true,
+                "data-source": [
+                  {
+                    "id": "nova",
+                    "title": "Fazer nova inscrição"
+                  },
+                  {
+                    "id": "continuar",
+                    "title": "Já sou inscrito"
+                  }
+                ]
+              },
+              {
+                "type": "If",
+                "condition": "${form.modo} == 'continuar'",
+                "then": [
+                  {
+                    "type": "TextBody",
+                    "text": "Entre com o CPF e a data de nascimento usados na inscrição. Vamos carregar sua jornada de onde parou."
+                  },
+                  {
+                    "type": "TextInput",
+                    "name": "login",
+                    "label": "CPF",
+                    "input-type": "number",
+                    "helper-text": "Somente os 11 números",
+                    "required": true
+                  },
+                  {
+                    "type": "CalendarPicker",
+                    "name": "data_nascimento",
+                    "label": "Data de nascimento",
+                    "mode": "single",
+                    "min-date": "1920-01-01",
+                    "max-date": "${data.data_maxima_nascimento}",
+                    "required": true
+                  }
+                ],
+                "else": [
+                  {
+                    "type": "Dropdown",
+                    "label": "Forma de ingresso",
+                    "name": "processo_id",
+                    "data-source": "${data.processo_seletivo_id}",
+                    "required": true
+                  }
+                ]
               },
               {
                 "type": "Footer",
-                "label": "Iniciar inscrição",
+                "label": "Continuar",
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
                     "acao": "selecionar_processo",
+                    "modo": "${form.modo}",
                     "processo_seletivo_id": "${form.processo_id}",
+                    "login": "${form.login}",
+                    "data_nascimento": "${form.data_nascimento}",
                     "estado": "${data.estado}"
                   }
                 }
               }
-            ],
-            "init-values": {
-              "processo_id": "${data.valor_processo_id}"
-            }
+            ]
           }
         ]
       }
@@ -878,7 +961,7 @@
                   },
                   {
                     "type": "TextCaption",
-                    "text": "Verificar o andamento não envia seus dados novamente."
+                    "text": "⏳ Leva só alguns segundinhos. Se esta tela continuar aparecendo, aguarde um pouco e toque em Verificar andamento. Nada será enviado em duplicidade."
                   }
                 ]
               },
@@ -1216,7 +1299,7 @@
                   },
                   {
                     "type": "TextCaption",
-                    "text": "Verificar o andamento não envia suas notas novamente."
+                    "text": "⏳ Leva só alguns segundinhos. Se esta tela continuar aparecendo, aguarde um pouco e toque em Verificar andamento. Nada será enviado em duplicidade."
                   }
                 ]
               },
@@ -1581,7 +1664,7 @@
                   },
                   {
                     "type": "TextCaption",
-                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                    "text": "⏳ Leva só alguns segundinhos. Se esta tela continuar aparecendo, aguarde um pouco e toque em Verificar andamento. Nada será enviado em duplicidade."
                   },
                   {
                     "type": "EmbeddedLink",
@@ -1725,7 +1808,7 @@
                   },
                   {
                     "type": "TextCaption",
-                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                    "text": "⏳ Leva só alguns segundinhos. Se esta tela continuar aparecendo, aguarde um pouco e toque em Verificar andamento. Nada será enviado em duplicidade."
                   },
                   {
                     "type": "EmbeddedLink",
@@ -1850,7 +1933,7 @@
                   },
                   {
                     "type": "TextCaption",
-                    "text": "Sua solicitação está em processamento. Verificar o andamento não envia seus dados novamente."
+                    "text": "⏳ Leva só alguns segundinhos. Se esta tela continuar aparecendo, aguarde um pouco e toque em Verificar andamento. Nada será enviado em duplicidade."
                   },
                   {
                     "type": "EmbeddedLink",
@@ -1924,93 +2007,6 @@
       }
     },
     {
-      "id": "LOGIN_CANDIDATO",
-      "title": "Continuar inscrição",
-      "terminal": false,
-      "data": {
-        "erro": {
-          "type": "string",
-          "__example__": ""
-        },
-        "tem_erro": {
-          "type": "boolean",
-          "__example__": false
-        },
-        "estado": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_login": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_data_nascimento": {
-          "type": "string",
-          "__example__": ""
-        },
-        "data_maxima_nascimento": {
-          "type": "string",
-          "__example__": "2026-11-06"
-        }
-      },
-      "layout": {
-        "type": "SingleColumnLayout",
-        "children": [
-          {
-            "type": "Form",
-            "name": "form_login",
-            "init-values": {
-              "login": "${data.valor_login}"
-            },
-            "children": [
-              {
-                "type": "TextHeading",
-                "text": "Continuar inscrição"
-              },
-              {
-                "type": "TextBody",
-                "text": "Informe o CPF (ou e-mail) e a data de nascimento usados na sua inscrição."
-              },
-              {
-                "type": "TextBody",
-                "text": "${data.erro}",
-                "visible": "${data.tem_erro}"
-              },
-              {
-                "type": "TextInput",
-                "name": "login",
-                "label": "CPF ou e-mail",
-                "input-type": "text",
-                "required": true
-              },
-              {
-                "type": "CalendarPicker",
-                "name": "data_nascimento",
-                "label": "Data de nascimento",
-                "mode": "single",
-                "min-date": "1920-01-01",
-                "max-date": "${data.data_maxima_nascimento}",
-                "required": true
-              },
-              {
-                "type": "Footer",
-                "label": "Entrar",
-                "on-click-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "entrar_portal",
-                    "login": "${form.login}",
-                    "data_nascimento": "${form.data_nascimento}",
-                    "estado": "${data.estado}"
-                  }
-                }
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
       "id": "PORTAL_STATUS",
       "title": "Sua inscrição",
       "terminal": false,
@@ -2073,12 +2069,223 @@
             }
           },
           {
+            "type": "EmbeddedLink",
+            "text": "Encerrar por agora",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "encerrar",
+                "estado": "${data.estado}"
+              }
+            }
+          },
+          {
             "type": "Footer",
             "label": "${data.rotulo_rodape}",
             "on-click-action": {
               "name": "data_exchange",
               "payload": {
                 "acao": "${data.acao_rodape}",
+                "estado": "${data.estado}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "ACOMPANHAMENTO",
+      "title": "Acompanhamento",
+      "terminal": false,
+      "data": {
+        "titulo": {
+          "type": "string",
+          "__example__": "Inscrição recebida ✅"
+        },
+        "mensagem": {
+          "type": "string",
+          "__example__": "Sua inscrição foi concluída."
+        },
+        "resumo": {
+          "type": "string",
+          "__example__": "✅ Inscrição: Concluída"
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Atualizar situação"
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "atualizar_portal"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.erro}",
+            "visible": "${data.tem_erro}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.mensagem}"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "Situação da sua jornada"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.resumo}"
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Encerrar por agora",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "encerrar",
+                "estado": "${data.estado}"
+              }
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "${data.rotulo_rodape}",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "${data.acao_rodape}",
+                "estado": "${data.estado}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DOCUMENTOS_INSCRICAO",
+      "title": "Documentos",
+      "terminal": false,
+      "data": {
+        "documentos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "texto": {
+          "type": "string",
+          "__example__": "Envie o documento solicitado."
+        },
+        "enviados": {
+          "type": "string",
+          "__example__": "Nenhum documento enviado ainda."
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_documento": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Documentos da inscrição"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.erro}",
+            "visible": "${data.tem_erro}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.texto}"
+          },
+          {
+            "type": "TextCaption",
+            "text": "${data.enviados}"
+          },
+          {
+            "type": "Dropdown",
+            "name": "documento",
+            "label": "Documento",
+            "data-source": "${data.documentos}",
+            "required": true
+          },
+          {
+            "type": "DocumentPicker",
+            "name": "arquivo",
+            "label": "Arquivo",
+            "description": "PDF, JPG ou PNG de até 740 KB",
+            "min-uploaded-documents": 1,
+            "max-uploaded-documents": 1,
+            "max-file-size-kb": 740,
+            "allowed-mime-types": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ]
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Já enviei, continuar",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "atualizar_portal",
+                "estado": "${data.estado}"
+              }
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "Enviar documento",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "enviar_documento",
+                "documento": "${form.documento}",
+                "arquivo": "${form.arquivo}",
                 "estado": "${data.estado}"
               }
             }
