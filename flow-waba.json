@@ -4,7 +4,8 @@
   "routing_model": {
     "ESCOLHA_PROCESSO": [
       "DADOS_BASICOS",
-      "PENDENTE"
+      "PENDENTE",
+      "LOGIN_CANDIDATO"
     ],
     "DADOS_BASICOS": [
       "CURSO_INTERESSE",
@@ -45,7 +46,61 @@
     "CURSO_INGRESSO": [
       "QUASE_LA",
       "PENDENTE"
-    ]
+    ],
+    "LOGIN_CANDIDATO": [
+      "PORTAL_STATUS",
+      "PENDENTE"
+    ],
+    "PORTAL_STATUS": [
+      "RESP_FINANCEIRO",
+      "RESP_DADOS",
+      "ENDERECO",
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "TELA_ORIENTACAO_PROVA",
+      "PENDENTE"
+    ],
+    "RESP_FINANCEIRO": [
+      "RESP_DADOS",
+      "ENDERECO",
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "RESP_DADOS": [
+      "ENDERECO",
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "ENDERECO": [
+      "IDENTIDADE",
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "IDENTIDADE": [
+      "CUPOM",
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "CUPOM": [
+      "ETAPA_PORTAL",
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "ETAPA_PORTAL": [
+      "STATUS_FINAL",
+      "PENDENTE"
+    ],
+    "STATUS_FINAL": []
   },
   "screens": [
     {
@@ -106,7 +161,7 @@
               },
               {
                 "type": "TextBody",
-                "text": "Selecione a forma de ingresso desejada para iniciar sua inscrição:"
+                "text": "Selecione a forma de ingresso para iniciar sua inscrição. Se você já se inscreveu, escolha \"Já me inscrevi: continuar\"."
               },
               {
                 "type": "TextBody",
@@ -1579,7 +1634,7 @@
       "data": {
         "tema_redacao": {
           "type": "string",
-          "__example__": "Tema: A romantização da produtividade e o esgotamento mental"
+          "__example__": "Tema carregado da prova"
         },
         "texto_motivador": {
           "type": "string",
@@ -1705,7 +1760,7 @@
       "data": {
         "tema_redacao": {
           "type": "string",
-          "__example__": "Tema: A romantização da produtividade..."
+          "__example__": "Tema carregado da prova"
         },
         "valor_texto_redacao": {
           "type": "string",
@@ -1856,6 +1911,1351 @@
           {
             "type": "TextBody",
             "text": "${data.mensagem}"
+          },
+          {
+            "type": "Footer",
+            "label": "Concluir",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "LOGIN_CANDIDATO",
+      "title": "Continuar inscrição",
+      "terminal": false,
+      "data": {
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_login": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_data_nascimento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "data_maxima_nascimento": {
+          "type": "string",
+          "__example__": "2026-11-06"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_login",
+            "init-values": {
+              "login": "${data.valor_login}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Continuar inscrição"
+              },
+              {
+                "type": "TextBody",
+                "text": "Informe o CPF (ou e-mail) e a data de nascimento usados na sua inscrição."
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextInput",
+                "name": "login",
+                "label": "CPF ou e-mail",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "CalendarPicker",
+                "name": "data_nascimento",
+                "label": "Data de nascimento",
+                "mode": "single",
+                "min-date": "1920-01-01",
+                "max-date": "${data.data_maxima_nascimento}",
+                "required": true
+              },
+              {
+                "type": "Footer",
+                "label": "Entrar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "entrar_portal",
+                    "login": "${form.login}",
+                    "data_nascimento": "${form.data_nascimento}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "PORTAL_STATUS",
+      "title": "Sua inscrição",
+      "terminal": false,
+      "data": {
+        "titulo": {
+          "type": "string",
+          "__example__": "Sua inscrição"
+        },
+        "resumo": {
+          "type": "string",
+          "__example__": "✅ Inscrição: Concluída"
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "rotulo_rodape": {
+          "type": "string",
+          "__example__": "Continuar"
+        },
+        "acao_rodape": {
+          "type": "string",
+          "__example__": "continuar_etapa"
+        },
+        "link_portal": {
+          "type": "string",
+          "__example__": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.erro}",
+            "visible": "${data.tem_erro}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.resumo}"
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Abrir Portal do candidato",
+            "on-click-action": {
+              "name": "open_url",
+              "url": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "${data.rotulo_rodape}",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "${data.acao_rodape}",
+                "estado": "${data.estado}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "RESP_FINANCEIRO",
+      "title": "Responsável financeiro",
+      "terminal": false,
+      "data": {
+        "opcoes_responsavel": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_responsavel": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_resp",
+            "init-values": {
+              "responsavel": "${data.valor_responsavel}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Responsável financeiro"
+              },
+              {
+                "type": "TextBody",
+                "text": "Quem será o responsável financeiro pelo seu contrato?"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "responsavel",
+                "label": "Responsável",
+                "data-source": "${data.opcoes_responsavel}",
+                "required": true
+              },
+              {
+                "type": "TextCaption",
+                "text": "Se escolher Outro, pediremos os dados dessa pessoa em seguida."
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_responsavel",
+                    "responsavel": "${form.responsavel}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "RESP_DADOS",
+      "title": "Dados do responsável",
+      "terminal": false,
+      "data": {
+        "ufs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "cidades_natal": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "cidade_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "data_maxima_nascimento": {
+          "type": "string",
+          "__example__": "2026-11-06"
+        },
+        "valor_nome": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_email": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cpf": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_data_nascimento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_celular": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cep": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_rua": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_numero": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_complemento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_bairro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cidade": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_uf": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_estado_natal": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_busca_cidade": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cidade_natal": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_resp_dados",
+            "init-values": {
+              "nome": "${data.valor_nome}",
+              "email": "${data.valor_email}",
+              "cpf": "${data.valor_cpf}",
+              "celular": "${data.valor_celular}",
+              "cep": "${data.valor_cep}",
+              "rua": "${data.valor_rua}",
+              "numero": "${data.valor_numero}",
+              "complemento": "${data.valor_complemento}",
+              "bairro": "${data.valor_bairro}",
+              "cidade": "${data.valor_cidade}",
+              "uf": "${data.valor_uf}",
+              "estado_natal": "${data.valor_estado_natal}",
+              "busca_cidade": "${data.valor_busca_cidade}",
+              "cidade_natal": "${data.valor_cidade_natal}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Dados do responsável"
+              },
+              {
+                "type": "TextBody",
+                "text": "Informe os dados do responsável financeiro."
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextInput",
+                "name": "nome",
+                "label": "Nome completo",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "email",
+                "label": "E-mail",
+                "input-type": "email",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "cpf",
+                "label": "CPF",
+                "input-type": "number",
+                "helper-text": "Somente os 11 números",
+                "required": true
+              },
+              {
+                "type": "CalendarPicker",
+                "name": "data_nascimento",
+                "label": "Data de nascimento",
+                "mode": "single",
+                "min-date": "1920-01-01",
+                "max-date": "${data.data_maxima_nascimento}",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "celular",
+                "label": "Celular",
+                "input-type": "phone",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "cep",
+                "label": "CEP",
+                "input-type": "number",
+                "helper-text": "Somente números",
+                "required": false
+              },
+              {
+                "type": "EmbeddedLink",
+                "text": "Buscar endereço pelo CEP",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_cep",
+                    "nome": "${form.nome}",
+                    "email": "${form.email}",
+                    "cpf": "${form.cpf}",
+                    "data_nascimento": "${form.data_nascimento}",
+                    "celular": "${form.celular}",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              },
+              {
+                "type": "TextInput",
+                "name": "rua",
+                "label": "Rua",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "numero",
+                "label": "Número",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "complemento",
+                "label": "Complemento",
+                "input-type": "text",
+                "required": false
+              },
+              {
+                "type": "TextInput",
+                "name": "bairro",
+                "label": "Bairro",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "cidade",
+                "label": "Cidade",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "uf",
+                "label": "UF",
+                "input-type": "text",
+                "helper-text": "Sigla do estado. Ex.: MA",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "estado_natal",
+                "label": "Estado natal",
+                "data-source": "${data.ufs}",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "busca_cidade",
+                "label": "Buscar cidade natal",
+                "input-type": "text",
+                "helper-text": "Digite parte do nome e toque em Buscar cidade natal",
+                "required": false
+              },
+              {
+                "type": "EmbeddedLink",
+                "text": "Buscar cidade natal",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_cidade",
+                    "nome": "${form.nome}",
+                    "email": "${form.email}",
+                    "cpf": "${form.cpf}",
+                    "data_nascimento": "${form.data_nascimento}",
+                    "celular": "${form.celular}",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              },
+              {
+                "type": "If",
+                "condition": "${data.cidade_visivel} == true",
+                "then": [
+                  {
+                    "type": "Dropdown",
+                    "name": "cidade_natal",
+                    "label": "Cidade natal",
+                    "data-source": "${data.cidades_natal}",
+                    "required": true
+                  }
+                ],
+                "else": []
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_resp_dados",
+                    "nome": "${form.nome}",
+                    "email": "${form.email}",
+                    "cpf": "${form.cpf}",
+                    "data_nascimento": "${form.data_nascimento}",
+                    "celular": "${form.celular}",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ENDERECO",
+      "title": "Endereço",
+      "terminal": false,
+      "data": {
+        "ufs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "cidades_natal": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "cidade_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cep": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_rua": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_numero": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_complemento": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_bairro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cidade": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_uf": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_estado_natal": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_busca_cidade": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cidade_natal": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_endereco",
+            "init-values": {
+              "cep": "${data.valor_cep}",
+              "rua": "${data.valor_rua}",
+              "numero": "${data.valor_numero}",
+              "complemento": "${data.valor_complemento}",
+              "bairro": "${data.valor_bairro}",
+              "cidade": "${data.valor_cidade}",
+              "uf": "${data.valor_uf}",
+              "estado_natal": "${data.valor_estado_natal}",
+              "busca_cidade": "${data.valor_busca_cidade}",
+              "cidade_natal": "${data.valor_cidade_natal}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Seu endereço"
+              },
+              {
+                "type": "TextBody",
+                "text": "Próximo passo: conhecer você melhor! Informe seu endereço e sua naturalidade."
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextInput",
+                "name": "cep",
+                "label": "CEP",
+                "input-type": "number",
+                "helper-text": "Somente números",
+                "required": false
+              },
+              {
+                "type": "EmbeddedLink",
+                "text": "Buscar endereço pelo CEP",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_cep",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              },
+              {
+                "type": "TextInput",
+                "name": "rua",
+                "label": "Rua",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "numero",
+                "label": "Número",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "complemento",
+                "label": "Complemento",
+                "input-type": "text",
+                "required": false
+              },
+              {
+                "type": "TextInput",
+                "name": "bairro",
+                "label": "Bairro",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "cidade",
+                "label": "Cidade",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "uf",
+                "label": "UF",
+                "input-type": "text",
+                "helper-text": "Sigla do estado. Ex.: MA",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "estado_natal",
+                "label": "Estado natal",
+                "data-source": "${data.ufs}",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "busca_cidade",
+                "label": "Buscar cidade natal",
+                "input-type": "text",
+                "helper-text": "Digite parte do nome e toque em Buscar cidade natal",
+                "required": false
+              },
+              {
+                "type": "EmbeddedLink",
+                "text": "Buscar cidade natal",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_cidade",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              },
+              {
+                "type": "If",
+                "condition": "${data.cidade_visivel} == true",
+                "then": [
+                  {
+                    "type": "Dropdown",
+                    "name": "cidade_natal",
+                    "label": "Cidade natal",
+                    "data-source": "${data.cidades_natal}",
+                    "required": true
+                  }
+                ],
+                "else": []
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_endereco",
+                    "cep": "${form.cep}",
+                    "rua": "${form.rua}",
+                    "numero": "${form.numero}",
+                    "complemento": "${form.complemento}",
+                    "bairro": "${form.bairro}",
+                    "cidade": "${form.cidade}",
+                    "uf": "${form.uf}",
+                    "estado_natal": "${form.estado_natal}",
+                    "busca_cidade": "${form.busca_cidade}",
+                    "cidade_natal": "${form.cidade_natal}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "IDENTIDADE",
+      "title": "Identidade",
+      "terminal": false,
+      "data": {
+        "ufs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "racas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "estados_civis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "anos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "escolas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "escola_visivel": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_rg": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_orgao_emissor": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_uf_rg": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cor_raca": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_estado_civil": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_busca_escola": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_escola": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_ano_conclusao": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_identidade",
+            "init-values": {
+              "rg": "${data.valor_rg}",
+              "orgao_emissor": "${data.valor_orgao_emissor}",
+              "uf_rg": "${data.valor_uf_rg}",
+              "cor_raca": "${data.valor_cor_raca}",
+              "estado_civil": "${data.valor_estado_civil}",
+              "busca_escola": "${data.valor_busca_escola}",
+              "escola": "${data.valor_escola}",
+              "ano_conclusao": "${data.valor_ano_conclusao}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Documento e perfil"
+              },
+              {
+                "type": "TextBody",
+                "text": "Precisamos de mais algumas informações suas."
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextInput",
+                "name": "rg",
+                "label": "Nº da identidade",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "orgao_emissor",
+                "label": "Órgão emissor",
+                "input-type": "text",
+                "helper-text": "Ex.: SSP",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "uf_rg",
+                "label": "UF da identidade",
+                "data-source": "${data.ufs}",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "cor_raca",
+                "label": "Cor / Raça",
+                "data-source": "${data.racas}",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "estado_civil",
+                "label": "Estado civil",
+                "data-source": "${data.estados_civis}",
+                "required": true
+              },
+              {
+                "type": "Dropdown",
+                "name": "ano_conclusao",
+                "label": "Ano de conclusão",
+                "data-source": "${data.anos}",
+                "required": false
+              },
+              {
+                "type": "TextInput",
+                "name": "busca_escola",
+                "label": "Buscar escola",
+                "input-type": "text",
+                "helper-text": "Opcional: escola do ensino médio",
+                "required": false
+              },
+              {
+                "type": "EmbeddedLink",
+                "text": "Buscar escola",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_escola",
+                    "rg": "${form.rg}",
+                    "orgao_emissor": "${form.orgao_emissor}",
+                    "uf_rg": "${form.uf_rg}",
+                    "cor_raca": "${form.cor_raca}",
+                    "estado_civil": "${form.estado_civil}",
+                    "busca_escola": "${form.busca_escola}",
+                    "escola": "${form.escola}",
+                    "ano_conclusao": "${form.ano_conclusao}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              },
+              {
+                "type": "If",
+                "condition": "${data.escola_visivel} == true",
+                "then": [
+                  {
+                    "type": "Dropdown",
+                    "name": "escola",
+                    "label": "Escola",
+                    "data-source": "${data.escolas}",
+                    "required": false
+                  }
+                ],
+                "else": []
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_identidade",
+                    "rg": "${form.rg}",
+                    "orgao_emissor": "${form.orgao_emissor}",
+                    "uf_rg": "${form.uf_rg}",
+                    "cor_raca": "${form.cor_raca}",
+                    "estado_civil": "${form.estado_civil}",
+                    "busca_escola": "${form.busca_escola}",
+                    "escola": "${form.escola}",
+                    "ano_conclusao": "${form.ano_conclusao}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CUPOM",
+      "title": "Cupom de desconto",
+      "terminal": false,
+      "data": {
+        "texto": {
+          "type": "string",
+          "__example__": "Se você recebeu um cupom, informe abaixo."
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "valor_cupom": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_cupom",
+            "init-values": {
+              "cupom": "${data.valor_cupom}"
+            },
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Cupom de desconto"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.texto}"
+              },
+              {
+                "type": "TextInput",
+                "name": "cupom",
+                "label": "Cupom",
+                "input-type": "text",
+                "required": false
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "enviar_cupom",
+                    "cupom": "${form.cupom}",
+                    "estado": "${data.estado}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ETAPA_PORTAL",
+      "title": "Próxima etapa",
+      "terminal": false,
+      "data": {
+        "titulo": {
+          "type": "string",
+          "__example__": "Envie seus documentos"
+        },
+        "mensagem": {
+          "type": "string",
+          "__example__": "Continue esta etapa pelo Portal do candidato."
+        },
+        "link_portal": {
+          "type": "string",
+          "__example__": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+        },
+        "rotulo_link": {
+          "type": "string",
+          "__example__": "Abrir no Portal do candidato"
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.erro}",
+            "visible": "${data.tem_erro}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.mensagem}"
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Abrir Portal do candidato",
+            "on-click-action": {
+              "name": "open_url",
+              "url": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "Já concluí, atualizar situação",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "atualizar_portal",
+                "estado": "${data.estado}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "STATUS_FINAL",
+      "title": "Situação",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "titulo": {
+          "type": "string",
+          "__example__": "Etapa registrada"
+        },
+        "resumo": {
+          "type": "string",
+          "__example__": ""
+        },
+        "mensagem": {
+          "type": "string",
+          "__example__": ""
+        },
+        "link_portal": {
+          "type": "string",
+          "__example__": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "${data.titulo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.resumo}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.mensagem}"
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Abrir Portal do candidato",
+            "on-click-action": {
+              "name": "open_url",
+              "url": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+            }
           },
           {
             "type": "Footer",

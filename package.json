@@ -1,11 +1,11 @@
 {
   "name": "devflowunibalsas",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test \"test/*.test.js\""
   },
   "engines": {
     "node": ">=22"

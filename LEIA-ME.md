@@ -1,3 +1,37 @@
+# Versão 1.5.0 — Jornada completa (continuação da inscrição e matrícula)
+
+## O que mudou
+
+1. **Celular** passa a ir para o Rubeus só com dígitos (DDD + número), igual ao site oficial.
+2. **Tema da redação**: removido o tema fixo antigo. O tema é sempre o sorteado pelo módulo de avaliação, lido em `iniciar_redacao`.
+3. **Nova opção "Já me inscrevi: continuar"** na primeira tela. O candidato entra com CPF (ou e-mail) e data de nascimento (`/login`, `/login/portal` da API oficial) e vê a situação de cada etapa.
+4. **Novas telas** (`api/matricula.js` + `flow-waba.json`):
+   - `LOGIN_CANDIDATO`, `PORTAL_STATUS` (resumo das etapas e botão para a próxima);
+   - `RESP_FINANCEIRO` (Eu/Outro), `RESP_DADOS` (dados do responsável), `ENDERECO` (CEP via ViaCEP, busca de cidade natal), `IDENTIDADE` (RG, órgão, UF, cor/raça, estado civil, busca de escola, ano), `CUPOM`;
+   - `ETAPA_PORTAL` para documentos, contrato, pagamento, taxa e filiação (abre o portal oficial; a API oficial não documenta upload, aceite de contrato nem Pix);
+   - `STATUS_FINAL` (tela terminal com a situação).
+5. Listas grandes (5.568 cidades, 1.461 escolas) usam **busca por texto** + Dropdown com até 20 resultados, por causa do limite de 200 opções do Dropdown.
+6. O `routing_model` da Meta só aceita rotas para frente. A jornada segue a ordem resumo → responsável → dados do responsável → endereço → identidade → cupom → portal. Se a próxima etapa do portal estiver "para trás", o Flow termina em `STATUS_FINAL` e orienta a reabrir.
+7. As confirmações (inscrição, ENEM, redação) orientam a voltar por "Já me inscrevi: continuar".
+8. `npm test` agora roda `test/*.test.js` (as cópias antigas soltas na raiz não são mais executadas).
+
+## Validação
+
+78 testes locais passam (73 anteriores + 5 novos em `test/matricula.test.js`: grafo sem ciclos, limites de componentes, correspondência JSON × servidor, jornada completa simulada e bloqueio de rota para trás).
+
+**Não validado em produção:** as chamadas `/login`, `/login/info` e `/login/portal` seguem a documentação da Rubeus, mas a documentação não deixa claro se o `session_id` devolvido por `/login` é o token aceito por `/form` e `/submit`. O código usa `token` ou `session_id`, nessa ordem. Homologue com a inscrição de teste 14083470 antes de publicar.
+
+## Atualizar
+
+Servidor: `api/flow.js`, novo `api/matricula.js`, `package.json`, `test/`. JSON da WABA: `flow-waba.json` (9 telas novas, versão 7.3 mantida). Atualize os dois lados antes de testar.
+
+```bash
+curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api/flow
+```
+
+Versão esperada: `unibalsas-cloudrun-matricula-1.5.0`.
+
+---
 # Versão 1.4.0 — Transferência e Portador de Diploma
 
 ## Base preservada
