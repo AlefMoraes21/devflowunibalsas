@@ -7,21 +7,6 @@ function memory(){const map=new Map();return {async create(id,record){if(map.has
 const req=()=>({action:'data_exchange',screen:'QUASE_LA',flow_token:'unit-flow',data:{acao:'enviar_informacoes_complementares',estado:'{}',cpf:'unit-value'}});
 const render=(screen,data)=>({screen,data:{...data,estado:JSON.stringify(data)}});
 function engine(store,run,extra={}){return createJobEngine({store,run,enqueue:async()=>{},openState:JSON.parse,render,waitMs:0,...extra})}
-
-test('resultado antigo da redação usa painel pós-prova sem repetir envio',async()=>{
- const store=memory();let calls=0;
- const e=engine(store,async()=>{calls++;return render('ACOMPANHAMENTO',{token:'unit',proxima:{step:33,title:'Prova online'}})});
- const request={action:'data_exchange',screen:'TELA_REDACAO',flow_token:'unit-flow',data:{acao:'enviar_redacao',estado:'{}'}};
- const first=await e.route(request);await e.worker(first.data.job_id,workerSignature(first.data.job_id));
- const result=await e.route({...request,data:{acao:'consultar_tarefa',estado:first.data.estado}});
- assert.equal(result.screen,'ACOMPANHAMENTO_POS_PROVA');assert.equal(result.data.proxima,null);assert.equal(result.data.acao_rodape,'atualizar_portal');assert.equal(calls,1);
-});
-
-test('painel pós-prova aceita atualização assíncrona e preserva a origem durante espera',async()=>{
- const e=engine(memory(),async()=>({}));
- const result=await e.route({action:'data_exchange',screen:'ACOMPANHAMENTO_POS_PROVA',flow_token:'unit-flow',data:{acao:'atualizar_portal',estado:'{}'}});
- assert.equal(result.screen,'ACOMPANHAMENTO_POS_PROVA');assert.equal(result.data.acao_rodape,'consultar_tarefa');
-});
 test('operação lenta permanece na tela de origem e conclui sem novo submit',async()=>{
  const store=memory();let writes=0;const e=engine(store,async()=>{writes++;return {screen:'TELA_ORIENTACAO_PROVA',data:{estado:'{}'}}});
  const first=await e.route(req());assert.equal(first.screen,'QUASE_LA');assert.equal(first.data.processando,true);assert.equal(first.data.acao_rodape,'consultar_tarefa');assert.equal(writes,0);

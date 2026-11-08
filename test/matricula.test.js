@@ -31,9 +31,7 @@ test('telas novas respeitam limites de componentes da Meta e batem com o servido
  assert.ok(!j.screens.some(s=>s.id==='LOGIN_CANDIDATO'));
  // A WABA exige que init-values tenha o mesmo tipo do input: campos "number" não aceitam ${data.valor_*} (string).
  for(const s of j.screens){const forms=walk(s.layout).filter(c=>c.type==='Form'&&c['init-values']);for(const f of forms)for(const c of walk(f.children))if(c.type==='TextInput'&&c['input-type']==='number')assert.ok(!(c.name in f['init-values']),`${s.id}.${c.name}`)}
- assert.ok(j.routing_model.QUASE_LA.includes('ACOMPANHAMENTO'));
- assert.ok(j.routing_model.TELA_REDACAO.includes('ACOMPANHAMENTO_POS_PROVA'));
- assert.ok(j.routing_model.ACOMPANHAMENTO.includes('TELA_ORIENTACAO_PROVA'));
+ for(const s of ['QUASE_LA','TELA_REDACAO'])assert.ok(j.routing_model[s].includes('ACOMPANHAMENTO'),s);
  const doc=walk(j.screens.find(s=>s.id==='DOCUMENTOS_INSCRICAO').layout).find(c=>c.type==='DocumentPicker');assert.equal(doc['max-uploaded-documents'],1);assert.ok(doc['max-file-size-kb']<=740);
 });
 
@@ -74,31 +72,7 @@ function rubeus(portalSequence,forms,submits){
 async function run(request){request=structuredClone(request);return flowContext.run({request,write:null,deadline:Date.now()+60000},()=>routeFlowRequest(request))}
 const ask=(screen,acao,estado,user={})=>({screen,action:'data_exchange',flow_token:'t',data:{acao,estado,...user}});
 
-test('acompanhamento abre a prova e o painel pós-prova mantém apenas rotas permitidas',async()=>{
- process.env.FLOW_PRIVATE_KEY='unit-routing-key';process.env.RBS_TOKEN='unit';
- const previous=globalThis.fetch,submits=[];
- const proof=stage('Prova online',0,'Prova disponível',33);
- globalThis.fetch=rubeus([[proof,stage('Seleção resp. financeiro',0,'Pendente',300676)]],{33:{id:33,content:{inputs:[]}},300676:radioForm},submits);
- try{
-  const j=await flowJson(),base={token:'unit',applyment_id:'123',processo_seletivo_id:'20383',proxima:{step:33,title:'Prova online'}};
-  const pre=await run(ask('ACOMPANHAMENTO','continuar_etapa',sealState('ACOMPANHAMENTO',base)));
-  assert.equal(pre.screen,'TELA_ORIENTACAO_PROVA');assert.ok(j.routing_model.ACOMPANHAMENTO.includes(pre.screen));
-  assert.equal(canAdvance('ACOMPANHAMENTO','TELA_ORIENTACAO_PROVA'),true);
-  assert.equal(canAdvance('ACOMPANHAMENTO_POS_PROVA','TELA_ORIENTACAO_PROVA'),false);
-  const post=await run(ask('ACOMPANHAMENTO_POS_PROVA','atualizar_portal',sealState('ACOMPANHAMENTO_POS_PROVA',base)));
-  assert.equal(post.screen,'ACOMPANHAMENTO_POS_PROVA');
-  assert.equal(openState(post.data.estado,post.screen).proxima.step,300676);
-  const next=await run(ask(post.screen,'continuar_etapa',post.data.estado));
-  assert.equal(next.screen,'RESP_FINANCEIRO');assert.ok(j.routing_model[post.screen].includes(next.screen));
-  const stale=await run(ask(post.screen,'continuar_etapa',sealState(post.screen,base)));
-  assert.equal(stale.screen,post.screen);assert.equal(stale.data.acao_rodape,'atualizar_portal');assert.equal(stale.data.tem_erro,true);
-  const empty=await run(ask(post.screen,'continuar_etapa',sealState(post.screen,{...base,proxima:null})));
-  assert.equal(empty.screen,post.screen);
-  assert.equal(submits.length,0);
- }finally{globalThis.fetch=previous}
-});
-
-test('jornada de matrícula: login, responsável, endereço e tela nativa de documentos sem sessão de portal simulada',async()=>{
+test('jornada de matrícula: login, responsável, endereço com busca de cidade, documentos no portal e situação final',async()=>{
  process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
  const submits=[],previous=globalThis.fetch;
  const done=[stage('Inscrição',1,'Concluída'),stage('Prova online',1,'Aprovado')];
@@ -137,8 +111,8 @@ test('jornada de matrícula: login, responsável, endereço e tela nativa de doc
   assert.equal(identity.screen,'IDENTIDADE');assert.deepEqual(identity.data.anos.map(a=>a.id),['2026','2025']);
   const docs=await run(ask('IDENTIDADE','enviar_identidade',identity.data.estado,{rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'3',estado_civil:'S',ano_conclusao:'2025'}));
   assert.equal(submits.length,3);const idSent=Object.fromEntries(submits[2].data.map(f=>[f.field_id,f.value]));assert.equal(idSent[38642],'123456789');assert.equal(idSent[38643],'SSP');assert.equal(idSent[38699],undefined);
-  assert.equal(docs.screen,'DOCUMENTOS_MATRICULA');assert.match(docs.data.titulo,/documentos/i);assert.equal(docs.data.tem_erro,true,'fixture does not provide a portal session; no false upload availability');
-  const end=await run(ask('DOCUMENTOS_MATRICULA','atualizar_portal',docs.data.estado));
+  assert.equal(docs.screen,'ETAPA_PORTAL');assert.match(docs.data.titulo,/documentos/i);assert.match(docs.data.link_portal,/passo\/300671$/);
+  const end=await run(ask('ETAPA_PORTAL','atualizar_portal',docs.data.estado));
   assert.equal(end.screen,'STATUS_FINAL');assert.match(end.data.resumo,/Contrato: Em análise/);assert.equal(submits.length,3);
  }finally{globalThis.fetch=previous}
 });

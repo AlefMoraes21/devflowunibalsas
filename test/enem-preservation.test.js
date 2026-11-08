@@ -8,11 +8,7 @@ test('telas existentes do GitHub permanecem idênticas e a tela ENEM tem média 
  const flow=JSON.parse(await readFile(new URL('../flow-waba.json',import.meta.url)));
  for(const [id,hash] of Object.entries(baseline)){
   const screen=flow.screens.find(s=>s.id===id);assert.ok(screen,id);
-  if(id==='ESCOLHA_PROCESSO'){
-   // Login now uses durable jobs; the remaining enrollment/ENEM screens stay identical.
-   assert.equal(screen.data.processando.type,'boolean');
-   assert.match(JSON.stringify(screen.layout),/consultar|acao_rodape/);
-  }else assert.equal(crypto.createHash('sha256').update(JSON.stringify(screen)).digest('hex'),hash,id);
+  assert.equal(crypto.createHash('sha256').update(JSON.stringify(screen)).digest('hex'),hash,id);
  }
  const screen=flow.screens.find(s=>s.id==='CURSO_ENEM');assert.equal(screen.terminal,false);
  const all=[];function walk(x){if(Array.isArray(x))x.forEach(walk);else if(x&&typeof x==='object'){if(x.type)all.push(x);for(const v of Object.values(x))if(v&&typeof v==='object')walk(v)}}walk(screen.layout);
