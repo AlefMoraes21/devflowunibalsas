@@ -8,7 +8,6 @@ import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
 import { listDocuments, saveDocument } from "./documentos.js";
-import { createMatriculaDocuments } from "./matricula-documentos.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -133,17 +132,16 @@ SCREEN_KEYS.CURSO_INGRESSO=[...SCREEN_KEYS.CURSO_ENEM];
 Object.assign(SCREEN_KEYS, MATRICULA_SCREENS);
 // Telas que processam em segundo plano (fila durável), como QUASE_LA: Rubeus /portal e envios podem passar de 6 s.
 const PROCESSING_KEYS = ["processando", "editavel", "acao_rodape", "rotulo_rodape", "mensagem_processamento", "job_id", "titulo_processamento"];
-const MATRICULA_STEP_ACTIONS = { RESP_FINANCEIRO: "enviar_responsavel", RESP_DADOS: "enviar_resp_dados", ENDERECO: "enviar_endereco", IDENTIDADE: "enviar_identidade", CUPOM: "enviar_cupom", ETAPA_PORTAL: "atualizar_portal", DOCUMENTOS_INSCRICAO: "enviar_documento", DOCUMENTOS_MATRICULA: "enviar_documento_matricula" };
-const MATRICULA_STEP_LABELS = { RESP_FINANCEIRO: "Continuar", RESP_DADOS: "Continuar", ENDERECO: "Continuar", IDENTIDADE: "Continuar", CUPOM: "Continuar", ETAPA_PORTAL: "Já concluí, atualizar situação", DOCUMENTOS_INSCRICAO: "Enviar documento", DOCUMENTOS_MATRICULA: "Enviar documento" };
-for (const s of ["PORTAL_STATUS", "ACOMPANHAMENTO", "ACOMPANHAMENTO_POS_PROVA", ...Object.keys(MATRICULA_STEP_ACTIONS)]) SCREEN_KEYS[s] = [...new Set([...SCREEN_KEYS[s], ...PROCESSING_KEYS])];
+const MATRICULA_STEP_ACTIONS = { RESP_FINANCEIRO: "enviar_responsavel", RESP_DADOS: "enviar_resp_dados", ENDERECO: "enviar_endereco", IDENTIDADE: "enviar_identidade", CUPOM: "enviar_cupom", ETAPA_PORTAL: "atualizar_portal", DOCUMENTOS_INSCRICAO: "enviar_documento" };
+const MATRICULA_STEP_LABELS = { RESP_FINANCEIRO: "Continuar", RESP_DADOS: "Continuar", ENDERECO: "Continuar", IDENTIDADE: "Continuar", CUPOM: "Continuar", ETAPA_PORTAL: "Já concluí, atualizar situação", DOCUMENTOS_INSCRICAO: "Enviar documento" };
+for (const s of ["PORTAL_STATUS", "ACOMPANHAMENTO", ...Object.keys(MATRICULA_STEP_ACTIONS)]) SCREEN_KEYS[s] = [...new Set([...SCREEN_KEYS[s], ...PROCESSING_KEYS])];
 Object.assign(FORM_DEFAULTS, MATRICULA_FIELDS);
 const SEALED_SCREENS = ["ESCOLHA_PROCESSO", "DADOS_BASICOS", "CURSO_INTERESSE", "CURSO_ENEM", "CURSO_INGRESSO", "DOCUMENTOS_ENEM", "QUASE_LA", "TELA_ORIENTACAO_PROVA", "TELA_REDACAO", ...Object.keys(MATRICULA_SCREENS)];
 const PROXIMOS_PASSOS = "\n\nQuando houver uma nova etapa (resultado, pré-matrícula, documentos, contrato), abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.";
 // Primeira tela: nova inscrição ou login de quem já se inscreveu (CPF + data de nascimento).
-FORM_DEFAULTS.ESCOLHA_PROCESSO = { processo_id: "", modo: "nova", login: "", data_nascimento: "" };
+FORM_DEFAULTS.ESCOLHA_PROCESSO = { processo_id: "", modo: "nova", login: "" };
 const PROCESSO_INDISPONIVEL = { id: "indisponivel", title: "Nenhum processo disponível" };
 SCREEN_KEYS.ESCOLHA_PROCESSO.push("valor_modo", "valor_login", "data_maxima_nascimento");
-SCREEN_KEYS.ESCOLHA_PROCESSO.push('valor_data_nascimento',...PROCESSING_KEYS);
 
 const USER_FIELDS = new Set([
   "aceite_privacidade",
@@ -481,7 +479,7 @@ function assessmentClient(){return createAssessment({maxRequestMs:flowContext.ge
 const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
 async function linkDaInscricao(data){return proofRouter.prepare(data)}
 const academicId=id=>{try{return processPolicy(id).academicId}catch{return null}};
-const matricula=createMatricula({api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument},nativeDocs:createMatriculaDocuments()});
+const matricula=createMatricula({api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument}});
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -490,7 +488,7 @@ async function listProcesses() {
 
 // Sessão do candidato já inscrito, carregada no estado selado (nunca vinda do cliente).
 const cpfDigits = v => String(v ?? "").replace(/\D/g, "");
-const sessaoDe = d => ({ token: toStringValue(d.token), applyment_id: toStringValue(d.applyment_id), person_id: toStringValue(d.person_id), processo_seletivo_id: toStringValue(d.processo_seletivo_id), cpf: cpfDigits(d.cpf_candidato??d.cpf), cpf_candidato:cpfDigits(d.cpf_candidato??d.cpf), ...(d.portal_session?{portal_session:d.portal_session}:{}), ...(d.portal_document_error?{portal_document_error:d.portal_document_error}:{}), ...(d.nascimento_candidato?{nascimento_candidato:d.nascimento_candidato}:{}) });
+const sessaoDe = d => ({ token: toStringValue(d.token), applyment_id: toStringValue(d.applyment_id), person_id: toStringValue(d.person_id), processo_seletivo_id: toStringValue(d.processo_seletivo_id), cpf: cpfDigits(d.cpf) });
 function validarLogin(data) {
   const cpf = cpfDigits(data.login);
   if (!validCpf(cpf)) throw new Error("Informe o CPF usado na inscrição (11 números).");
@@ -500,9 +498,9 @@ function validarLogin(data) {
 
 // Depois da inscrição/redação: painel de acompanhamento sem fechar o Flow.
 // Se o portal ainda não responder para esta sessão, mantém a confirmação tradicional.
-async function acompanhamento(data, confirmation, hub = "ACOMPANHAMENTO") {
+async function acompanhamento(data, confirmation) {
   try {
-    return await matricula.status(sessaoDe(data), "", hub, { mensagem: confirmation.mensagem });
+    return await matricula.status(sessaoDe(data), "", "ACOMPANHAMENTO", { mensagem: confirmation.mensagem });
   } catch (e) {
     console.warn(JSON.stringify({ event: "acompanhamento_indisponivel", applicationId: toStringValue(data.applyment_id), message: e.message }));
     return responseForScreen("CONFIRMACAO", confirmation);
@@ -516,18 +514,13 @@ async function routeMatricula(screen, action, data) {
         return matricula.finish(data);
       case "enviar_documento":
         return await matricula.sendDocument(data);
-      case "enviar_documento_matricula":
-        if(screen!=='DOCUMENTOS_MATRICULA')throw new Error('Ação não permitida nesta tela.');
-        return await matricula.sendEnrollmentDocument(data);
-      case "atualizar_documentos_matricula":
-        if(screen!=='DOCUMENTOS_MATRICULA')throw new Error('Ação não permitida nesta tela.');
-        return await matricula.refreshEnrollmentDocuments(data);
       case "carregar_jornada":
       case "atualizar_portal":
-        if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO" || screen === "DOCUMENTOS_MATRICULA") return await matricula.advance(screen, sessaoDe(data));
-        return await matricula.status(sessaoDe(data), "", screen.startsWith("ACOMPANHAMENTO") ? screen : "PORTAL_STATUS", screen.startsWith("ACOMPANHAMENTO") ? { mensagem: data.mensagem } : {});
+        if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO") return await matricula.advance(screen, sessaoDe(data));
+        return await matricula.status(sessaoDe(data), "", screen === "ACOMPANHAMENTO" ? "ACOMPANHAMENTO" : "PORTAL_STATUS", screen === "ACOMPANHAMENTO" ? { mensagem: data.mensagem } : {});
       case "continuar_etapa":
-        return await matricula.continueStep(screen, sessaoDe(data), data.proxima, { mensagem: data.mensagem, resumo: data.resumo, titulo: data.titulo });
+        if (!data.proxima) return await matricula.status(sessaoDe(data));
+        return await matricula.open(sessaoDe(data), data.proxima);
       case "buscar_cep":
         return responseForScreen(screen, { ...data, values: { ...data, ...(await matricula.cep(data)) }, erro: "" });
       case "buscar_cidade": {
@@ -545,15 +538,10 @@ async function routeMatricula(screen, action, data) {
       }
     }
   } catch (e) {
-    if (action === "enviar_documento" && e.uncertain) return responseForScreen("PENDENTE", {
-      titulo: "Vamos conferir seu documento",
-      mensagem: "Não conseguimos confirmar o envio neste momento. Confira o recebimento com a equipe da UniBalsas antes de enviar novamente.",
-      inscricao_id: toStringValue(data.applyment_id)
-    });
     const p = pendingAfterWrite(data);
     if (p) return p;
     const { arquivo, ...safe } = data; // mídia do DocumentPicker não entra no estado selado
-    if (["PORTAL_STATUS", "ACOMPANHAMENTO", "ACOMPANHAMENTO_POS_PROVA", "ETAPA_PORTAL"].includes(screen)) return responseForScreen(screen, { ...safe, erro: e.message });
+    if (["PORTAL_STATUS", "ACOMPANHAMENTO", "ETAPA_PORTAL"].includes(screen)) return responseForScreen(screen, { ...safe, erro: e.message });
     return responseForScreen(screen, { ...safe, values: safe, erro: e.message });
   }
   return { data: { status: "active" } };
@@ -774,7 +762,6 @@ function buildAlmostThereScreenData(formResponse, prev, dataAnterior = {}) {
     campo_origem_outro_id: String(origO?.field_id || 319428),
     origens: ORIGENS_PADRAO,
     processo_seletivo_id: toStringValue(dataAnterior.processo_seletivo_id),
-    nascimento_candidato: toStringValue(dataAnterior.nascimento_candidato),
     eh_nota_enem: toBoolean(dataAnterior.eh_nota_enem),
     erro: ""
   };
@@ -819,16 +806,14 @@ function responseForScreen(screen, data) {
   if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
-  const actionByScreen={ESCOLHA_PROCESSO:"selecionar_processo",CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao",...MATRICULA_STEP_ACTIONS};
-  const labelByScreen={ESCOLHA_PROCESSO:"Continuar",CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação",...MATRICULA_STEP_LABELS};
+  const actionByScreen={CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao",...MATRICULA_STEP_ACTIONS};
+  const labelByScreen={CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação",...MATRICULA_STEP_LABELS};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
-  if(screen==='DOCUMENTOS_MATRICULA'){next.tem_pendentes=Boolean(next.tem_pendentes);next.documentos??=[];next.documentos_resumo??='';next.mensagem_envio??=''}
   // Navigation belongs to the destination screen, never to the previous form.
   if(actionByScreen[screen]){
     if(next.processando&&next.job_id){next.acao_rodape="consultar_tarefa";next.rotulo_rodape="Verificar andamento";next.editavel=false}
     else{next.processando=false;next.editavel=true;next.job_id="";next.acao_rodape=actionByScreen[screen];next.rotulo_rodape=labelByScreen[screen]}
   }
-  if(screen==='DOCUMENTOS_MATRICULA'&&!next.processando&&!next.tem_pendentes){next.acao_rodape='atualizar_portal';next.rotulo_rodape='Ver próximas etapas'}
   if(screen==="TELA_ORIENTACAO_PROVA"&&data.proof_resume_required&&!(next.processando&&next.job_id)){
     next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
   }
@@ -842,6 +827,7 @@ function responseForScreen(screen, data) {
     next.mensagem_processamento="Seu curso foi recebido. Vamos consultar a próxima etapa sem enviar os dados novamente.";
   }
   next.titulo_processamento={CURSO_INGRESSO:"Só um instante ⏳ Gravando seu curso",CURSO_ENEM:"Só um instante ⏳ Gravando suas notas",QUASE_LA:"Só um instante ⏳ Concluindo sua inscrição",TELA_ORIENTACAO_PROVA:"Só um instante ⏳ Preparando sua prova",TELA_REDACAO:"Só um instante ⏳ Enviando sua redação",PORTAL_STATUS:"Só um instante ⏳ Carregando sua jornada",ACOMPANHAMENTO:"Só um instante ⏳ Carregando sua jornada",ETAPA_PORTAL:"Só um instante ⏳ Conferindo sua situação",DOCUMENTOS_INSCRICAO:"Só um instante ⏳ Conferindo sua situação"}[screen]??"Só um instante ⏳ Gravando seus dados";
+  if(screen==="DOCUMENTOS_INSCRICAO"&&values.acao==="enviar_documento")next.titulo_processamento="Só um instante ⏳ Recebendo seu documento";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao)next.titulo_processamento="Conferindo atualização da redação";
   if(screen==="TELA_REDACAO"&&data.recibo_avaliacao&&!(next.processando&&next.job_id)){
     next.processando=true;next.editavel=false;next.job_id="";next.acao_rodape="verificar_entrega";next.rotulo_rodape="Verificar atualização";next.titulo_processamento="Redação recebida";
@@ -1005,8 +991,6 @@ async function routeFlowRequest(requestData) {
       const trusted = openState(data.estado, requestData.screen);
       const user = Object.fromEntries(Object.entries(data).filter(([k]) => USER_FIELDS.has(k)));
       data = { ...trusted, ...user, acao: customAction };
-      if(MATRICULA_ACTIONS.has(customAction))data.cpf_candidato=trusted.cpf_candidato??trusted.cpf;
-      if (["enviar_documento","enviar_documento_matricula","atualizar_documentos_matricula"].includes(customAction)) data.cpf = trusted.cpf;
       if (customAction !== "selecionar_processo") {
         data.processo_seletivo_id = trusted.processo_seletivo_id;
       }
@@ -1068,7 +1052,7 @@ async function routeFlowRequest(requestData) {
           try { session = await matricula.login(cpf, data.data_nascimento); }
           catch (e) { console.warn(JSON.stringify({ event: "login_falhou", message: e.message })); throw new Error("Não encontramos uma inscrição com esse CPF e data de nascimento. Confira os dados e tente de novo."); }
           // O /portal da Rubeus pode passar de 6 s: carregamos as etapas em segundo plano no próximo toque.
-          return matricula.welcome({ ...session, cpf, cpf_candidato:cpf });
+          return matricula.welcome({ ...session, cpf });
         }
         processPolicy(raw);
         if (!raw) {
@@ -1118,7 +1102,7 @@ async function routeFlowRequest(requestData) {
 
         const submit = await submitForm(data.button_id, fields, data.token);
         const next = await getForm(submit.data.next, submit.data.local, submit.data.token ?? data.token);
-        return responseForScreen("CURSO_INTERESSE", {...await buildCourseScreenData(next, data.processo_seletivo_id),nascimento_candidato:toStringValue(data.data_nascimento)});
+        return responseForScreen("CURSO_INTERESSE", await buildCourseScreenData(next, data.processo_seletivo_id));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1391,7 +1375,7 @@ async function followReceipt(data,receipt){
   const checked=await proofRouter.verify(data,data.sessao_avaliacao?.binding);
   flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt??data.recibo_avaliacao,portal:checked.portal};
   console.info(JSON.stringify({event:"proof_portal_check",applicationId:String(data.applyment_id),confirmed:portalConfirmsDelivery(checked.portal)}));
-  if(portalConfirmsDelivery(checked.portal))return await acompanhamento(data,{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)},"ACOMPANHAMENTO_POS_PROVA");
+  if(portalConfirmsDelivery(checked.portal))return await acompanhamento(data,{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)});
   return receiptScreen(data,receipt);
  }catch(e){return receiptScreen(data,receipt,e.message)}
 }
@@ -1445,7 +1429,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.1" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.3" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

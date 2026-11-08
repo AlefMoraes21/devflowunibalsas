@@ -29,8 +29,8 @@ export function createStore({request=googleRequest}={}){
     const r=await request(`${base()}/${collection}?documentId=${id}`,{method:'POST',body:{fields:fields(record)}});
     if(r.status===409)return false;if(r.status!==200)throw new Error('Não foi possível registrar o processamento.');return true;
   }
-  async function update(id,record,version,collection='flowJobs'){
-    const r=await request(`${base()}/${collection}/${id}?currentDocument.updateTime=${encodeURIComponent(version)}`,{method:'PATCH',body:{fields:fields(record)}});
+  async function update(id,record,version){
+    const r=await request(`${base()}/flowJobs/${id}?currentDocument.updateTime=${encodeURIComponent(version)}`,{method:'PATCH',body:{fields:fields(record)}});
     if([409,412].includes(r.status)||r.json?.error?.status==='FAILED_PRECONDITION')return false;
     if(r.status!==200)throw new Error('Não foi possível atualizar o processamento.');return true;
   }
