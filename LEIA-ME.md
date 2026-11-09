@@ -1,4 +1,17 @@
-# Versão 1.6.3 — Envio de documentos pelo WhatsApp na fila durável
+# Versão 1.6.4 — Prova aguardando correção
+
+## O que mudou
+
+Depois da redação, quando o portal mostra **Prova online: Aguardando correção**, a tela de acompanhamento deixa de oferecer "Continuar: Prova online" (não há o que continuar até a correção da equipe).
+
+- Título "Aguardando correção ⏱" e a mensagem do portal: "Você realizou a sua prova. Em breve o resultado estará disponível."
+- Dois botões: **Portal do Candidato** (abre a situação da jornada no site) e **Encerrar** (fecha o Flow).
+- Se houver outra etapa disponível (ex.: documentos), o botão Continuar permanece.
+- No painel de login ("Já sou inscrito") a etapa aparece com ⏱ e o botão é Atualizar situação.
+
+**Atualizar também o JSON da WABA** (`flow-waba.json`): a tela ACOMPANHAMENTO ganhou o dado `aguardando_resultado` e o link Portal do Candidato. Versão esperada: `unibalsas-cloudrun-jornada-1.6.4`. 94 testes locais.
+
+---# Versão 1.6.3 — Envio de documentos pelo WhatsApp na fila durável
 
 ## O que mudou (somente servidor; o JSON da WABA não muda)
 

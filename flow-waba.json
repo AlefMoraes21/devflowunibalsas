@@ -2189,6 +2189,10 @@
         "titulo_processamento": {
           "type": "string",
           "__example__": "Só um instante ⏳"
+        },
+        "aguardando_resultado": {
+          "type": "boolean",
+          "__example__": false
         }
       },
       "layout": {
@@ -2220,15 +2224,31 @@
                 "text": "${data.resumo}"
               },
               {
-                "type": "EmbeddedLink",
-                "text": "Encerrar por agora",
-                "on-click-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "encerrar",
-                    "estado": "${data.estado}"
+                "type": "If",
+                "condition": "${data.aguardando_resultado} == true",
+                "then": [
+                  {
+                    "type": "EmbeddedLink",
+                    "text": "Portal do Candidato",
+                    "on-click-action": {
+                      "name": "open_url",
+                      "url": "https://vestibular.unibalsas.edu.br/presencial/portal-inscrito"
+                    }
                   }
-                }
+                ],
+                "else": [
+                  {
+                    "type": "EmbeddedLink",
+                    "text": "Encerrar por agora",
+                    "on-click-action": {
+                      "name": "data_exchange",
+                      "payload": {
+                        "acao": "encerrar",
+                        "estado": "${data.estado}"
+                      }
+                    }
+                  }
+                ]
               }
             ],
             "else": [

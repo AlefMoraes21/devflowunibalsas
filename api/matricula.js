@@ -21,7 +21,7 @@ const title30 = v => str(v).replace(/-+\s*$/g, "").trim().slice(0, 30);
 
 export const SCREENS = {
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
-  ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape"],
+  ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "aguardando_resultado"],
   DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
   RESP_DADOS: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
@@ -119,9 +119,12 @@ export function summarizeStages(stages = []) {
     id: s.id, title: str(s.title), status: str(s.feedback?.complementary_text), conclusive: Number(s.feedback?.conclusive) === 1,
     action: s.feedback?.cta_text && s.feedback.cta_text !== "null" ? str(s.feedback.cta_text) : "", step: stepFromLink(s.cta_link)
   }));
-  const next = rows.find(r => !r.conclusive && r.step && r.action) ?? null;
-  const resumo = rows.map(r => `${r.conclusive ? "✅" : r.step && r.action ? "👉" : "⏳"} ${r.title}: ${r.status || "—"}`).join("\n");
-  return { rows, next, resumo };
+  // Etapa já entregue que depende da correção da equipe: não há o que continuar (ex.: "Prova online: Aguardando correção").
+  const emCorrecao = r => !r.conclusive && /aguardando.*correc/.test(norm(r.status));
+  const next = rows.find(r => !r.conclusive && r.step && r.action && !emCorrecao(r)) ?? null;
+  const aguardandoCorrecao = !next && rows.some(emCorrecao);
+  const resumo = rows.map(r => `${r.conclusive ? "✅" : emCorrecao(r) ? "⏱" : r.step && r.action ? "👉" : "⏳"} ${r.title}: ${r.status || "—"}`).join("\n");
+  return { rows, next, resumo, aguardandoCorrecao };
 }
 
 export function screenForStep(stageTitle, form) {
@@ -182,12 +185,20 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const p = await portal(session);
     const s = summarizeStages(p.stages);
     const base = { ...session, token: p.token, processo_seletivo_id: p.processo_seletivo_id || session.processo_seletivo_id, proxima: s.next };
-    const waiting = s.rows.find(r => !r.conclusive && !(r.step && r.action));
+    const waiting = s.rows.find(r => !r.conclusive && !(r.step && r.action) && !/aguardando.*correc/.test(norm(r.status)));
+    // Prova entregue e à espera da correção: sem "Continuar"; o candidato abre o portal ou encerra.
+    const espera = hub === "ACOMPANHAMENTO" && s.aguardandoCorrecao;
     return render(hub, {
       ...base, titulo: hub === "ACOMPANHAMENTO" ? "Inscrição recebida ✅" : "Sua inscrição",
       resumo: (s.resumo || "Nenhuma etapa disponível no momento.") + (!s.next && waiting ? `\n\n⏳ ${waiting.title}: aguardando a análise da equipe UniBalsas. Você pode tocar em Atualizar situação daqui a pouco ou voltar depois por "Já sou inscrito".` : ""),
       erro, acao_rodape: s.next ? "continuar_etapa" : "atualizar_portal", rotulo_rodape: s.next ? `Continuar: ${title30(s.next.title)}`.slice(0, 35) : "Atualizar situação",
-      link_portal: `${PORTAL_URL}/portal-inscrito`, ...extra
+      link_portal: `${PORTAL_URL}/portal-inscrito`, ...extra,
+      ...(hub === "ACOMPANHAMENTO" ? { aguardando_resultado: espera } : {}),
+      ...(espera ? {
+        titulo: "Aguardando correção ⏱",
+        mensagem: "Você realizou a sua prova. Em breve o resultado estará disponível.\n\nQuando o resultado sair, abra este atendimento e escolha \"Já sou inscrito\" com seu CPF e data de nascimento.",
+        acao_rodape: "encerrar", rotulo_rodape: "Encerrar"
+      } : {})
     });
   }
 
