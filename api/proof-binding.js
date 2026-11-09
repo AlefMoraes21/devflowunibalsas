@@ -56,7 +56,10 @@ export async function loadPortal(data,options){
 export function assertCurrentBinding(snapshot,data,binding){
  if(!binding||!same(data.applyment_id,binding.applicationId)||!same(data.processo_seletivo_id,binding.processId)||Number(snapshot.id)!==Number(binding.step))throw new Error('[PROVA_VINCULO] Esta sessão não possui vínculo validado com a inscrição atual.');
  const values=snapshotValues(snapshot);
- if(!same(values.get(binding.executionFieldId),binding.executionCode)||!same(values.get(binding.proofFieldId),binding.proofId))throw new Error('[PROVA_VINCULO] A inscrição aponta outra execução de prova. O texto foi preservado; não foi enviado para uma execução diferente.');
+ if(!same(values.get(binding.executionFieldId),binding.executionCode)||!same(values.get(binding.proofFieldId),binding.proofId)){
+  console.warn(JSON.stringify({event:"proof_binding_mismatch",applicationId:String(data.applyment_id),step:Number(binding.step),executionFieldId:binding.executionFieldId,executionCodeBound:binding.executionCode,executionCodeSnapshot:values.get(binding.executionFieldId)??null,proofFieldId:binding.proofFieldId,proofIdBound:binding.proofId,proofIdSnapshot:values.get(binding.proofFieldId)??null}));
+  throw new Error('[PROVA_VINCULO] A inscrição aponta outra execução de prova. O texto foi preservado; não foi enviado para uma execução diferente.');
+ }
  return true;
 }
 export function portalConfirmsDelivery(portal){
