@@ -89,8 +89,8 @@ test('contrato publicado: documentos declara só id/title e todas as listas de D
  }
  // Nenhuma lista de opções com campos extras passa pelo serializador.
  const noisy=[{id:7,title:'A',descricao:'x',extra:1}];
- for(const k of ['cursos','turnos','anos_enem','origens','opcoes_responsavel','ufs','cidades_natal','racas','estados_civis','anos','escolas']){
-  const screen={cursos:'CURSO_INGRESSO',turnos:'CURSO_INGRESSO',anos_enem:'CURSO_ENEM',origens:'QUASE_LA',opcoes_responsavel:'RESP_FINANCEIRO',ufs:'ENDERECO',cidades_natal:'ENDERECO',racas:'IDENTIDADE',estados_civis:'IDENTIDADE',anos:'IDENTIDADE',escolas:'IDENTIDADE'}[k];
+ for(const k of ['cursos','turnos','anos_enem','origens','opcoes_responsavel','ufs','cidades_natal','racas','estados_civis','escolas']){
+  const screen={cursos:'CURSO_INGRESSO',turnos:'CURSO_INGRESSO',anos_enem:'CURSO_ENEM',origens:'QUASE_LA',opcoes_responsavel:'RESP_FINANCEIRO',ufs:'ENDERECO',cidades_natal:'ENDERECO',racas:'IDENTIDADE',estados_civis:'IDENTIDADE',escolas:'IDENTIDADE'}[k];
   assert.deepEqual(responseForScreen(screen,{[k]:noisy}).data[k],[{id:'7',title:'A'}],k);
  }
 });

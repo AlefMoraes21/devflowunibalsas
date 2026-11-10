@@ -1,6 +1,6 @@
 # Checklist - testes do FLOW UniBalsas 1.6.6 (documentos da inscrição, um só Flow)
 
-FLOW: DevRubeusFlows, ID 1295030755786589, JSON 7.3 / Data API 3.0. Servidor esperado em `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.7`. O JSON da WABA **muda** nesta versão: importar o `flow-waba.json` novo antes de testar.
+FLOW: DevRubeusFlows, ID 1295030755786589, JSON 7.3 / Data API 3.0. Servidor esperado em `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.8`. O JSON da WABA **muda** nesta versão: importar o `flow-waba.json` novo antes de testar.
 
 **O que mudou na 1.6.6**
 1. Corrige `Component Validation Error: Dropdown should NOT have additional properties (descricao)` na tela `DOCUMENTOS_INSCRICAO`. Todas as listas de opções saem só com `{id,title}`.
@@ -14,8 +14,8 @@ Legenda: ESPERADO = comportamento que deve ser observado; REGISTRAR = anotar o q
 ## 0. Preparação
 
 - [ ] Importar `flow-waba.json` da 1.6.6 na WABA e publicar; conferir "zero erros" no meta.
-- [ ] `GET /api/flow` responde `version: unibalsas-cloudrun-jornada-1.6.7`.
-- [ ] `npm test` local: 106 testes passando.
+- [ ] `GET /api/flow` responde `version: unibalsas-cloudrun-jornada-1.6.8`.
+- [ ] `npm test` local: 108 testes passando.
 - [ ] Ligar o modo interativo (não clicar em Executar durante o teste; ele desativa o modo).
 - [ ] Ter uma inscrição concluída por modalidade (ou usar as já existentes: Transferência 14150234, Diploma 14150338, ENEM 14150473).
 

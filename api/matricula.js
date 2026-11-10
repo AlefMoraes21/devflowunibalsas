@@ -31,7 +31,7 @@ export const SCREENS = {
   ENDERECO: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
     "valor_cep", "valor_rua", "valor_numero", "valor_complemento", "valor_bairro", "valor_cidade", "valor_uf",
     "valor_estado_natal", "valor_busca_cidade", "valor_cidade_natal"],
-  IDENTIDADE: ["ufs", "racas", "estados_civis", "anos", "escolas", "escola_visivel", "erro", "tem_erro", "estado",
+  IDENTIDADE: ["ufs", "racas", "estados_civis", "escolas", "escola_visivel", "erro", "tem_erro", "estado",
     "valor_rg", "valor_orgao_emissor", "valor_uf_rg", "valor_cor_raca", "valor_estado_civil",
     "valor_busca_escola", "valor_escola", "valor_ano_conclusao"],
   CUPOM: ["texto", "erro", "tem_erro", "estado", "valor_cupom"],
@@ -86,7 +86,7 @@ const SPEC = {
   CUPOM: { cupom: [["Cupom de Desconto"], 98519] }
 };
 const OPTIONAL = new Set(["complemento", "escola", "ano_conclusao", "cupom"]);
-const LABELS = { rua: "Rua", numero: "Número", bairro: "Bairro", cidade: "Cidade", uf: "UF", estado_natal: "Estado natal", cidade_natal: "Cidade natal",
+const LABELS = { ano_conclusao: "Ano de conclusão", rua: "Rua", numero: "Número", bairro: "Bairro", cidade: "Cidade", uf: "UF", estado_natal: "Estado natal", cidade_natal: "Cidade natal",
   nome: "Nome", email: "E-mail", cpf: "CPF", data_nascimento: "Data de nascimento", celular: "Celular", rg: "Número da identidade",
   orgao_emissor: "Órgão emissor", uf_rg: "UF da identidade", cor_raca: "Cor/Raça", estado_civil: "Estado civil", responsavel: "Responsável financeiro" };
 
@@ -320,9 +320,9 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     if (screen === "ENDERECO" || screen === "RESP_DADOS") data.ufs = await loadOptions(form, session.token, b.ids.estado_natal);
     if (screen === "RESP_DADOS") data.data_maxima_nascimento = new Date().toISOString().slice(0, 10);
     if (screen === "IDENTIDADE") {
-      [data.ufs, data.racas, data.estados_civis, data.anos] = await Promise.all([
-        loadOptions(form, session.token, b.ids.uf_rg), loadOptions(form, session.token, b.ids.cor_raca), loadOptions(form, session.token, b.ids.estado_civil),
-        b.ids.ano_conclusao ? loadOptions(form, session.token, b.ids.ano_conclusao).then(l => l.sort((a, z) => z.id.localeCompare(a.id))) : []
+      // O ano de conclusão é digitado (a consulta do Rubeus não retorna a lista de anos).
+      [data.ufs, data.racas, data.estados_civis] = await Promise.all([
+        loadOptions(form, session.token, b.ids.uf_rg), loadOptions(form, session.token, b.ids.cor_raca), loadOptions(form, session.token, b.ids.estado_civil)
       ]);
     }
     if (screen === "CUPOM") data.texto = "Se você recebeu um cupom de desconto, informe abaixo. Deixe em branco para seguir sem cupom.";
@@ -381,6 +381,12 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       require(data, ["rg", "orgao_emissor", "uf_rg", "cor_raca", "estado_civil"]);
       for (const [n, list] of [["uf_rg", "ufs"], ["cor_raca", "racas"], ["estado_civil", "estados_civis"]]) if (!(data[list] ?? []).some(o => o.id === data[n])) throw new Error(`Selecione ${LABELS[n]}.`);
       if (data.escola && !(data.escolas ?? []).some(o => o.id === data.escola)) throw new Error("Busque e selecione a escola, ou deixe em branco.");
+      // Obrigatório quando a etapa tem o campo (4 números, de 1950 até o ano atual).
+      if (data.campos?.ano_conclusao) {
+        const year = onlyDigits(data.ano_conclusao);
+        if (!/^\d{4}$/.test(year) || Number(year) < 1950 || Number(year) > new Date().getFullYear()) throw new Error("Informe o ano de conclusão do ensino médio com 4 números (ex.: 2024).");
+        data.ano_conclusao = year;
+      }
       set("rg", onlyDigits(data.rg) || str(data.rg).trim()); set("orgao_emissor", str(data.orgao_emissor).trim().toUpperCase());
       set("uf_rg", data.uf_rg); set("cor_raca", data.cor_raca); set("estado_civil", data.estado_civil); set("escola", data.escola); set("ano_conclusao", data.ano_conclusao);
     } else if (screen === "CUPOM") {

@@ -3390,21 +3390,6 @@
           },
           "__example__": []
         },
-        "anos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
         "escolas": {
           "type": "array",
           "items": {
@@ -3568,11 +3553,14 @@
                     "required": true
                   },
                   {
-                    "type": "Dropdown",
+                    "type": "TextInput",
                     "name": "ano_conclusao",
                     "label": "Ano de conclusão",
-                    "data-source": "${data.anos}",
-                    "required": false
+                    "input-type": "text",
+                    "min-chars": 4,
+                    "max-chars": 4,
+                    "helper-text": "4 números. Ex.: 2024",
+                    "required": true
                   },
                   {
                     "type": "TextInput",

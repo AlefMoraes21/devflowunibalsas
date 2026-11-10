@@ -108,7 +108,7 @@ test('jornada de matrícula: login, responsável, endereço com busca de cidade,
   assert.equal(submits.length,2);assert.equal(submits[1].button,3940407);
   const sent=Object.fromEntries(submits[1].data.map(f=>[f.field_id,f.value]));
   assert.equal(sent[38573],'MA');assert.equal(sent[38640],'00069');assert.equal(sent[38641],'MA');assert.equal(sent[38704],'19');assert.equal(sent[38572],undefined);
-  assert.equal(identity.screen,'IDENTIDADE');assert.deepEqual(identity.data.anos.map(a=>a.id),['2026','2025']);
+  assert.equal(identity.screen,'IDENTIDADE');assert.equal('anos' in identity.data,false,'ano de conclusão não é mais lista');
   const docs=await run(ask('IDENTIDADE','enviar_identidade',identity.data.estado,{rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'3',estado_civil:'S',ano_conclusao:'2025'}));
   assert.equal(submits.length,3);const idSent=Object.fromEntries(submits[2].data.map(f=>[f.field_id,f.value]));assert.equal(idSent[38642],'123456789');assert.equal(idSent[38643],'SSP');assert.equal(idSent[38699],undefined);
   assert.equal(docs.screen,'ETAPA_PORTAL');assert.match(docs.data.titulo,/documentos/i);assert.match(docs.data.link_portal,/passo\/300671$/);
@@ -158,4 +158,30 @@ test('quando a Rubeus devolve o próximo passo no envio, abre direto sem consult
   const r=await run(ask('ENDERECO','enviar_endereco',state,{rua:'Rua Teste',numero:'1',bairro:'Centro',cidade:'Balsas',uf:'MA',estado_natal:'MA',cidade_natal:'00069'}));
   assert.equal(r.screen,'IDENTIDADE');assert.ok(!calls.some(p=>p.endsWith('/portal')),'não chamou /portal');
  }finally{globalThis.fetch=previous}
+});
+
+// Ano de conclusão: digitado e obrigatório (a consulta do Rubeus não devolvia a lista de anos).
+test('IDENTIDADE: ano de conclusão é campo de texto obrigatório de 4 caracteres, não lista',async()=>{
+ const j=await flowJson();const s=j.screens.find(x=>x.id==='IDENTIDADE');
+ assert.equal('anos' in s.data,false);
+ const f=walk(s.layout).find(c=>c.name==='ano_conclusao'&&c.type);
+ assert.equal(f.type,'TextInput');assert.equal(f.required,true);assert.equal(f['min-chars'],4);assert.equal(f['max-chars'],4);
+ assert.ok(!JSON.stringify(s).includes('data.anos'));
+});
+
+test('IDENTIDADE: servidor exige ano de conclusão com 4 números entre 1950 e o ano atual e envia ao campo certo',async()=>{
+ const {createMatricula}=await import('../api/matricula.js');
+ const sent=[];
+ const m=createMatricula({api:async()=>({}),getForm:async()=>({}),getDataSource:async()=>({}),render:()=>({}),submitForm:async(button,fields)=>{sent.push({button,fields});return {token:'t'}}});
+ const base={rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'2',estado_civil:'S',ufs:[{id:'MA'}],racas:[{id:'2'}],estados_civis:[{id:'S'}],
+  campos:{rg:'38642',orgao_emissor:'38643',uf_rg:'38644',cor_raca:'38645',estado_civil:'38646',ano_conclusao:'38680'},button_id:'3940407',token:'t',ocultos:[]};
+ const year=new Date().getFullYear();
+ for(const bad of ['','abcd','202','20245',String(year+1),'1949'])
+  await assert.rejects(m.send('IDENTIDADE',{...base,ano_conclusao:bad}),/ano de conclusão/i,`"${bad}" deveria ser recusado`);
+ assert.equal(sent.length,0,'nada é enviado ao Rubeus com ano inválido');
+ await m.send('IDENTIDADE',{...base,ano_conclusao:' 2024 '});
+ assert.equal(sent.length,1);assert.deepEqual(sent[0].fields.find(f=>f.field_id===38680),{field_id:38680,value:'2024'});
+ // Etapa sem o campo do ano (formulário diferente): não bloqueia.
+ const {ano_conclusao,...semCampo}=base.campos;
+ await m.send('IDENTIDADE',{...base,campos:semCampo,ano_conclusao:''});assert.equal(sent.length,2);
 });

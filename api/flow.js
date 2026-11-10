@@ -804,7 +804,7 @@ function openState(value, screen) {
 // Listas usadas como data-source de Dropdown: o renderer do WhatsApp rejeita propriedades além de
 // id/title ("Dropdown should NOT have additional properties"). Modelos internos (ex.: descricao)
 // ficam só no estado selado; o payload enviado ao Flow leva apenas {id, title}.
-const OPTION_LIST_KEYS = new Set(["processo_seletivo_id", "documentos", "cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"]);
+const OPTION_LIST_KEYS = new Set(["processo_seletivo_id", "documentos", "cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "escolas"]);
 function projectOptions(list) {
   return list.map(o => (o && typeof o === "object" && "id" in o && "title" in o ? { id: String(o.id), title: String(o.title) } : o));
 }
@@ -880,7 +880,7 @@ function responseForScreen(screen, data) {
         OPTION_LIST_KEYS.has(k) && Array.isArray(next[k]) ? projectOptions(next[k]) : next[k] ?? (
           k.startsWith("valor_") ? "" :
           k === "tem_erro" || k === "concluido" || k === "mostrar_envio" || k === "mostrar_concluido" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
-          ["cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"].includes(k) ? [] : ""
+          ["cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "escolas"].includes(k) ? [] : ""
         )
       ])
     )
@@ -1441,7 +1441,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.7" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.8" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

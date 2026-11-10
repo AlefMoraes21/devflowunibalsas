@@ -1,3 +1,12 @@
+# Versão 1.6.8 — Ano de conclusão digitado e obrigatório (Identidade)
+
+Na etapa **Identidade** o campo "Ano de conclusão" vinha como lista e abria vazio (a consulta do Rubeus não devolve os anos). Agora é um campo de texto de 4 caracteres, **obrigatório**.
+
+- Servidor: exige 4 números entre 1950 e o ano atual e grava no campo do formulário do Rubeus. Se a etapa não tiver esse campo, não bloqueia.
+- `flow-waba.json`: o Dropdown virou `TextInput` (texto, `min-chars`/`max-chars` 4, obrigatório); o dado `anos` saiu da tela. É texto (não numérico) para manter o valor digitado quando a tela recarrega (ex.: Buscar escola).
+- 108 testes locais. **Atualizar servidor e JSON juntos.** Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.8`.
+
+---
 # Versão 1.6.7 — Corrige a importação do Flow na Meta
 
 A Meta recusou o `flow-waba.json` da 1.6.6: `Wrong positioning of operator '&&'. It cannot be used in concatenation with '=='` (tela `DOCUMENTOS_INSCRICAO`). Condições do `If` não aceitam `&&` junto com `==`.
