@@ -2308,6 +2308,14 @@
           "type": "string",
           "__example__": "Nenhum documento enviado ainda."
         },
+        "progresso": {
+          "type": "string",
+          "__example__": "0 de 3 documentos enviados."
+        },
+        "concluido": {
+          "type": "boolean",
+          "__example__": false
+        },
         "erro": {
           "type": "string",
           "__example__": ""
@@ -2363,7 +2371,7 @@
           },
           {
             "type": "If",
-            "condition": "${data.processando} == false",
+            "condition": "${data.processando} == false && ${data.concluido} == false",
             "then": [
               {
                 "type": "TextHeading",
@@ -2376,6 +2384,10 @@
               {
                 "type": "TextCaption",
                 "text": "${data.enviados}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.progresso}"
               },
               {
                 "type": "Dropdown",
@@ -2409,8 +2421,30 @@
                   }
                 }
               }
-            ],
-            "else": [
+            ]
+          },
+          {
+            "type": "If",
+            "condition": "${data.processando} == false && ${data.concluido} == true",
+            "then": [
+              {
+                "type": "TextHeading",
+                "text": "Documentos enviados ✅"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.progresso}"
+              },
+              {
+                "type": "TextCaption",
+                "text": "${data.enviados}"
+              }
+            ]
+          },
+          {
+            "type": "If",
+            "condition": "${data.processando} == true",
+            "then": [
               {
                 "type": "TextHeading",
                 "text": "${data.titulo_processamento}"

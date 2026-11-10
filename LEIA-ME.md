@@ -1,3 +1,49 @@
+# Versão 1.7.0 — Documentos pelo Blip (Flow termina em `complete`)
+
+## O que mudou
+
+Quando o Flow roda no Blip, o arquivo chega no `nfm_reply` (`#wa.interactive.nfm_reply.json_response`) já baixado e decifrado pelo Blip, com `file_name` e `file_url` (link temporário do Azure Blob, cerca de 30 minutos). O servidor não precisa decifrar nada nesse caminho.
+
+1. **`POST /api/documento`** (header `x-api-key: BLIP_DOCS_KEY`). O bot envia `{ json_response, cpf, processo_seletivo_id }` (ou `idps`). O servidor valida, baixa o `file_url`, confere `sha256`, tipo (PDF/JPG/PNG) e 740 KB, confere que o documento é um dos exigidos pelo processo e grava em `/blip/documents`. Responde `{ ok, mensagem, documento, nomeArquivo, primaryKey }` ou `{ ok:false, mensagem }` (400 dados inválidos, 401 sem chave, 422 arquivo/RM recusou).
+2. **`GET /api/documento?processo_seletivo_id=20385`**: lista `{id,title}` e o texto para o bot montar o Flow.
+3. **`flow-documentos-blip.json`**: Flow de uma tela (`DOCUMENTOS`, terminal) com Dropdown, DocumentPicker (740 KB) e `complete` com `{documento, arquivo}`. Os dados da tela vão no `flow_action_payload` ao enviar o Flow (`documentos` e `texto`, vindos do GET).
+4. **Segurança:** a URL assinada não vai para log nem resposta; só hosts da lista (`BLIP_MEDIA_HOSTS`), HTTPS, sem seguir redirecionamento, limite de 740 KB na leitura. `codDocumento` só vale se estiver em `/rm/documents` do processo.
+5. Inclui tudo da 1.6.6 (correção do Dropdown e progresso dos documentos no Flow com endpoint).
+
+## Como o bot usa
+
+1. Antes de enviar o Flow: `GET /api/documento?processo_seletivo_id=…` → `flow_action_payload.data = { documentos, texto }`; `flow_token` por sessão.
+2. Ao receber o `nfm_reply`: `POST /api/documento` com `json_response` (texto cru), `cpf` e `processo_seletivo_id`; responder ao candidato com `mensagem`.
+3. O picker aceita um arquivo por vez: para vários documentos, reenviar o Flow para o próximo. O contador "N de M" fica no bot.
+
+## Limite conhecido
+
+Na Transferência o portal lista 3 documentos e só vira "Em análise" com os três; `/rm/documents` (idps 225) devolve só o Histórico. Depende da UniBalsas expor os outros dois `CODDOCUMENTO`.
+
+## Atualizar
+
+Servidor: `api/documento-blip.js` (novo), `api/documentos.js`, `server.js`, `api/flow.js`, `package.json`. Definir `BLIP_DOCS_KEY` no Cloud Run (valor aleatório longo, o mesmo no bot do Blip). Importar `flow-documentos-blip.json` como um segundo Flow na WABA (o `flow-waba.json` é o da 1.6.6). 111 testes locais. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.7.0`.
+
+---
+# Versão 1.6.6 — Documentos da inscrição: correção do Dropdown e progresso
+
+## O que mudou
+
+1. **Corrige o erro do Flow** `Component Validation Error: Dropdown should NOT have additional properties (descricao)` na tela `DOCUMENTOS_INSCRICAO` (Transferência, Portador de Diploma e ENEM). O servidor guardava `{id,title,descricao}` e repassava tudo ao Flow, que só aceita `{id,title}`. Agora `responseForScreen` projeta toda lista de opções para `{id: String(id), title}`; `descricao` fica só no estado selado (usada no texto e no nome do documento enviado). Vale também para cursos, turnos, anos, origens, UFs, cidades, raças, estados civis, escolas e processos.
+2. **Progresso dos documentos.** A tela mostra "N de M documentos enviados. Falta: …". O reenvio do mesmo documento é "atualizado" e não conta duas vezes.
+3. **Conclusão.** Com todos os documentos da lista enviados, a tela passa a "Documentos enviados ✅", sem Dropdown nem seletor, e o rodapé vira **Atualizar situação**.
+
+**Atualizar também o JSON da WABA** (`flow-waba.json`): `DOCUMENTOS_INSCRICAO` ganhou os dados `progresso` e `concluido` e três estados exclusivos (enviar, concluído, processando). Limites do seletor preservados (PDF/JPG/PNG, 740 KB).
+
+## Limite conhecido
+
+O portal da Transferência lista 3 documentos e só passa de "Pendentes" para "Em análise" com os três; a API `/rm/documents` (idps 225) devolve só o Histórico (28). O Flow conclui com os documentos que a API informa e orienta a terminar pelo Portal se ainda houver pendência. Depende da UniBalsas expor os outros dois `CODDOCUMENTO`.
+
+## Validação
+
+104 testes locais (inclui `dropdown-options.test.js` e `documentos-progresso.test.js`). Não testado: prévia/aparelho real, nem o caminho do Blip. Ver `CHECKLIST-TESTES-1.7.0.md` e `ENGENHARIA-REVERSA-TRANSFERENCIA-DOCUMENTOS.md`. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.6`.
+
+---
 # Versão 1.6.4 — Prova aguardando correção
 
 ## O que mudou
