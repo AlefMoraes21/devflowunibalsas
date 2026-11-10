@@ -182,8 +182,49 @@ test('formulário oficial: todos os formatos recusados -> mensagem de conferir n
  const {m}=setup({form:OFFICIAL,submit:async()=>{n++;throw new Error('[RUBEUS_ERRO] HTTP 500')}});
  const r=await m.open(SESSION,STEP);
  await assert.rejects(()=>send(m,r,'1'),/Confira no Portal do candidato/);
- assert.equal(n,4);
+ assert.equal(n,6,'4 formatos + 2 controles sem arquivo');
+ await assert.rejects(()=>send(m,r,'1'),/Confira no Portal/);assert.equal(n,10,'o controle roda só uma vez');
  const {m:m2}=setup({form:OFFICIAL,submit:async()=>({success:false,message:'campo inválido'})});
  const r2=await m2.open(SESSION,STEP);
  await assert.rejects(()=>send(m2,r2,'1'),/não aceitou este documento/);
+});
+
+// API documentada da UniBalsas (POST /blip/documents) como caminho do envio de matrícula.
+function setupApi({save,submit,via}={}){
+ const saved=[],submitted=[];
+ const docsApi={readDocument:async()=>({base64:'QUJD',type:'pdf',size:3,originalName:'x.pdf'}),listDocuments:async()=>[],
+  saveDocument:save??(async a=>{saved.push(a);return {primaryKey:'1;223;777;15'}})};
+ const m=createMatricula({api:async()=>({}),getForm:async()=>({data:{form:OFFICIAL}}),getDataSource:async()=>({}),render:responseForScreen,
+  submitForm:submit??(async(b,f)=>{submitted.push(f);return {success:true}}),academicId:()=>'223',docs:docsApi,...(via?{matriculaVia:via}:{})});
+ return {m,saved,submitted};
+}
+const SESS_API={...SESSION};
+
+test('API UniBalsas primeiro: grava pelo /blip/documents e nem chama o Rubeus',async()=>{
+ const {m,saved,submitted}=setupApi();
+ const r=await m.open(SESS_API,STEP);
+ const out=await send(m,r,'15');
+ assert.equal(saved.length,1);assert.equal(saved[0].idps,'223');assert.equal(saved[0].cpf,'11144477735');assert.equal(saved[0].codDocumento,15);
+ assert.equal(submitted.length,0);
+ assert.match(out.data.enviados,/✅ COMPROVANTE DE RESIDÊNCIA recebido/);
+});
+
+test('API UniBalsas falha: cai no envio oficial do Rubeus',async()=>{
+ const {m,submitted}=setupApi({save:async()=>{throw new Error('RM ocupado')}});
+ const r=await m.open(SESS_API,STEP);
+ const out=await send(m,r,'15');
+ assert.ok(submitted.length>=1);assert.match(out.data.enviados,/recebido/);
+});
+
+test('ordem rubeus,unibalsas: Rubeus recusa e a API da UniBalsas grava',async()=>{
+ const {m,saved,submitted}=setupApi({via:['rubeus','unibalsas'],submit:async()=>{throw new Error('HTTP 500')}});
+ const r=await m.open(SESS_API,STEP);
+ const out=await send(m,r,'15');
+ assert.equal(saved.length,1);assert.match(out.data.enviados,/recebido/);
+});
+
+test('ambos falham: mensagem de conferir no portal',async()=>{
+ const {m}=setupApi({save:async()=>{throw new Error('502')},submit:async()=>{throw new Error('HTTP 500')}});
+ const r=await m.open(SESS_API,STEP);
+ await assert.rejects(()=>send(m,r,'15'),/Confira no Portal do candidato/);
 });

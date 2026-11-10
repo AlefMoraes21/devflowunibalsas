@@ -262,8 +262,8 @@ export function documentProgress(documentos = [], enviadosIds = []) {
   return { docs_enviados: done, progresso, concluido };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null, submitModes = null }) {
-  let lastGoodMode = null;
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null, submitModes = null, controlProbe = true, matriculaVia = ["unibalsas", "rubeus"] }) {
+  let lastGoodMode = null, controlDone = false;
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
     try {
@@ -345,7 +345,21 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       ? orderAttempts(buildUploadAttempts({ file, doc, name, uploadField: data.upload_field, hidden: data.ocultos ?? [] }), submitModes, lastGoodMode)
       : [{ mode: "campos_rm", fields }];
     let r, failure = null;
-    for (const a of attempts) {
+    // API documentada da UniBalsas (artigos 743-746: POST /blip/documents, grava no EduPSDocumentoEntregueData).
+    const idps = academicId(data.processo_seletivo_id);
+    const canApi = !!(docs?.saveDocument && idps && /^\d{11}$/.test(str(data.cpf)));
+    const apiFirst = canApi && matriculaVia[0] !== "rubeus";
+    const viaApi = async () => {
+      try {
+        const saved = await docs.saveDocument({ idps, cpf: data.cpf, codDocumento: Number(doc.id), media: data.arquivo });
+        r = {}; console.info(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: true, idps: Number(idps), chave: str(saved?.primaryKey ?? saved?.chave).slice(0, 60) }));
+      } catch (e) {
+        failure = { refused: false, message: str(e.message).slice(0, 300) };
+        console.warn(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: false, idps: Number(idps), message: failure.message }));
+      }
+    };
+    if (apiFirst) await viaApi();
+    for (const a of (r === undefined ? attempts : [])) {
       try {
         const resp = await submitForm(data.button_id, a.fields, data.token);
         if (resp?.success === false) { failure = { refused: true, message: str(resp?.message ?? resp?.error ?? "success=false").slice(0, 200) }; console.warn(JSON.stringify({ event: "matricula_doc_tentativa", doc: doc.id, mode: a.mode, ok: false, ...failure })); continue; }
@@ -353,6 +367,18 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       } catch (e) {
         failure = { refused: false, message: str(e.message).slice(0, 300) };
         console.warn(JSON.stringify({ event: "matricula_doc_tentativa", doc: doc.id, mode: a.mode, ok: false, message: failure.message }));
+      }
+    }
+    if (r === undefined && canApi && !apiFirst) await viaApi();
+    if (r === undefined && data.upload_field && !failure?.refused && !controlDone && controlProbe) {
+      // Controle sem arquivo, uma vez por instância: o 500 depende do conteúdo ou o botão quebra com qualquer envio?
+      controlDone = true;
+      const base = (data.ocultos ?? []).filter(f => Number(f.field_id) !== Number(data.upload_field));
+      for (const [mode, fields] of [["controle_campo_vazio", [...base, { field_id: Number(data.upload_field), value: null }]], ["controle_sem_campos", [...base]]]) {
+        try {
+          const resp = await submitForm(data.button_id, fields, data.token);
+          console.warn(JSON.stringify({ event: "matricula_doc_controle", mode, resultado: "aceito", success: resp?.success ?? null, message: str(resp?.message ?? resp?.error ?? "").slice(0, 200) }));
+        } catch (e) { console.warn(JSON.stringify({ event: "matricula_doc_controle", mode, resultado: "erro", message: str(e.message).slice(0, 300) })); }
       }
     }
     if (r === undefined) {

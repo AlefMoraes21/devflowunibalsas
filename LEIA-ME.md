@@ -1,3 +1,13 @@
+# Versão 1.6.13 — API documentada da UniBalsas no envio de matrícula + sondagem sem arquivo
+
+Logs reais da 1.6.12: os 4 formatos no campo de upload do Rubeus deram HTTP 500 (não JSON), idênticos. Os artigos 743-746 da central de ajuda documentam o caminho "oficial" da UniBalsas: `GET /blip/processos-seletivos/{cpf}` → `GET /blip/inscritos/{idps}/{cpf}` → `GET /rm/documents` → `POST /blip/documents` (grava no DataServer `EduPSDocumentoEntregueData`; não citam SDOCALUNO nem matrícula).
+
+- No envio de "Documentos matrícula" o servidor agora tenta **primeiro** a API documentada (mesma função `saveDocument` das inscrições, com `idps` do processo e `codDocumento` = código do documento) e, se falhar, o envio oficial do Rubeus. `MATRICULA_DOC_VIA=rubeus,unibalsas` inverte a ordem. Log: `matricula_doc_api_unibalsas` (ok/erro, mensagem).
+- **Sondagem sem arquivo** (uma vez por instância, só se o Rubeus recusar): envia o botão 3940449 com o campo vazio e sem campos. Log `matricula_doc_controle`: se vier erro de validação em JSON, o 500 depende do conteúdo; se vier 500 de novo, o botão quebra via API. `MATRICULA_CONTROL=off` desliga.
+- **Não verificado:** se um documento gravado por `/blip/documents` aparece no Portal do candidato como "Em análise" no passo de matrícula (o Portal grava em SDOCALUNO; a API grava em `EduPSDocumentoEntregue`) e se o RM aceita códigos de documento que `/rm/documents` não lista para o Vestibular (retorna vazio no idps 223).
+- 126 testes locais. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.13`.
+
+---
 # Versão 1.6.12 — Envio oficial: testa formatos do arquivo no campo de upload
 
 Logs reais da 1.6.11 (WhatsApp, PDF e JPEG da Nicole): o arquivo chega e é lido (`matricula_doc_lido`), mas o `/submit` oficial respondeu HTTP 500 com os campos 38730/38731/38733/38718, que **não existem** no formulário oficial (só o componente `3940446`, tipo `upload`). A API interna do portal respondeu 403 com página HTML da Azure (bloqueio da plataforma): abandonada.
