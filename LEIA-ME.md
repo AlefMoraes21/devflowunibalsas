@@ -1,3 +1,8 @@
+# Versão 1.6.14 — Log `matricula_doc_via` (por que a API da UniBalsas não foi usada)
+
+No teste da 1.6.13 (documento 16, JPEG) não apareceu `matricula_doc_api_unibalsas`: o envio foi direto ao Rubeus, então `canApi` deu falso (sem `idps` do processo ou sem CPF de 11 dígitos no estado). O novo evento `matricula_doc_via` registra `canApi`, `apiFirst`, `tem_saveDocument`, `idps`, `processo` e `cpf_digitos` (só o tamanho do CPF) em todo envio de matrícula. 126 testes. Versão esperada: `unibalsas-cloudrun-jornada-1.6.14`.
+
+---
 # Versão 1.6.13 — API documentada da UniBalsas no envio de matrícula + sondagem sem arquivo
 
 Logs reais da 1.6.12: os 4 formatos no campo de upload do Rubeus deram HTTP 500 (não JSON), idênticos. Os artigos 743-746 da central de ajuda documentam o caminho "oficial" da UniBalsas: `GET /blip/processos-seletivos/{cpf}` → `GET /blip/inscritos/{idps}/{cpf}` → `GET /rm/documents` → `POST /blip/documents` (grava no DataServer `EduPSDocumentoEntregueData`; não citam SDOCALUNO nem matrícula).

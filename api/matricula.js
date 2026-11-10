@@ -349,6 +349,8 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const idps = academicId(data.processo_seletivo_id);
     const canApi = !!(docs?.saveDocument && idps && /^\d{11}$/.test(str(data.cpf)));
     const apiFirst = canApi && matriculaVia[0] !== "rubeus";
+    // Por que a API da UniBalsas foi (ou não) usada: só booleanos e o tamanho do CPF, nada pessoal.
+    console.info(JSON.stringify({ event: "matricula_doc_via", doc: doc.id, canApi, apiFirst, tem_saveDocument: !!docs?.saveDocument, idps: idps ? String(idps) : null, processo: str(data.processo_seletivo_id) || null, cpf_digitos: str(data.cpf).replace(/\D/g, "").length, via: matriculaVia }));
     const viaApi = async () => {
       try {
         const saved = await docs.saveDocument({ idps, cpf: data.cpf, codDocumento: Number(doc.id), media: data.arquivo });
