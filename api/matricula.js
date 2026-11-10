@@ -151,6 +151,8 @@ export function describeMedia(media) {
   try { const u = new URL(String(m.cdn_url ?? "")); host = u.hostname; https = u.protocol === "https:"; } catch { /* sem endereço válido */ }
   const enc = m.encryption_metadata && typeof m.encryption_metadata === "object" ? m.encryption_metadata : {};
   return {
+    // Só quando o endereço não é válido: tamanho e início (ex.: "blob:", "/mock"), para saber o que a prévia mandou.
+    cdn_url_len: str(m.cdn_url).length, cdn_url_inicio: https === null ? str(m.cdn_url).slice(0, 12) : null,
     media_count: items.length, media_keys: Object.keys(m).sort().slice(0, 20), cdn_host: host, cdn_https: https,
     ext: str(m.file_name).match(/\.([A-Za-z0-9]{1,5})$/)?.[1]?.toLowerCase() ?? null,
     mime: typeof m.mime_type === "string" ? m.mime_type.slice(0, 60) : null,

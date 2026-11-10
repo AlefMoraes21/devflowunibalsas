@@ -1,3 +1,12 @@
+# Versão 1.6.11 — Diagnósticos mais precisos (sondagem do portal e anexo)
+
+Resultado dos logs da 1.6.10 na prévia da Meta: a sondagem da API interna do portal respondeu **HTTP 403** (sem JSON) e o anexo simulado da prévia chegou sem endereço `https` válido (`cdn_host: null`), com a estrutura correta (`media_id`, `file_name`, `cdn_url`, `encryption_metadata`).
+
+- A sondagem agora envia `Origin`/`Referer` do site do vestibular e, quando a resposta não for 200/JSON, registra `matricula_portal_probe_resposta` (servidor, tipo e início do texto do erro).
+- `matricula_doc_recebido` passa a registrar o tamanho do `cdn_url` e, se não for endereço válido, os 12 primeiros caracteres.
+- 120 testes locais. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.11`.
+
+---
 # Versão 1.6.10 — Sondagem da API interna do portal (só leitura)
 
 O log da 1.6.9 mostrou que o formulário **oficial** do passo 300671 só tem o campo `3940446` (tipo `upload`) e os botões 3940448 (Portal) e 3940449 (Enviar): os campos 38730/38731/38733/38718 do envio da 1.6.9 não existem nele. O portal envia o arquivo por `POST /api/applyment/button-click` (multipart) usando só o `token` no corpo.
