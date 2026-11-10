@@ -801,6 +801,14 @@ function openState(value, screen) {
   }
 }
 
+// Listas usadas como data-source de Dropdown: o renderer do WhatsApp rejeita propriedades além de
+// id/title ("Dropdown should NOT have additional properties"). Modelos internos (ex.: descricao)
+// ficam só no estado selado; o payload enviado ao Flow leva apenas {id, title}.
+const OPTION_LIST_KEYS = new Set(["processo_seletivo_id", "documentos", "cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"]);
+function projectOptions(list) {
+  return list.map(o => (o && typeof o === "object" && "id" in o && "title" in o ? { id: String(o.id), title: String(o.title) } : o));
+}
+
 function responseForScreen(screen, data) {
   if(screen==="CURSO_INTERESSE"&&isDirectRegistration(data.processo_seletivo_id))screen="CURSO_INGRESSO";
   if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
@@ -814,6 +822,8 @@ function responseForScreen(screen, data) {
     if(next.processando&&next.job_id){next.acao_rodape="consultar_tarefa";next.rotulo_rodape="Verificar andamento";next.editavel=false}
     else{next.processando=false;next.editavel=true;next.job_id="";next.acao_rodape=actionByScreen[screen];next.rotulo_rodape=labelByScreen[screen]}
   }
+  // Todos os documentos enviados: sem "Enviar"; o rodapé só atualiza a situação (a análise é da equipe).
+  if(screen==="DOCUMENTOS_INSCRICAO"&&data.concluido&&!(next.processando&&next.job_id)){next.acao_rodape="atualizar_portal";next.rotulo_rodape="Atualizar situação"}
   if(screen==="TELA_ORIENTACAO_PROVA"&&data.proof_resume_required&&!(next.processando&&next.job_id)){
     next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
   }
@@ -865,9 +875,9 @@ function responseForScreen(screen, data) {
     data: Object.fromEntries(
       (SCREEN_KEYS[screen] ?? []).map(k => [
         k,
-        next[k] ?? (
+        OPTION_LIST_KEYS.has(k) && Array.isArray(next[k]) ? projectOptions(next[k]) : next[k] ?? (
           k.startsWith("valor_") ? "" :
-          k === "tem_erro" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
+          k === "tem_erro" || k === "concluido" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
           ["cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"].includes(k) ? [] : ""
         )
       ])
@@ -1429,7 +1439,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.5" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

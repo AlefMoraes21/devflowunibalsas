@@ -22,7 +22,7 @@ const title30 = v => str(v).replace(/-+\s*$/g, "").trim().slice(0, 30);
 export const SCREENS = {
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
   ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "aguardando_resultado"],
-  DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "erro", "tem_erro", "estado", "valor_documento"],
+  DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "progresso", "concluido", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
   RESP_DADOS: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
     "valor_nome", "valor_email", "valor_cpf", "valor_data_nascimento", "valor_celular", "valor_cep", "valor_rua",
@@ -155,6 +155,19 @@ export function portalScreenData(stageTitle, step) {
   };
 }
 
+// Progresso do envio: ids enviados (só os que existem na lista), texto e flag de conclusão.
+export function documentProgress(documentos = [], enviadosIds = []) {
+  const all = Array.isArray(documentos) ? documentos : [];
+  const valid = new Set(all.map(d => str(d.id)));
+  const done = [...new Set(enviadosIds.map(str))].filter(id => valid.has(id));
+  const faltam = all.filter(d => !done.includes(str(d.id)));
+  const concluido = all.length > 0 && faltam.length === 0;
+  const progresso = concluido
+    ? `✅ Todos os ${all.length} documentos solicitados foram enviados. A equipe confere em até 48 horas úteis. Toque em Atualizar situação. Se o Portal do candidato ainda mostrar documentos pendentes, envie os restantes por lá.`
+    : `${done.length} de ${all.length} documentos enviados. Falta: ${faltam.map(d => d.descricao ?? d.title).join(", ")}.`;
+  return { docs_enviados: done, progresso, concluido };
+}
+
 export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null }) {
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
@@ -220,7 +233,9 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const again = previous.includes(`✅ ${nome} `);
     const enviados = [previous, `✅ ${nome} ${again ? "atualizado" : "recebido"} (${saved.nomeArquivo}). Recebemos a confirmação do envio; a equipe vai conferir o documento.`].filter(Boolean).join("\n");
     const { arquivo, ...rest } = data; // a mídia (chaves de criptografia) nunca vai para o estado selado
-    return render("DOCUMENTOS_INSCRICAO", { ...rest, enviados, values: { documento: "" }, erro: "" });
+    // A etapa só sai de "Pendentes" no portal quando todos os documentos da lista foram enviados (não só o obrigatório).
+    const progress = documentProgress(data.documentos, [...(data.docs_enviados ?? []), str(data.documento)]);
+    return render("DOCUMENTOS_INSCRICAO", { ...rest, enviados, ...progress, values: { documento: "" }, erro: "" });
   }
 
   // Depois de concluir uma etapa: abre a próxima etapa se a rota for permitida, senão encerra com a situação.
@@ -287,8 +302,8 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     if (screen === "DOCUMENTOS_INSCRICAO") {
       const list = docs && academicId(session.processo_seletivo_id) ? await docs.listDocuments(academicId(session.processo_seletivo_id)).catch(() => []) : [];
       if (list.length && /^\d{11}$/.test(str(session.cpf))) return render(screen, {
-        ...base, documentos: list, enviados: NENHUM_ENVIO,
-        texto: `Envie pelo WhatsApp: ${list.map(d => d.descricao).join(", ")}.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez.`
+        ...base, documentos: list, enviados: NENHUM_ENVIO, ...documentProgress(list, []),
+        texto: `Envie todos os documentos pelo WhatsApp: ${list.map(d => d.descricao).join(", ")}.\nA etapa só é concluída quando os ${list.length} forem enviados.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez.`
       });
     }
     if (screen === "ETAPA_PORTAL" || screen === "DOCUMENTOS_INSCRICAO") return render("ETAPA_PORTAL", { ...base, ...portalScreenData(next.title, next.step) });

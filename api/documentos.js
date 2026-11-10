@@ -86,15 +86,13 @@ export function detectType(buf) {
   return null;
 }
 
-export async function saveDocument({ idps, cpf, codDocumento, media, fetcher = fetch }) {
-  if (!Array.isArray(media) || media.length !== 1) throw new Error("Anexe um arquivo para enviar.");
-  // Primeiro a inscrição (consulta barata): sem ela não há para onde enviar.
-  const insc = await findInscription(idps, cpf, { fetcher });
-  const file = await downloadMedia(media[0], { fetcher });
+// Arquivo já decifrado (Buffer): confere tipo/tamanho e grava no RM. Usado pelo DocumentPicker direto
+// (saveDocument) e pelo arquivo que o Blip baixou da Graph API (saveDocumentFromUrl).
+async function sendFile({ idps, insc, codDocumento, file, fileName, fetcher }) {
   const type = detectType(file);
   if (!type) throw new Error("Esse arquivo não é aceito. Envie um PDF, JPG ou PNG.");
   if (file.length > MAX_FILE_BYTES) throw new Error("Arquivo maior que 740 KB. Envie uma foto ou PDF menor (ex.: foto em qualidade média).");
-  const given = safeFileName(media[0].file_name, "");
+  const given = safeFileName(fileName, "");
   const nome = given && given.split(".").pop().toLowerCase().replace("jpeg", "jpg") === type ? given : `documento.${type}`;
   const q = new URLSearchParams({ codColigada: insc.codColigada, idps: String(idps), numeroInscricao: insc.numeroInscricao, codDocumento: String(codDocumento), nomeArquivo: nome });
   const r = await ub(`/blip/documents?${q}`, { method: "POST", body: { base64: file.toString("base64") }, timeoutMs: 15000, fetcher });
@@ -106,4 +104,42 @@ export async function saveDocument({ idps, cpf, codDocumento, media, fetcher = f
   const primaryKey = String(r.json.primaryKey ?? "");
   if (primaryKey && primaryKey !== expected) throw new Error(UNSURE);
   return { primaryKey, nomeArquivo: nome };
+}
+
+export async function saveDocument({ idps, cpf, codDocumento, media, fetcher = fetch }) {
+  if (!Array.isArray(media) || media.length !== 1) throw new Error("Anexe um arquivo para enviar.");
+  // Primeiro a inscrição (consulta barata): sem ela não há para onde enviar.
+  const insc = await findInscription(idps, cpf, { fetcher });
+  const file = await downloadMedia(media[0], { fetcher });
+  return sendFile({ idps, insc, codDocumento, file, fileName: media[0].file_name, fetcher });
+}
+
+// --- Blip: o Flow termina em `complete` e o Blip entrega `file_url` (link temporário, já decifrado) ---
+const BLIP_HOSTS = () => (process.env.BLIP_MEDIA_HOSTS || "blipmediastore.blob.core.windows.net").split(",").map(h => h.trim().toLowerCase()).filter(Boolean);
+
+// Baixa o arquivo do Blip. A URL carrega assinatura: nunca vai para log nem para mensagem de erro.
+export async function downloadBlipMedia(file, { fetcher = fetch, timeoutMs = 8000 } = {}) {
+  let url;
+  try { url = new URL(String(file?.file_url ?? "")); } catch { throw new Error("Arquivo inválido. Envie novamente."); }
+  if (url.protocol !== "https:" || url.username || url.password || !BLIP_HOSTS().includes(url.hostname.toLowerCase())) throw new Error("Arquivo inválido. Envie novamente.");
+  let r;
+  try { r = await fetcher(url.href, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs) }); } catch { throw new Error("Não conseguimos baixar o arquivo enviado agora. Tente enviar novamente."); }
+  if (!r.ok) throw new Error(r.status === 403 || r.status === 404 ? "O link do arquivo expirou. Envie o documento novamente." : "Não conseguimos baixar o arquivo enviado. Envie novamente.");
+  const declared = Number(r.headers?.get?.("content-length"));
+  if (declared > MAX_FILE_BYTES) throw new Error("Arquivo maior que 740 KB. Envie uma foto ou PDF menor (ex.: foto em qualidade média).");
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > MAX_FILE_BYTES) throw new Error("Arquivo maior que 740 KB. Envie uma foto ou PDF menor (ex.: foto em qualidade média).");
+  // sha256 informado pela Meta (base64): se vier e não bater, o arquivo não é o que o candidato enviou.
+  if (file.sha256) {
+    const want = Buffer.from(String(file.sha256), "base64");
+    if (want.length !== 32 || !crypto.timingSafeEqual(crypto.createHash("sha256").update(buf).digest(), want)) throw new Error("Arquivo recebido não confere. Envie novamente.");
+  }
+  return buf;
+}
+
+export async function saveDocumentFromUrl({ idps, cpf, codDocumento, file, fetcher = fetch }) {
+  if (!file || typeof file !== "object") throw new Error("Anexe um arquivo para enviar.");
+  const insc = await findInscription(idps, cpf, { fetcher });
+  const buf = await downloadBlipMedia(file, { fetcher });
+  return sendFile({ idps, insc, codDocumento, file: buf, fileName: file.file_name, fetcher });
 }
