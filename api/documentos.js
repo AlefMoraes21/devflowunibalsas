@@ -86,11 +86,26 @@ export function detectType(buf) {
   return null;
 }
 
-// Arquivo já decifrado (Buffer): confere tipo/tamanho e grava no RM (usado por saveDocument).
-async function sendFile({ idps, insc, codDocumento, file, fileName, fetcher }) {
+// Confere o tipo real e o tamanho de um arquivo já decifrado; devolve "pdf" | "jpg" | "png".
+export function checkFile(file) {
   const type = detectType(file);
   if (!type) throw new Error("Esse arquivo não é aceito. Envie um PDF, JPG ou PNG.");
   if (file.length > MAX_FILE_BYTES) throw new Error("Arquivo maior que 740 KB. Envie uma foto ou PDF menor (ex.: foto em qualidade média).");
+  return type;
+}
+
+// Baixa, decifra e valida o arquivo do DocumentPicker e devolve o conteúdo em base64 (documentos de matrícula,
+// enviados ao Rubeus; a mídia e as chaves de criptografia nunca saem desta função).
+export async function readDocument({ media, fetcher = fetch }) {
+  if (!Array.isArray(media) || media.length !== 1) throw new Error("Anexe um arquivo para enviar.");
+  const file = await downloadMedia(media[0], { fetcher });
+  const type = checkFile(file);
+  return { base64: file.toString("base64"), type, size: file.length, originalName: safeFileName(media[0].file_name, "") };
+}
+
+// Arquivo já decifrado (Buffer): confere tipo/tamanho e grava no RM (usado por saveDocument).
+async function sendFile({ idps, insc, codDocumento, file, fileName, fetcher }) {
+  const type = checkFile(file);
   const given = safeFileName(fileName, "");
   const nome = given && given.split(".").pop().toLowerCase().replace("jpeg", "jpg") === type ? given : `documento.${type}`;
   const q = new URLSearchParams({ codColigada: insc.codColigada, idps: String(idps), numeroInscricao: insc.numeroInscricao, codDocumento: String(codDocumento), nomeArquivo: nome });

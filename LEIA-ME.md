@@ -1,3 +1,24 @@
+# Versão 1.6.10 — Sondagem da API interna do portal (só leitura)
+
+O log da 1.6.9 mostrou que o formulário **oficial** do passo 300671 só tem o campo `3940446` (tipo `upload`) e os botões 3940448 (Portal) e 3940449 (Enviar): os campos 38730/38731/38733/38718 do envio da 1.6.9 não existem nele. O portal envia o arquivo por `POST /api/applyment/button-click` (multipart) usando só o `token` no corpo.
+
+- Ao abrir "Documentos matrícula", o servidor faz uma consulta **só de leitura** a `getApplymentDataByStep/{passo}` na API interna do portal com o `token` do Flow e registra `matricula_portal_probe` (http, success, nomes de campos, contagem de linhas de documento; sem valores). Desliga com `PORTAL_PROBE=off`.
+- Se o token do Flow valer lá, o próximo passo é o envio por `button-click` (multipart) como o site faz.
+- 120 testes locais. Log `matricula_doc_recebido` (formato do anexo), `matricula_doc_leitura_falhou` e `matricula_doc_lido`. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.10`.
+
+---
+# Versão 1.6.9 — Documentos de matrícula (Vestibular) pelo DocumentPicker, via API oficial do Rubeus
+
+Resultado da engenharia reversa (`ENGENHARIA-REVERSA-VESTIBULAR-DOCUMENTOS-MATRICULA.md`): o passo "Documentos matrícula" (300671) é um formulário Rubeus cujo botão 3940449 grava o arquivo na tabela SDOCALUNO do RM. O Cloud Run, que já faz o login no Rubeus, agora faz o mesmo envio.
+
+- Depois do login ("Já sou inscrito"), o hub abre a tela `DOCUMENTOS_INSCRICAO` no modo matrícula: 7 documentos (Histórico, Certificado e Declaração de conclusão são **obrigatórios**; Identidade, CPF, Comprovante de residência e Responsável financeiro são opcionais). Progresso "N de 3 obrigatórios enviados".
+- O arquivo do DocumentPicker é decifrado, validado (PDF/JPG/PNG, até 740 KB) e enviado no `/submit` do botão 3940449 (campos 38730 arquivo, 38731 nome, 38733 código, 38718 chave RM). Os campos técnicos do formulário são preservados e o token novo do Rubeus é reaproveitado.
+- **Rede de segurança:** se o formulário não tiver o botão/campos esperados, ou com `MATRICULA_DOCS_UPLOAD=off` no Cloud Run, a etapa abre o Portal como antes (ETAPA_PORTAL).
+- O Flow só tem rotas para frente: vindo de Identidade na mesma sessão o Flow encerra com a situação; o candidato retoma por "Já sou inscrito".
+- `flow-waba.json` **não mudou** (reaproveita a tela de documentos da 1.6.6). 120 testes locais. Log `matricula_doc_recebido` (formato do anexo), `matricula_doc_leitura_falhou` e `matricula_doc_lido`. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.10`.
+- **Não verificado em produção:** se o `/submit` oficial grava o arquivo no RM. Ao abrir a etapa o servidor loga `matricula_docs_form` (campos e botões, sem valores); no envio, `matricula_doc_enviado` ou `matricula_doc_rejeitado`. Testar com o cadastro fictício antes de liberar.
+
+---
 # Versão 1.6.8 — Ano de conclusão digitado e obrigatório (Identidade)
 
 Na etapa **Identidade** o campo "Ano de conclusão" vinha como lista e abria vazio (a consulta do Rubeus não devolve os anos). Agora é um campo de texto de 4 caracteres, **obrigatório**.

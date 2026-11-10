@@ -113,6 +113,61 @@ export function validCpf(v) {
 }
 export function stepFromLink(link) { const m = str(link).match(/passo\/(\d+)/); return m ? Number(m[1]) : null; }
 
+// Documentos de matrícula do Vestibular (passo "Documentos matrícula", 300671 no processo 20383).
+// Códigos e obrigatoriedade observados no Portal do candidato em 10/11/2026 (campo CODTIPODOCUMENTO / OBRIGATORIO).
+// "title" é o que aparece no Dropdown do Flow (até 30 caracteres); "descricao" fica só no estado selado.
+export const MATRICULA_DOCS = [
+  { id: "1", title: "Carteira de identidade", descricao: "CARTEIRA DE IDENTIDADE", obrigatorio: false },
+  { id: "2", title: "CPF", descricao: "CPF", obrigatorio: false },
+  { id: "5", title: "Histórico ensino médio *", descricao: "HISTÓRICO ENSINO MÉDIO", obrigatorio: true },
+  { id: "8", title: "Certificado conclusão EM *", descricao: "CERTIFICADO DE CONCLUSÃO ENSINO MÉDIO", obrigatorio: true },
+  { id: "15", title: "Comprovante de residência", descricao: "COMPROVANTE DE RESIDÊNCIA", obrigatorio: false },
+  { id: "16", title: "Docs. resp. financeiro", descricao: "DOCUMENTOS / RESPONSÁVEL FINANCEIRO", obrigatorio: false },
+  { id: "46", title: "Declaração conclusão EM *", descricao: "DECLARAÇÃO DE CONCLUSÃO ENSINO MÉDIO", obrigatorio: true }
+];
+// Campos do componente de upload e botão do passo, como o Portal os usa (ação "Salvar Dados" → tabela SDOCALUNO do RM).
+export const MATRICULA_UPLOAD = { arquivo: 38730, nomeArquivo: 38731, chaveRm: 38718, pathArquivo: 38719, codDocumento: 38733, botao: 3940449,
+  coligada: 38611, periodo: 38613, ra: 38651 };
+
+// Procura o botão de envio dos documentos de matrícula no formulário oficial. Sem ele, a etapa abre o portal.
+export function matriculaUploadBinding(form) {
+  const buttons = form?.content?.buttons ?? [];
+  const button = buttons.find(b => Number(b.button) === MATRICULA_UPLOAD.botao) ?? buttons.find(b => /document/.test(norm(b.label)) && /envi/.test(norm(b.label))) ?? null;
+  if (!button) return null;
+  const mine = new Set([MATRICULA_UPLOAD.arquivo, MATRICULA_UPLOAD.nomeArquivo, MATRICULA_UPLOAD.chaveRm, MATRICULA_UPLOAD.pathArquivo, MATRICULA_UPLOAD.codDocumento]);
+  const scalar = v => ["string", "number"].includes(typeof v) && str(v).length <= 200;
+  // Campos técnicos (coligada, período, RA...) seguem com o valor atual, como o site faz.
+  const hidden = inputsOf(form).filter(i => Number(i.field_id) > 0 && !mine.has(Number(i.field_id)) && scalar(i.value ?? i.value_now ?? null))
+    .map(i => ({ field_id: Number(i.field_id), value: i.value ?? i.value_now }));
+  return { button: str(button.button), hidden, target: str(form?.id) };
+}
+
+// Resumo do anexo que o DocumentPicker entregou, para o log: formato, extensão, host do CDN e quais metadados de
+// criptografia vieram. Nunca leva chaves, hashes, nome do arquivo nem o endereço completo.
+export function describeMedia(media) {
+  const items = Array.isArray(media) ? media : [];
+  const m = items[0] && typeof items[0] === "object" ? items[0] : {};
+  let host = null, https = null;
+  try { const u = new URL(String(m.cdn_url ?? "")); host = u.hostname; https = u.protocol === "https:"; } catch { /* sem endereço válido */ }
+  const enc = m.encryption_metadata && typeof m.encryption_metadata === "object" ? m.encryption_metadata : {};
+  return {
+    media_count: items.length, media_keys: Object.keys(m).sort().slice(0, 20), cdn_host: host, cdn_https: https,
+    ext: str(m.file_name).match(/\.([A-Za-z0-9]{1,5})$/)?.[1]?.toLowerCase() ?? null,
+    mime: typeof m.mime_type === "string" ? m.mime_type.slice(0, 60) : null,
+    enc_keys: Object.keys(enc).sort(), has_key: !!enc.encryption_key, has_iv: !!enc.iv, has_hmac: !!enc.hmac_key
+  };
+}
+
+// Resumo sem dados pessoais do que o Rubeus expõe no passo (vai para o log: confirma os campos e o botão do upload).
+export function describeUploadForm(form) {
+  return {
+    form: form?.id ?? null,
+    buttons: (form?.content?.buttons ?? []).map(b => ({ button: b.button, label: str(b.label).slice(0, 60) })),
+    inputs: inputsOf(form).map(i => ({ field_id: i.field_id, type: i.type ?? null, label: str(i.label).slice(0, 50), has_value: (i.value ?? i.value_now ?? null) !== null })),
+    components: (form?.content?.components ?? []).map(c => ({ id: c.id ?? c.component_id ?? null, type: c.type ?? null }))
+  };
+}
+
 // Etapas do portal → próxima etapa acionável (primeira não conclusiva com passo).
 export function summarizeStages(stages = []) {
   const rows = stages.map(s => ({
@@ -135,7 +190,7 @@ export function screenForStep(stageTitle, form) {
   if (labels.has(norm("Cupom de Desconto"))) return "CUPOM";
   if (/resp.*financeiro/.test(t) && labels.has("cpf") && labels.has("rua")) return "RESP_DADOS";
   if (labels.has("rua") && labels.has(norm("Estado natal"))) return "ENDERECO";
-  if (/documentos?.*inscri/.test(t)) return "DOCUMENTOS_INSCRICAO";
+  if (/documentos?.*(inscri|matric)/.test(t)) return "DOCUMENTOS_INSCRICAO";
   return "ETAPA_PORTAL";
 }
 
@@ -160,15 +215,23 @@ export function documentProgress(documentos = [], enviadosIds = []) {
   const all = Array.isArray(documentos) ? documentos : [];
   const valid = new Set(all.map(d => str(d.id)));
   const done = [...new Set(enviadosIds.map(str))].filter(id => valid.has(id));
-  const faltam = all.filter(d => !done.includes(str(d.id)));
-  const concluido = all.length > 0 && faltam.length === 0;
+  // Matrícula: só os documentos obrigatórios (marcados com *) fecham a etapa; os demais são opcionais.
+  const onlyRequired = all.some(d => d.obrigatorio === true);
+  const scope = onlyRequired ? all.filter(d => d.obrigatorio === true) : all;
+  const faltam = scope.filter(d => !done.includes(str(d.id)));
+  const concluido = scope.length > 0 && faltam.length === 0;
+  const label = d => d.descricao ?? d.title;
   const progresso = concluido
-    ? `✅ Todos os ${all.length} documentos solicitados foram enviados. A equipe confere em até 48 horas úteis. Toque em Atualizar situação. Se o Portal do candidato ainda mostrar documentos pendentes, envie os restantes por lá.`
-    : `${done.length} de ${all.length} documentos enviados. Falta: ${faltam.map(d => d.descricao ?? d.title).join(", ")}.`;
+    ? (onlyRequired
+      ? `✅ Os ${scope.length} documentos obrigatórios foram enviados. A equipe confere em até 48 horas úteis. Toque em Atualizar situação. Se quiser enviar os documentos opcionais, use o Portal do candidato.`
+      : `✅ Todos os ${all.length} documentos solicitados foram enviados. A equipe confere em até 48 horas úteis. Toque em Atualizar situação. Se o Portal do candidato ainda mostrar documentos pendentes, envie os restantes por lá.`)
+    : (onlyRequired
+      ? `${scope.length - faltam.length} de ${scope.length} documentos obrigatórios enviados. Falta: ${faltam.map(label).join(", ")}.`
+      : `${done.length} de ${all.length} documentos enviados. Falta: ${faltam.map(label).join(", ")}.`);
   return { docs_enviados: done, progresso, concluido };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null }) {
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null }) {
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
     try {
@@ -223,7 +286,45 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     });
   }
 
+  // Documentos de matrícula: o arquivo (base64) segue para o Rubeus no /submit do botão da etapa, com os campos
+  // do componente de upload (o Portal grava em SDOCALUNO por essa ação).
+  async function sendMatriculaDocument(data) {
+    if (!docs?.readDocument) throw new Error("Envio de documentos indisponível.");
+    const doc = (data.documentos ?? []).find(d => d.id === str(data.documento));
+    if (!doc) throw new Error("Escolha qual documento você está enviando.");
+    if (!str(data.token) || !str(data.button_id)) throw new Error("Sua sessão expirou. Entre novamente por \"Já sou inscrito\".");
+    const media = describeMedia(data.arquivo);
+    console.info(JSON.stringify({ event: "matricula_doc_recebido", doc: doc.id, ...media }));
+    let file;
+    try { file = await docs.readDocument({ media: data.arquivo }); }
+    catch (e) { console.warn(JSON.stringify({ event: "matricula_doc_leitura_falhou", doc: doc.id, message: str(e.message).slice(0, 200), ...media })); throw e; }
+    console.info(JSON.stringify({ event: "matricula_doc_lido", doc: doc.id, type: file.type, bytes: file.size }));
+    const U = MATRICULA_UPLOAD, fields = [...(data.ocultos ?? [])];
+    const put = (id, value) => { const i = fields.findIndex(f => Number(f.field_id) === Number(id)); const item = { field_id: Number(id), value }; i >= 0 ? fields.splice(i, 1, item) : fields.push(item); };
+    const current = id => fields.find(f => Number(f.field_id) === id)?.value;
+    const name = `${doc.descricao}.${file.type}`;
+    put(U.arquivo, file.base64); put(U.nomeArquivo, name); put(U.codDocumento, doc.id);
+    // CHAVERM = CODCOLIGADA;IDPERLET;RA;CODDOCUMENTO (chave da linha em SDOCALUNO), quando o formulário traz os três primeiros.
+    const parts = [U.coligada, U.periodo, U.ra].map(current);
+    if (parts.every(p => p !== undefined && p !== null && str(p) !== "")) put(U.chaveRm, [...parts, doc.id].join(";"));
+    let r;
+    try { r = await submitForm(data.button_id, fields, data.token); }
+    catch (e) {
+      console.warn(JSON.stringify({ event: "matricula_doc_rejeitado", doc: doc.id, message: str(e.message).slice(0, 300) }));
+      throw new Error("Não conseguimos confirmar o envio deste documento. Confira no Portal do candidato antes de enviar de novo.");
+    }
+    if (r?.success === false) throw new Error("O sistema não aceitou este documento agora. Tente de novo em instantes ou envie pelo Portal do candidato.");
+    console.info(JSON.stringify({ event: "matricula_doc_enviado", doc: doc.id, type: file.type, bytes: file.size }));
+    const previous = str(data.enviados) === NENHUM_ENVIO ? "" : str(data.enviados);
+    const again = previous.includes(`✅ ${doc.descricao} `);
+    const enviados = [previous, `✅ ${doc.descricao} ${again ? "atualizado" : "recebido"} (${name}). Recebemos o envio; a equipe confere em até 48 horas úteis.`].filter(Boolean).join("\n");
+    const { arquivo, ...rest } = data; // a mídia (chaves de criptografia) nunca vai para o estado selado
+    const progress = documentProgress(data.documentos, [...(data.docs_enviados ?? []), doc.id]);
+    return render("DOCUMENTOS_INSCRICAO", { ...rest, token: str(r?.token ?? r?.data?.token, data.token), enviados, ...progress, values: { documento: "" }, erro: "" });
+  }
+
   async function sendDocument(data) {
+    if (data.doc_modo === "matricula") return sendMatriculaDocument(data);
     if (!docs) throw new Error("Envio de documentos indisponível.");
     if (!(data.documentos ?? []).some(d => d.id === str(data.documento))) throw new Error("Escolha qual documento você está enviando.");
     if (!/^\d{11}$/.test(str(data.cpf))) throw new Error("Para enviar documentos, entre pela opção \"Já sou inscrito\" com seu CPF.");
@@ -299,7 +400,21 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     const screen = screenForStep(next.title, form);
     const base = { ...session, etapa_titulo: next.title, etapa_passo: str(next.step) };
     if (screen === "TELA_ORIENTACAO_PROVA") return render(screen, { ...base, tema_redacao: "", texto_motivador: "", erro: "" });
-    if (screen === "DOCUMENTOS_INSCRICAO") {
+    if (screen === "DOCUMENTOS_INSCRICAO" && /matric/.test(norm(next.title))) {
+      // Diagnóstico no log: o que o Rubeus expõe neste passo (campos e botão do upload), sem dados pessoais.
+      console.info(JSON.stringify({ event: "matricula_docs_form", step: next.step, ...describeUploadForm(form) }));
+      // Sondagem só de leitura: o token do Flow vale na API interna do portal? (loga só nomes de campos e contagens)
+      if (portalProbe) await Promise.resolve(portalProbe({ step: next.step, token: session.token, processId: session.processo_seletivo_id })).catch(() => {});
+      const bound = matriculaUpload && docs?.readDocument ? matriculaUploadBinding(form) : null;
+      if (bound) {
+        const required = MATRICULA_DOCS.filter(d => d.obrigatorio);
+        return render(screen, {
+          ...base, doc_modo: "matricula", documentos: MATRICULA_DOCS, enviados: NENHUM_ENVIO, ...documentProgress(MATRICULA_DOCS, []),
+          button_id: bound.button, ocultos: bound.hidden, target: bound.target,
+          texto: `Envie os documentos da sua matrícula pelo WhatsApp.\nObrigatórios (*): ${required.map(d => d.descricao).join(", ")}.\nOs demais são opcionais.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez. A análise ocorre em até 48 horas úteis.`
+        });
+      }
+    } else if (screen === "DOCUMENTOS_INSCRICAO") {
       const list = docs && academicId(session.processo_seletivo_id) ? await docs.listDocuments(academicId(session.processo_seletivo_id)).catch(() => []) : [];
       if (list.length && /^\d{11}$/.test(str(session.cpf))) return render(screen, {
         ...base, documentos: list, enviados: NENHUM_ENVIO, ...documentProgress(list, []),

@@ -1,6 +1,6 @@
 # Checklist - testes do FLOW UniBalsas 1.6.6 (documentos da inscrição, um só Flow)
 
-FLOW: DevRubeusFlows, ID 1295030755786589, JSON 7.3 / Data API 3.0. Servidor esperado em `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.8`. O JSON da WABA **muda** nesta versão: importar o `flow-waba.json` novo antes de testar.
+FLOW: DevRubeusFlows, ID 1295030755786589, JSON 7.3 / Data API 3.0. Servidor esperado em `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.9`. O JSON da WABA **muda** nesta versão: importar o `flow-waba.json` novo antes de testar.
 
 **O que mudou na 1.6.6**
 1. Corrige `Component Validation Error: Dropdown should NOT have additional properties (descricao)` na tela `DOCUMENTOS_INSCRICAO`. Todas as listas de opções saem só com `{id,title}`.
@@ -14,8 +14,8 @@ Legenda: ESPERADO = comportamento que deve ser observado; REGISTRAR = anotar o q
 ## 0. Preparação
 
 - [ ] Importar `flow-waba.json` da 1.6.6 na WABA e publicar; conferir "zero erros" no meta.
-- [ ] `GET /api/flow` responde `version: unibalsas-cloudrun-jornada-1.6.8`.
-- [ ] `npm test` local: 108 testes passando.
+- [ ] `GET /api/flow` responde `version: unibalsas-cloudrun-jornada-1.6.9`.
+- [ ] `npm test` local: 118 testes passando.
 - [ ] Ligar o modo interativo (não clicar em Executar durante o teste; ele desativa o modo).
 - [ ] Ter uma inscrição concluída por modalidade (ou usar as já existentes: Transferência 14150234, Diploma 14150338, ENEM 14150473).
 
@@ -50,6 +50,17 @@ Caminho: ESCOLHA_PROCESSO → "Já sou inscrito" (CPF 389.637.573-31, nascimento
 
 - [ ] ESPERADO: não pede documentos na inscrição (`/rm/documents` do idps 223 vem vazio). A tela de documentos não deve aparecer; se aparecer a tela genérica ETAPA_PORTAL, é o comportamento antigo e está correto.
 - [ ] Regressão: redação enviada → ACOMPANHAMENTO "Prova online: Aguardando correção" → Encerrar → STATUS_FINAL.
+
+### 4.1 Documentos de matrícula (1.6.9, passo 300671 "Documentos matrícula")
+
+Pré-requisito: usuária fictícia do Vestibular com a etapa "Documentos matrícula" pendente (CPF + nascimento em "Já sou inscrito").
+
+- [ ] ESPERADO: o hub (Ver minhas etapas → Continuar) abre `DOCUMENTOS_INSCRICAO` com 7 documentos e "0 de 3 documentos obrigatórios enviados. Falta: HISTÓRICO ENSINO MÉDIO, CERTIFICADO DE CONCLUSÃO ENSINO MÉDIO, DECLARAÇÃO DE CONCLUSÃO ENSINO MÉDIO."
+- [ ] REGISTRAR no log do Cloud Run o evento `matricula_docs_form` (botões e campos do formulário). Se aparecer ETAPA_PORTAL em vez da tela de documentos, o formulário não trouxe o botão 3940449: anotar os campos do log.
+- [ ] Enviar um PDF de teste como Histórico. ESPERADO: "✅ HISTÓRICO ENSINO MÉDIO recebido"; log `matricula_doc_enviado`. Se recusar: log `matricula_doc_rejeitado` e mensagem "Confira no Portal do candidato antes de enviar de novo".
+- [ ] **PONTO CRÍTICO:** conferir no Portal do candidato (passo 300671) se o documento aparece como "Em análise". Se não aparecer, o `/submit` oficial não grava o arquivo: desligar com `MATRICULA_DOCS_UPLOAD=off` e pedir o endpoint à UniBalsas.
+- [ ] Opcional (Identidade) não conta no progresso; reenvio mostra "atualizado"; só os 3 obrigatórios liberam "Atualizar situação".
+- [ ] Vindo de Identidade na mesma sessão, o Flow encerra em STATUS_FINAL com "Próxima etapa: Documentos matrícula" (sem rota de volta); retomar por "Já sou inscrito".
 
 ## 5. Regressão das demais listas (Dropdown)
 

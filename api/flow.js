@@ -7,7 +7,7 @@ import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
-import { listDocuments, saveDocument } from "./documentos.js";
+import { listDocuments, saveDocument, readDocument } from "./documentos.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -479,7 +479,19 @@ function assessmentClient(){return createAssessment({maxRequestMs:flowContext.ge
 const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
 async function linkDaInscricao(data){return proofRouter.prepare(data)}
 const academicId=id=>{try{return processPolicy(id).academicId}catch{return null}};
-const matricula=createMatricula({api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument}});
+// Sondagem (só leitura) da API interna do portal: confirma se o token do Flow vale lá. Loga só nomes de campos e contagens.
+const PORTAL_API_URL="https://processoseletivo.azurewebsites.net/api";
+async function portalProbe({step,token,processId}){
+  let http=null;
+  try{
+    const r=await fetch(`${PORTAL_API_URL}/applyment/getApplymentDataByStep/${encodeURIComponent(step)}`,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify({execute_stage_query:1,token,process_id:processId}),signal:AbortSignal.timeout(4000)});
+    http=r.status;const j=await r.json().catch(()=>null);
+    const keys=o=>o&&typeof o==="object"&&!Array.isArray(o)?Object.keys(o).slice(0,40):null;
+    const rows=JSON.stringify(j?.data??{}).match(/"CODTIPODOCUMENTO"/g)?.length??0;
+    console.info(JSON.stringify({event:"matricula_portal_probe",step,http,success:j?.success??null,keys:keys(j),data_keys:keys(j?.data),message:typeof j?.message==="string"?j.message.slice(0,120):null,doc_rows:rows}));
+  }catch(e){console.info(JSON.stringify({event:"matricula_portal_probe",step,http,error:String(e?.message??e).slice(0,120)}))}
+}
+const matricula=createMatricula({portalProbe:process.env.PORTAL_PROBE==="off"?null:portalProbe,api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument,readDocument},matriculaUpload:process.env.MATRICULA_DOCS_UPLOAD!=="off"});
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -1441,7 +1453,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.8" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.10" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
