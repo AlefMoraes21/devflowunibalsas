@@ -84,8 +84,6 @@ Variáveis de ambiente (configure no Cloud Run; nunca no código):
 | `APP_SECRET` / `META_APP_SECRET` | Segredo do app Meta (assinatura das requisições) |
 | `FLOW_PROJECT_ID`, `FLOW_DATABASE_ID`, `FLOW_TASKS_REGION`, `FLOW_TASKS_QUEUE`, `FLOW_WORKER_ORIGIN` | Firestore e Cloud Tasks (preenchidas por `implantar.sh`) |
 | `UNIBALSAS_API_URL` | Opcional. Padrão `https://api.unibalsas.edu.br` |
-| `BLIP_DOCS_KEY` | Chave que o bot do Blip envia no header `x-api-key` ao chamar `/api/documento`. Obrigatória para o endpoint responder (sem ela, sempre 401) |
-| `BLIP_MEDIA_HOSTS` | Opcional. Hosts permitidos para baixar a mídia do Blip. Padrão `blipmediastore.blob.core.windows.net` |
 | `PORT` | Opcional. Padrão `8080` |
 
 ## Testes
