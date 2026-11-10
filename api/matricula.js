@@ -22,7 +22,7 @@ const title30 = v => str(v).replace(/-+\s*$/g, "").trim().slice(0, 30);
 export const SCREENS = {
   PORTAL_STATUS: ["titulo", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "link_portal"],
   ACOMPANHAMENTO: ["titulo", "mensagem", "resumo", "erro", "tem_erro", "estado", "rotulo_rodape", "acao_rodape", "aguardando_resultado"],
-  DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "progresso", "concluido", "erro", "tem_erro", "estado", "valor_documento"],
+  DOCUMENTOS_INSCRICAO: ["documentos", "texto", "enviados", "progresso", "concluido", "mostrar_envio", "mostrar_concluido", "erro", "tem_erro", "estado", "valor_documento"],
   RESP_FINANCEIRO: ["opcoes_responsavel", "erro", "tem_erro", "estado", "valor_responsavel"],
   RESP_DADOS: ["ufs", "erro", "tem_erro", "estado", "cidades_natal", "cidade_visivel",
     "valor_nome", "valor_email", "valor_cpf", "valor_data_nascimento", "valor_celular", "valor_cep", "valor_rua",

@@ -57,9 +57,9 @@ test('documentProgress ignora ids fora da lista e lista vazia nunca conclui',()=
 test('JSON do Flow: três estados exclusivos e sem Dropdown/Picker na tela concluída',async()=>{
  const j=JSON.parse(await readFile(new URL('../flow-waba.json',import.meta.url)));
  const s=j.screens.find(x=>x.id==='DOCUMENTOS_INSCRICAO');
- assert.equal(s.data.concluido.type,'boolean');assert.equal(s.data.progresso.type,'string');
+ assert.equal(s.data.concluido.type,'boolean');assert.equal(s.data.mostrar_envio.type,'boolean');assert.equal(s.data.mostrar_concluido.type,'boolean');assert.equal(s.data.progresso.type,'string');
  const ifs=s.layout.children.filter(c=>c.type==='If');
- assert.deepEqual(ifs.map(i=>i.condition),['${data.processando} == false && ${data.concluido} == false','${data.processando} == false && ${data.concluido} == true','${data.processando} == true']);
+ assert.deepEqual(ifs.map(i=>i.condition),['${data.mostrar_envio}','${data.mostrar_concluido}','${data.processando} == true']);
  const types=i=>JSON.stringify(i.then);
  assert.ok(types(ifs[0]).includes('"Dropdown"')&&types(ifs[0]).includes('"DocumentPicker"'));
  assert.ok(!types(ifs[1]).includes('"Dropdown"')&&!types(ifs[1]).includes('"DocumentPicker"'));
@@ -67,4 +67,22 @@ test('JSON do Flow: três estados exclusivos e sem Dropdown/Picker na tela concl
  // limites de arquivo preservados
  const picker=JSON.parse(types(ifs[0])).find(c=>c.type==='DocumentPicker');
  assert.equal(picker['max-file-size-kb'],740);assert.deepEqual(picker['allowed-mime-types'],['application/pdf','image/jpeg','image/png']);
+});
+
+// A Meta rejeita "&&" junto com "==" nas condições ("Wrong positioning of operator '&&'"). O servidor resolve o estado da tela.
+test('JSON do Flow: nenhuma condição usa && ou || (a Meta recusa na importação)',async()=>{
+ const j=JSON.parse(await readFile(new URL('../flow-waba.json',import.meta.url)));
+ const conds=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(x&&typeof x==='object'){for(const [k,v] of Object.entries(x)){if(k==='condition'&&typeof v==='string')conds.push(v);walk(v)}}};
+ walk(j.screens);
+ assert.ok(conds.length>0);
+ for(const c of conds)assert.ok(!/&&|\|\|/.test(c),`condição inválida na Meta: ${c}`);
+});
+
+test('mostrar_envio/mostrar_concluido: exclusivos entre si e desligados enquanto processa',()=>{
+ const flags=d=>{const r=responseForScreen('DOCUMENTOS_INSCRICAO',d).data;return [r.mostrar_envio,r.mostrar_concluido]};
+ assert.deepEqual(flags({documentos:DOCS}),[true,false],'abertura/envio');
+ assert.deepEqual(flags({documentos:DOCS,concluido:true}),[false,true],'concluído');
+ assert.deepEqual(flags({documentos:DOCS,processando:true,job_id:'x'.repeat(64)}),[false,false],'processando');
+ assert.deepEqual(flags({documentos:DOCS,concluido:true,processando:true,job_id:'x'.repeat(64)}),[false,false],'processando após concluir');
+ assert.deepEqual(flags({}),[true,false],'sem dados');
 });

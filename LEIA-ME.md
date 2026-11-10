@@ -1,3 +1,12 @@
+# Versão 1.6.7 — Corrige a importação do Flow na Meta
+
+A Meta recusou o `flow-waba.json` da 1.6.6: `Wrong positioning of operator '&&'. It cannot be used in concatenation with '=='` (tela `DOCUMENTOS_INSCRICAO`). Condições do `If` não aceitam `&&` junto com `==`.
+
+- O servidor passa a enviar `mostrar_envio` e `mostrar_concluido` (booleanos já resolvidos, desligados enquanto a tela processa) e o JSON usa só `${data.mostrar_envio}`, `${data.mostrar_concluido}` e `${data.processando} == true`.
+- Teste novo falha se qualquer condição do Flow voltar a usar `&&` ou `||`.
+- **Servidor e JSON precisam ser atualizados juntos**: o JSON novo depende dos dois campos novos. 106 testes locais. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.7`.
+
+---
 # Versão 1.6.6 — Documentos da inscrição: correção do Dropdown e progresso
 
 ## O que mudou

@@ -824,6 +824,8 @@ function responseForScreen(screen, data) {
   }
   // Todos os documentos enviados: sem "Enviar"; o rodapé só atualiza a situação (a análise é da equipe).
   if(screen==="DOCUMENTOS_INSCRICAO"&&data.concluido&&!(next.processando&&next.job_id)){next.acao_rodape="atualizar_portal";next.rotulo_rodape="Atualizar situação"}
+  // A Meta não aceita "&&" junto com "==" nas condições do Flow: o servidor entrega o estado da tela já resolvido.
+  if(screen==="DOCUMENTOS_INSCRICAO"){const busy=Boolean(next.processando);next.mostrar_envio=!busy&&!data.concluido;next.mostrar_concluido=!busy&&Boolean(data.concluido)}
   if(screen==="TELA_ORIENTACAO_PROVA"&&data.proof_resume_required&&!(next.processando&&next.job_id)){
     next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
   }
@@ -877,7 +879,7 @@ function responseForScreen(screen, data) {
         k,
         OPTION_LIST_KEYS.has(k) && Array.isArray(next[k]) ? projectOptions(next[k]) : next[k] ?? (
           k.startsWith("valor_") ? "" :
-          k === "tem_erro" || k === "concluido" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
+          k === "tem_erro" || k === "concluido" || k === "mostrar_envio" || k === "mostrar_concluido" || k === "turno_visivel" || k === "eh_nota_enem" || k === "tem_processos" || k === "cidade_visivel" || k === "escola_visivel" ? false :
           ["cursos", "turnos", "anos_enem", "origens", "opcoes_responsavel", "ufs", "cidades_natal", "racas", "estados_civis", "anos", "escolas"].includes(k) ? [] : ""
         )
       ])
@@ -1439,7 +1441,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.6" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.7" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

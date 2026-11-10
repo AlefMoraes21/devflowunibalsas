@@ -2316,6 +2316,14 @@
           "type": "boolean",
           "__example__": false
         },
+        "mostrar_envio": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "mostrar_concluido": {
+          "type": "boolean",
+          "__example__": false
+        },
         "erro": {
           "type": "string",
           "__example__": ""
@@ -2371,7 +2379,7 @@
           },
           {
             "type": "If",
-            "condition": "${data.processando} == false && ${data.concluido} == false",
+            "condition": "${data.mostrar_envio}",
             "then": [
               {
                 "type": "TextHeading",
@@ -2425,7 +2433,7 @@
           },
           {
             "type": "If",
-            "condition": "${data.processando} == false && ${data.concluido} == true",
+            "condition": "${data.mostrar_concluido}",
             "then": [
               {
                 "type": "TextHeading",
