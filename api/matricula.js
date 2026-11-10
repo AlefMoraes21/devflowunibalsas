@@ -129,17 +129,46 @@ export const MATRICULA_DOCS = [
 export const MATRICULA_UPLOAD = { arquivo: 38730, nomeArquivo: 38731, chaveRm: 38718, pathArquivo: 38719, codDocumento: 38733, botao: 3940449,
   coligada: 38611, periodo: 38613, ra: 38651 };
 
+// Formatos candidatos do arquivo no campo do componente de upload (a API oficial aceita "value" de qualquer tipo e não
+// documenta upload). Ordem: do mais provável (o portal é Form.io) ao menos.
+export const UPLOAD_MODES = ["formio", "lista", "dataurl", "base64"];
+const MIME = { pdf: "application/pdf", jpg: "image/jpeg", png: "image/png" };
+export function buildUploadAttempts({ file, doc, name, uploadField, hidden = [] }) {
+  const id = Number(uploadField), mime = MIME[file.type] ?? "application/octet-stream";
+  const url = `data:${mime};base64,${file.base64}`;
+  const base = [...hidden].filter(f => Number(f.field_id) !== id);
+  const entry = { storage: "base64", name, originalName: name, type: mime, size: file.size, url };
+  const lista = MATRICULA_DOCS.map(d => d.id === doc.id
+    ? { CODIGO: d.id, title: d.descricao, OBRIGATORIO: d.obrigatorio ? 1 : 0, value: url, files: [entry] }
+    : { CODIGO: d.id, title: d.descricao, OBRIGATORIO: d.obrigatorio ? 1 : 0, value: null, files: [] });
+  return [
+    { mode: "formio", fields: [...base, { field_id: id, value: [{ ...entry, CODIGO: doc.id }] }] },
+    { mode: "lista", fields: [...base, { component_id: id, value: lista }] },
+    { mode: "dataurl", fields: [...base, { field_id: id, value: url }] },
+    { mode: "base64", fields: [...base, { field_id: id, value: file.base64 }] }
+  ];
+}
+// MATRICULA_SUBMIT_MODE (ex.: "formio,dataurl") limita/ordena os formatos; o último que funcionou vai primeiro.
+export function orderAttempts(attempts, modes = null, lastGood = null) {
+  const wanted = Array.isArray(modes) && modes.length ? modes.map(m => str(m).trim()).filter(Boolean) : null;
+  const list = wanted ? attempts.filter(a => wanted.includes(a.mode)).sort((a, b) => wanted.indexOf(a.mode) - wanted.indexOf(b.mode)) : [...attempts];
+  const i = list.findIndex(a => a.mode === lastGood);
+  return i > 0 ? [list[i], ...list.slice(0, i), ...list.slice(i + 1)] : list;
+}
+
 // Procura o botão de envio dos documentos de matrícula no formulário oficial. Sem ele, a etapa abre o portal.
 export function matriculaUploadBinding(form) {
   const buttons = form?.content?.buttons ?? [];
   const button = buttons.find(b => Number(b.button) === MATRICULA_UPLOAD.botao) ?? buttons.find(b => /document/.test(norm(b.label)) && /envi/.test(norm(b.label))) ?? null;
   if (!button) return null;
-  const mine = new Set([MATRICULA_UPLOAD.arquivo, MATRICULA_UPLOAD.nomeArquivo, MATRICULA_UPLOAD.chaveRm, MATRICULA_UPLOAD.pathArquivo, MATRICULA_UPLOAD.codDocumento]);
+  // Componente de upload do formulário oficial (tipo "upload"): é nele que o arquivo vai.
+  const uploadInput = inputsOf(form).find(i => norm(i.type) === "upload" && Number(i.field_id) > 0) ?? null;
+  const mine = new Set([MATRICULA_UPLOAD.arquivo, MATRICULA_UPLOAD.nomeArquivo, MATRICULA_UPLOAD.chaveRm, MATRICULA_UPLOAD.pathArquivo, MATRICULA_UPLOAD.codDocumento, Number(uploadInput?.field_id)]);
   const scalar = v => ["string", "number"].includes(typeof v) && str(v).length <= 200;
   // Campos técnicos (coligada, período, RA...) seguem com o valor atual, como o site faz.
   const hidden = inputsOf(form).filter(i => Number(i.field_id) > 0 && !mine.has(Number(i.field_id)) && scalar(i.value ?? i.value_now ?? null))
     .map(i => ({ field_id: Number(i.field_id), value: i.value ?? i.value_now }));
-  return { button: str(button.button), hidden, target: str(form?.id) };
+  return { button: str(button.button), hidden, target: str(form?.id), upload: uploadInput ? str(uploadInput.field_id) : "" };
 }
 
 // Resumo do anexo que o DocumentPicker entregou, para o log: formato, extensão, host do CDN e quais metadados de
@@ -233,7 +262,8 @@ export function documentProgress(documentos = [], enviadosIds = []) {
   return { docs_enviados: done, progresso, concluido };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null }) {
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null, submitModes = null }) {
+  let lastGoodMode = null;
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
     try {
@@ -309,13 +339,27 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     // CHAVERM = CODCOLIGADA;IDPERLET;RA;CODDOCUMENTO (chave da linha em SDOCALUNO), quando o formulário traz os três primeiros.
     const parts = [U.coligada, U.periodo, U.ra].map(current);
     if (parts.every(p => p !== undefined && p !== null && str(p) !== "")) put(U.chaveRm, [...parts, doc.id].join(";"));
-    let r;
-    try { r = await submitForm(data.button_id, fields, data.token); }
-    catch (e) {
-      console.warn(JSON.stringify({ event: "matricula_doc_rejeitado", doc: doc.id, message: str(e.message).slice(0, 300) }));
+    // O formulário oficial só tem o campo do componente de upload: tenta os formatos do arquivo nele, um por vez, e
+    // registra cada resposta do Rubeus. O primeiro aceito vira o primeiro da fila nas próximas vezes.
+    const attempts = data.upload_field
+      ? orderAttempts(buildUploadAttempts({ file, doc, name, uploadField: data.upload_field, hidden: data.ocultos ?? [] }), submitModes, lastGoodMode)
+      : [{ mode: "campos_rm", fields }];
+    let r, failure = null;
+    for (const a of attempts) {
+      try {
+        const resp = await submitForm(data.button_id, a.fields, data.token);
+        if (resp?.success === false) { failure = { refused: true, message: str(resp?.message ?? resp?.error ?? "success=false").slice(0, 200) }; console.warn(JSON.stringify({ event: "matricula_doc_tentativa", doc: doc.id, mode: a.mode, ok: false, ...failure })); continue; }
+        r = resp; lastGoodMode = a.mode; console.info(JSON.stringify({ event: "matricula_doc_tentativa", doc: doc.id, mode: a.mode, ok: true })); break;
+      } catch (e) {
+        failure = { refused: false, message: str(e.message).slice(0, 300) };
+        console.warn(JSON.stringify({ event: "matricula_doc_tentativa", doc: doc.id, mode: a.mode, ok: false, message: failure.message }));
+      }
+    }
+    if (r === undefined) {
+      console.warn(JSON.stringify({ event: "matricula_doc_rejeitado", doc: doc.id, tentativas: attempts.map(a => a.mode), message: failure?.message ?? "" }));
+      if (failure?.refused) throw new Error("O sistema não aceitou este documento agora. Tente de novo em instantes ou envie pelo Portal do candidato.");
       throw new Error("Não conseguimos confirmar o envio deste documento. Confira no Portal do candidato antes de enviar de novo.");
     }
-    if (r?.success === false) throw new Error("O sistema não aceitou este documento agora. Tente de novo em instantes ou envie pelo Portal do candidato.");
     console.info(JSON.stringify({ event: "matricula_doc_enviado", doc: doc.id, type: file.type, bytes: file.size }));
     const previous = str(data.enviados) === NENHUM_ENVIO ? "" : str(data.enviados);
     const again = previous.includes(`✅ ${doc.descricao} `);
@@ -412,7 +456,7 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
         const required = MATRICULA_DOCS.filter(d => d.obrigatorio);
         return render(screen, {
           ...base, doc_modo: "matricula", documentos: MATRICULA_DOCS, enviados: NENHUM_ENVIO, ...documentProgress(MATRICULA_DOCS, []),
-          button_id: bound.button, ocultos: bound.hidden, target: bound.target,
+          button_id: bound.button, ocultos: bound.hidden, target: bound.target, upload_field: bound.upload,
           texto: `Envie os documentos da sua matrícula pelo WhatsApp.\nObrigatórios (*): ${required.map(d => d.descricao).join(", ")}.\nOs demais são opcionais.\nFormatos PDF, JPG ou PNG, até 740 KB por arquivo. Envie um documento por vez. A análise ocorre em até 48 horas úteis.`
         });
       }

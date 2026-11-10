@@ -493,7 +493,7 @@ async function portalProbe({step,token,processId}){
     console.info(JSON.stringify({event:"matricula_portal_probe",step,http,success:j?.success??null,keys:keys(j),data_keys:keys(j?.data),message:typeof j?.message==="string"?j.message.slice(0,120):null,doc_rows:rows}));
   }catch(e){console.info(JSON.stringify({event:"matricula_portal_probe",step,http,error:String(e?.message??e).slice(0,120)}))}
 }
-const matricula=createMatricula({portalProbe:process.env.PORTAL_PROBE==="off"?null:portalProbe,api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument,readDocument},matriculaUpload:process.env.MATRICULA_DOCS_UPLOAD!=="off"});
+const matricula=createMatricula({portalProbe:process.env.PORTAL_PROBE==="off"?null:portalProbe,submitModes:process.env.MATRICULA_SUBMIT_MODE?process.env.MATRICULA_SUBMIT_MODE.split(","):null,api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument,readDocument},matriculaUpload:process.env.MATRICULA_DOCS_UPLOAD!=="off"});
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -1455,7 +1455,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.11" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.12" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

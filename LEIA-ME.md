@@ -1,3 +1,14 @@
+# Versão 1.6.12 — Envio oficial: testa formatos do arquivo no campo de upload
+
+Logs reais da 1.6.11 (WhatsApp, PDF e JPEG da Nicole): o arquivo chega e é lido (`matricula_doc_lido`), mas o `/submit` oficial respondeu HTTP 500 com os campos 38730/38731/38733/38718, que **não existem** no formulário oficial (só o componente `3940446`, tipo `upload`). A API interna do portal respondeu 403 com página HTML da Azure (bloqueio da plataforma): abandonada.
+
+- O arquivo agora vai no campo de upload do formulário, testando um formato por vez, na ordem: `formio` (lista de arquivos Form.io com `url` data-URL), `lista` (7 documentos com `component_id`, como o portal monta), `dataurl` e `base64`. O primeiro aceito vira o primeiro da fila nas próximas vezes (por instância).
+- Cada tentativa vai para o log: `matricula_doc_tentativa` (`mode`, `ok`, mensagem). Se nenhuma for aceita: `matricula_doc_rejeitado` com a lista de tentativas.
+- `MATRICULA_SUBMIT_MODE` (ex.: `formio,dataurl`) limita e ordena os formatos. Sem o campo `upload` no formulário, mantém o envio antigo pelos campos do RM.
+- Atenção: uma tentativa "aceita" só vale se o documento aparecer no Portal do candidato como "Em análise" (conferir sempre).
+- 122 testes locais. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.12`.
+
+---
 # Versão 1.6.11 — Diagnósticos mais precisos (sondagem do portal e anexo)
 
 Resultado dos logs da 1.6.10 na prévia da Meta: a sondagem da API interna do portal respondeu **HTTP 403** (sem JSON) e o anexo simulado da prévia chegou sem endereço `https` válido (`cdn_host: null`), com a estrutura correta (`media_id`, `file_name`, `cdn_url`, `encryption_metadata`).

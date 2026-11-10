@@ -150,3 +150,40 @@ test('log do anexo: formato e metadados, sem chaves nem endereço completo',asyn
  assert.ok(!JSON.stringify(d).match(/KEY|segredo|Historico/));
  assert.deepEqual(describeMedia(undefined).media_count,0);assert.equal(describeMedia([{}]).cdn_https,null);
 });
+
+// Formulário oficial do passo 300671: só o componente de upload (3940446) e os botões Portal/Enviar.
+const OFFICIAL={id:300671,content:{inputs:[{field_id:3940446,type:'upload',label:'',value:null}],buttons:[{button:3940448,label:'Portal do candidato'},{button:3940449,label:'Enviar'}]}};
+
+test('formulário oficial: campo de upload vai selado; formatos testados em ordem até o Rubeus aceitar',async()=>{
+ const {buildUploadAttempts,orderAttempts,UPLOAD_MODES}=await import('../api/matricula.js');
+ assert.equal(matriculaUploadBinding(OFFICIAL).upload,'3940446');
+ const tried=[];
+ const {m}=setup({form:OFFICIAL,submit:async(b,fields)=>{const f=fields[0];tried.push({b,key:f.field_id?'field':'component',multi:Array.isArray(f.value)});
+  if(tried.length<3)throw new Error('[RUBEUS_ERRO] HTTP 500');return {success:true,data:{token:'tok-9'}}}});
+ const r=await m.open(SESSION,STEP);
+ assert.equal(openState(r.data.estado,'DOCUMENTOS_INSCRICAO').upload_field,'3940446');
+ const out=await send(m,r,'1');
+ assert.equal(tried.length,3,'formio e lista falham, dataurl é aceito');
+ assert.match(out.data.enviados,/✅ CARTEIRA DE IDENTIDADE recebido/);
+ // formatos
+ const at=buildUploadAttempts({file:{type:'pdf',base64:'QUJD',size:3},doc:{id:'1'},name:'CI.pdf',uploadField:'3940446'});
+ assert.deepEqual(at.map(a=>a.mode),UPLOAD_MODES);
+ assert.equal(at[0].fields[0].value[0].url,'data:application/pdf;base64,QUJD');assert.equal(at[0].fields[0].value[0].CODIGO,'1');
+ assert.equal(at[1].fields[0].component_id,3940446);assert.equal(at[1].fields[0].value.length,7);
+ assert.equal(at[1].fields[0].value.filter(d=>d.files.length).length,1);
+ assert.equal(at[3].fields[0].value,'QUJD');
+ // ordem
+ assert.deepEqual(orderAttempts(at,['base64','formio']).map(a=>a.mode),['base64','formio']);
+ assert.deepEqual(orderAttempts(at,null,'dataurl').map(a=>a.mode),['dataurl','formio','lista','base64']);
+});
+
+test('formulário oficial: todos os formatos recusados -> mensagem de conferir no portal e nada marcado',async()=>{
+ let n=0;
+ const {m}=setup({form:OFFICIAL,submit:async()=>{n++;throw new Error('[RUBEUS_ERRO] HTTP 500')}});
+ const r=await m.open(SESSION,STEP);
+ await assert.rejects(()=>send(m,r,'1'),/Confira no Portal do candidato/);
+ assert.equal(n,4);
+ const {m:m2}=setup({form:OFFICIAL,submit:async()=>({success:false,message:'campo inválido'})});
+ const r2=await m2.open(SESSION,STEP);
+ await assert.rejects(()=>send(m2,r2,'1'),/não aceitou este documento/);
+});
