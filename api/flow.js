@@ -1,4 +1,4 @@
-import {processPolicy,isDirectRegistration,requiresEssay} from "./processes.js";
+import {processPolicy,isDirectRegistration,requiresEssay,academicIds} from "./processes.js";
 import {enemAverage,enemYears} from "./enem.js";
 import {portalConfirmsDelivery} from "./proof-binding.js";
 import {promptText} from "./prompt-text.js";
@@ -493,7 +493,7 @@ async function portalProbe({step,token,processId}){
     console.info(JSON.stringify({event:"matricula_portal_probe",step,http,success:j?.success??null,keys:keys(j),data_keys:keys(j?.data),message:typeof j?.message==="string"?j.message.slice(0,120):null,doc_rows:rows}));
   }catch(e){console.info(JSON.stringify({event:"matricula_portal_probe",step,http,error:String(e?.message??e).slice(0,120)}))}
 }
-const matricula=createMatricula({portalProbe:process.env.PORTAL_PROBE==="off"?null:portalProbe,controlProbe:process.env.MATRICULA_CONTROL!=="off",matriculaVia:process.env.MATRICULA_DOC_VIA?process.env.MATRICULA_DOC_VIA.split(",").map(s=>s.trim()):["unibalsas","rubeus"],submitModes:process.env.MATRICULA_SUBMIT_MODE?process.env.MATRICULA_SUBMIT_MODE.split(","):null,api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument,readDocument},matriculaUpload:process.env.MATRICULA_DOCS_UPLOAD!=="off"});
+const matricula=createMatricula({academicIds,portalProbe:process.env.PORTAL_PROBE==="off"?null:portalProbe,controlProbe:process.env.MATRICULA_CONTROL!=="off",matriculaVia:process.env.MATRICULA_DOC_VIA?process.env.MATRICULA_DOC_VIA.split(",").map(s=>s.trim()):["unibalsas","rubeus"],submitModes:process.env.MATRICULA_SUBMIT_MODE?process.env.MATRICULA_SUBMIT_MODE.split(","):null,api:rubeusRequest,getForm,submitForm,getDataSource,render:(screen,data)=>responseForScreen(screen,data),academicId,docs:{listDocuments,saveDocument,readDocument},matriculaUpload:process.env.MATRICULA_DOCS_UPLOAD!=="off"});
 
 async function listProcesses() {
   const r = await rubeusRequest(`/selective-processes?portal=${PORTAL_ID}`);
@@ -556,7 +556,7 @@ async function routeMatricula(screen, action, data) {
     if (p) return p;
     const { arquivo, ...safe } = data; // mídia do DocumentPicker não entra no estado selado
     if (["PORTAL_STATUS", "ACOMPANHAMENTO", "ETAPA_PORTAL"].includes(screen)) return responseForScreen(screen, { ...safe, erro: e.message });
-    return responseForScreen(screen, { ...safe, values: safe, erro: e.message });
+    return responseForScreen(screen, { ...safe, values: { ...safe, cpf: safe.cpf_informado ?? safe.cpf }, erro: e.message });
   }
   return { data: { status: "active" } };
 }
@@ -828,6 +828,8 @@ function responseForScreen(screen, data) {
   if(screen==="CURSO_INTERESSE"&&isNotaEnemContext(data))screen="CURSO_ENEM";
   const entered = flowContext.getStore()?.request?.data ?? {};
   const values = { ...entered, ...data.values };
+  // Reexibe o CPF digitado (ex.: do responsável), não o CPF da sessão.
+  if (entered.cpf_informado !== undefined && data.values?.cpf === undefined) values.cpf = entered.cpf_informado;
   const actionByScreen={CURSO_INGRESSO:"avancar_curso_ingresso",CURSO_ENEM:"avancar_curso_interesse",QUASE_LA:"enviar_informacoes_complementares",TELA_ORIENTACAO_PROVA:"iniciar_redacao",TELA_REDACAO:"enviar_redacao",...MATRICULA_STEP_ACTIONS};
   const labelByScreen={CURSO_INGRESSO:"Continuar",CURSO_ENEM:"Continuar",QUASE_LA:"Concluir inscrição",TELA_ORIENTACAO_PROVA:"Iniciar redação",TELA_REDACAO:"Enviar redação",...MATRICULA_STEP_LABELS};
   const next = {processando:false,editavel:true,job_id:"",mensagem_processamento:"",acao_rodape:actionByScreen[screen]??"",rotulo_rodape:labelByScreen[screen]??"Continuar", ...data, erro: data.erro ?? "", tem_erro: Boolean(data.erro) };
@@ -1017,6 +1019,12 @@ async function routeFlowRequest(requestData) {
       const trusted = openState(data.estado, requestData.screen);
       const user = Object.fromEntries(Object.entries(data).filter(([k]) => USER_FIELDS.has(k)));
       data = { ...trusted, ...user, acao: customAction };
+      // Depois do login, o CPF do candidato vem só do estado selado. Um "cpf" enviado pelo cliente
+      // (ex.: CPF do responsável financeiro) fica em cpf_informado e nunca troca a identidade da sessão.
+      if (/^\d{11}$/.test(cpfDigits(trusted.cpf)) && Object.hasOwn(user, "cpf")) {
+        data.cpf_informado = toStringValue(user.cpf);
+        data.cpf = trusted.cpf;
+      }
       if (customAction !== "selecionar_processo") {
         data.processo_seletivo_id = trusted.processo_seletivo_id;
       }
@@ -1455,7 +1463,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.14" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.16" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

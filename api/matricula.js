@@ -70,12 +70,12 @@ export const ACTIONS = new Set(["carregar_jornada", "atualizar_portal", "continu
 const SPEC = {
   RESP_FINANCEIRO: { responsavel: [["Quem é seu responsável financeiro?"], 232542] },
   ENDERECO: {
-    rua: [["Rua"], 38569], numero: [["Número"], 38570], complemento: [["Complemento"], 38572], bairro: [["Bairro"], 38571],
+    cep: [["CEP"], 38568], rua: [["Rua"], 38569], numero: [["Número"], 38570], complemento: [["Complemento"], 38572], bairro: [["Bairro"], 38571],
     cidade: [["Cidade"], 38574], uf: [["Estado - UF", "Estado"], 38573], estado_natal: [["Estado natal"], 38641], cidade_natal: [["Cidade natal"], 38640]
   },
   RESP_DADOS: {
     nome: [["Nome completo"], 38710], email: [["E-mail", "Email"], 38692], cpf: [["CPF"], 38688], data_nascimento: [["Data de nascimento"], 38691],
-    celular: [["Celular"], 38682], rua: [["Rua"], 38714], numero: [["Número"], 38711], complemento: [["Complemento"], 38726], bairro: [["Bairro"], 38681],
+    celular: [["Celular"], 38682], cep: [["CEP"], null], rua: [["Rua"], 38714], numero: [["Número"], 38711], complemento: [["Complemento"], 38726], bairro: [["Bairro"], 38681],
     cidade: [["Cidade"], 38684], uf: [["Estado"], 38701], estado_natal: [["Estado natal"], 38728], cidade_natal: [["Cidade natal"], 38727]
   },
   IDENTIDADE: {
@@ -85,7 +85,8 @@ const SPEC = {
   },
   CUPOM: { cupom: [["Cupom de Desconto"], 98519] }
 };
-const OPTIONAL = new Set(["complemento", "escola", "ano_conclusao", "cupom"]);
+// "cep" é opcional na localização: o formulário do responsável pode não ter o campo; quando existe, o site envia só dígitos.
+const OPTIONAL = new Set(["complemento", "escola", "ano_conclusao", "cupom", "cep"]);
 const LABELS = { ano_conclusao: "Ano de conclusão", rua: "Rua", numero: "Número", bairro: "Bairro", cidade: "Cidade", uf: "UF", estado_natal: "Estado natal", cidade_natal: "Cidade natal",
   nome: "Nome", email: "E-mail", cpf: "CPF", data_nascimento: "Data de nascimento", celular: "Celular", rg: "Número da identidade",
   orgao_emissor: "Órgão emissor", uf_rg: "UF da identidade", cor_raca: "Cor/Raça", estado_civil: "Estado civil", responsavel: "Responsável financeiro" };
@@ -226,8 +227,10 @@ export function screenForStep(stageTitle, form) {
 }
 
 const PORTAL_TEXT = [
-  [/documento/, "Envie seus documentos", "Envie os documentos solicitados (PNG, JPG ou PDF, até 5 MB no total) pelo Portal do candidato. A análise ocorre em até 48 horas úteis."],
-  [/contrato/, "Contrato", "Leia o contrato e registre o seu aceite no Portal do candidato."],
+  [/documento/, "Envie seus documentos", "Envie os documentos solicitados (PNG, JPG ou PDF, até 5 MB por arquivo) pelo Portal do candidato. A análise ocorre em até 48 horas úteis."],
+  // Observado no site (passo do contrato, 10/11/2026): não há aceite no portal; o contrato é baixado,
+  // assinado pelo GOV.BR e enviado por e-mail à central de matrícula.
+  [/contrato/, "Contrato", "1. No Portal do candidato, toque em \"Clique aqui para fazer o download do contrato\".\n2. Assine o contrato digitalmente pelo GOV.BR.\n3. Envie o contrato assinado para centraldematriculaub@unibalsas.edu.br.\nDúvidas: WhatsApp (99) 99131-1684. A matrícula segue quando a equipe receber o contrato assinado."],
   [/pagamento|taxa/, "Pagamento", "Escolha Pix, cartão ou boleto e conclua o pagamento pelo ambiente seguro do Portal do candidato."],
   [/filiacao/, "Filiação", "Cadastre os nomes dos seus responsáveis pelo Portal do candidato."]
 ];
@@ -262,7 +265,7 @@ export function documentProgress(documentos = [], enviadosIds = []) {
   return { docs_enviados: done, progresso, concluido };
 }
 
-export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null, submitModes = null, controlProbe = true, matriculaVia = ["unibalsas", "rubeus"] }) {
+export function createMatricula({ api, getForm, submitForm, getDataSource, render, academicId = () => null, docs = null, matriculaUpload = true, portalProbe = null, submitModes = null, controlProbe = true, matriculaVia = ["unibalsas", "rubeus"], academicIds = [] }) {
   let lastGoodMode = null, controlDone = false;
   async function login(loginValue, birth) {
     let keys = { login: "LOGIN", birth: "DATANASCIMENTO" };
@@ -347,17 +350,24 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     let r, failure = null;
     // API documentada da UniBalsas (artigos 743-746: POST /blip/documents, grava no EduPSDocumentoEntregueData).
     const idps = academicId(data.processo_seletivo_id);
-    const canApi = !!(docs?.saveDocument && idps && /^\d{11}$/.test(str(data.cpf)));
+    // Sem o processo na sessão (login por CPF), procura a inscrição em cada IDPS conhecido, na ordem da lista.
+    const candidates = idps ? [String(idps)] : academicIds.map(String);
+    const canApi = !!(docs?.saveDocument && candidates.length && /^\d{11}$/.test(str(data.cpf)));
     const apiFirst = canApi && matriculaVia[0] !== "rubeus";
     // Por que a API da UniBalsas foi (ou não) usada: só booleanos e o tamanho do CPF, nada pessoal.
-    console.info(JSON.stringify({ event: "matricula_doc_via", doc: doc.id, canApi, apiFirst, tem_saveDocument: !!docs?.saveDocument, idps: idps ? String(idps) : null, processo: str(data.processo_seletivo_id) || null, cpf_digitos: str(data.cpf).replace(/\D/g, "").length, via: matriculaVia }));
+    console.info(JSON.stringify({ event: "matricula_doc_via", doc: doc.id, canApi, apiFirst, tem_saveDocument: !!docs?.saveDocument, idps: idps ? String(idps) : null, candidatos: candidates, processo: str(data.processo_seletivo_id) || null, cpf_digitos: str(data.cpf).replace(/\D/g, "").length, via: matriculaVia }));
     const viaApi = async () => {
-      try {
-        const saved = await docs.saveDocument({ idps, cpf: data.cpf, codDocumento: Number(doc.id), media: data.arquivo });
-        r = {}; console.info(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: true, idps: Number(idps), chave: str(saved?.primaryKey ?? saved?.chave).slice(0, 60) }));
-      } catch (e) {
-        failure = { refused: false, message: str(e.message).slice(0, 300) };
-        console.warn(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: false, idps: Number(idps), message: failure.message }));
+      for (const id of candidates) {
+        try {
+          const saved = await docs.saveDocument({ idps: id, cpf: data.cpf, codDocumento: Number(doc.id), media: data.arquivo });
+          r = {}; console.info(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: true, idps: Number(id), chave: str(saved?.primaryKey ?? saved?.chave).slice(0, 60) }));
+          return;
+        } catch (e) {
+          failure = { refused: false, message: str(e.message).slice(0, 300) };
+          console.warn(JSON.stringify({ event: "matricula_doc_api_unibalsas", doc: doc.id, ok: false, idps: Number(id), message: failure.message }));
+          // Inscrição não encontrada neste IDPS: tenta o próximo. Qualquer outro erro encerra (o envio pode ter chegado ao RM).
+          if (!/localizamos sua inscri/i.test(failure.message)) return;
+        }
       }
     };
     if (apiFirst) await viaApi();
@@ -556,16 +566,21 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       set("responsavel", data.responsavel);
     } else if (screen === "ENDERECO" || screen === "RESP_DADOS") {
       const req = ["rua", "numero", "bairro", "cidade", "uf", "estado_natal", "cidade_natal"];
-      if (screen === "RESP_DADOS") req.unshift("nome", "email", "cpf", "data_nascimento", "celular");
+      // O CPF do responsável chega em cpf_informado: data.cpf é sempre o do candidato logado (estado selado).
+      const respCpf = str(data.cpf_informado ?? data.cpf);
+      if (screen === "RESP_DADOS") req.unshift("nome", "email", "data_nascimento", "celular");
       require(data, req);
-      if (screen === "RESP_DADOS" && !validCpf(data.cpf)) throw new Error("CPF do responsável inválido.");
+      if (screen === "RESP_DADOS" && !respCpf.trim()) throw new Error("Preencha CPF.");
+      if (screen === "RESP_DADOS" && !validCpf(respCpf)) throw new Error("CPF do responsável inválido.");
+      if (data.campos?.cep && !/^\d{8}$/.test(onlyDigits(data.cep))) throw new Error("Informe o CEP com 8 números.");
       if (!/^[A-Za-z]{2}$/.test(str(data.uf).trim())) throw new Error("Informe a UF com 2 letras.");
       if (!(data.ufs ?? []).some(o => o.id === data.estado_natal)) throw new Error("Selecione o estado natal.");
       if (!(data.cidades_natal ?? []).some(o => o.id === data.cidade_natal)) throw new Error("Busque e selecione a cidade natal.");
       for (const n of ["nome", "email", "rua", "numero", "complemento", "bairro", "cidade"]) set(n, str(data[n]).trim());
       set("uf", str(data.uf).trim().toUpperCase());
       set("estado_natal", data.estado_natal); set("cidade_natal", data.cidade_natal);
-      if (screen === "RESP_DADOS") { set("cpf", onlyDigits(data.cpf)); set("data_nascimento", data.data_nascimento); set("celular", onlyDigits(data.celular).replace(/^55(?=\d{10,11}$)/, "")); }
+      set("cep", onlyDigits(data.cep));
+      if (screen === "RESP_DADOS") { set("cpf", onlyDigits(respCpf)); set("data_nascimento", data.data_nascimento); set("celular", onlyDigits(data.celular).replace(/^55(?=\d{10,11}$)/, "")); }
     } else if (screen === "IDENTIDADE") {
       require(data, ["rg", "orgao_emissor", "uf_rg", "cor_raca", "estado_civil"]);
       for (const [n, list] of [["uf_rg", "ufs"], ["cor_raca", "racas"], ["estado_civil", "estados_civis"]]) if (!(data[list] ?? []).some(o => o.id === data[n])) throw new Error(`Selecione ${LABELS[n]}.`);
