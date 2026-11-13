@@ -1156,8 +1156,10 @@ async function routeFlowRequest(requestData) {
     case "buscar_turnos":
     case "avancar_curso_interesse":
     case "avancar_curso_ingresso": {
+      let buscandoTurnos = false;
       try {
         if (customAction === "buscar_turnos" || data.curso_id !== data.curso_selecionado || !toBoolean(data.turno_visivel) || (data.turnos ?? []).length === 0) {
+          buscandoTurnos = true;
           if (!(data.cursos??[]).some(c=>c.id===data.curso_id)) {
             throw new Error("Selecione um curso para ver os turnos.");
           }
@@ -1260,7 +1262,11 @@ async function routeFlowRequest(requestData) {
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
-        return responseForScreen("CURSO_INTERESSE", courseRetryData(data, e.message));
+        const retry = courseRetryData(data, e.message);
+        // Falha ao buscar o turno do curso escolhido: nada do curso anterior pode ser reaproveitado
+        // (turno, oferta, área etc.), senão o envio gravaria o curso novo com a oferta do antigo.
+        if (buscandoTurnos) Object.assign(retry, { turnos: [], turno_visivel: false, turno_id: "", turno_selecionado: "", area_interesse_valor: "", oferta_valor: "", polo_valor: "", coligada_valor: "", filial_valor: "", tipo_curso_valor: "" });
+        return responseForScreen("CURSO_INTERESSE", retry);
       }
     }
 
