@@ -375,11 +375,18 @@ function requireInput(input, name) {
   return input;
 }
 
+// O WhatsApp recusa (e reinicia o Flow) um Dropdown com id repetido, id vazio ou título vazio.
 function flowOptions(options = []) {
-  return options.map(o => ({
-    id: toStringValue(o.value),
-    title: toStringValue(o.label).replace(/-+$/g, "").trim().slice(0, 30)
-  }));
+  const seen = new Set();
+  const out = [];
+  for (const o of options ?? []) {
+    const id = toStringValue(o?.value);
+    const title = toStringValue(o?.label).replace(/-+$/g, "").trim().slice(0, 30);
+    if (!id.trim() || !title || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, title });
+  }
+  return out;
 }
 
 function extractDataSourceOptions(r) {
@@ -1065,6 +1072,8 @@ async function routeFlowRequest(requestData) {
   }
 
   if (data.error) {
+    // Aviso do WhatsApp quando não consegue montar uma tela (sem dados do candidato).
+    console.warn(JSON.stringify({ event: "flow_client_error", screen: toStringValue(requestData?.screen), error: String(data.error).slice(0, 120), error_message: String(data.error_message ?? "").slice(0, 300) }));
     return { data: { acknowledged: true } };
   }
 
@@ -1169,7 +1178,9 @@ async function routeFlowRequest(requestData) {
             token: data.token
           });
 
-          const shifts = flowOptions(extractDataSourceOptions(shiftsResponse));
+          const rawShifts = extractDataSourceOptions(shiftsResponse);
+          const shifts = flowOptions(rawShifts);
+          console.info(JSON.stringify({ event: "turnos_carregados", processo: toStringValue(data.processo_seletivo_id), recebidos: rawShifts.length, enviados: shifts.length, descartados: rawShifts.length - shifts.length }));
           if (shifts.length === 0) {
             throw new Error("Nenhum turno disponível para o curso selecionado.");
           }
@@ -1520,4 +1531,4 @@ export default async function handler(req, res) {
     return res.status(421).send("Erro na descriptografia do payload.");
   }
 }
-export {routeFlowRequest,flowContext,sealState,openState,responseForScreen};
+export {routeFlowRequest,flowContext,sealState,openState,responseForScreen,flowOptions};
