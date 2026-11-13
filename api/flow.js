@@ -124,8 +124,6 @@ for(const screen of ["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"]){SCREEN_
 
 FORM_DEFAULTS.CURSO_ENEM=FORM_DEFAULTS.CURSO_INTERESSE;
 SCREEN_KEYS.CURSO_ENEM=[...SCREEN_KEYS.CURSO_INTERESSE,"processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento"];
-// Vestibular: dados básicos e curso de interesse também rodam na fila e precisam devolver o estado do job.
-for(const screen of ["DADOS_BASICOS","CURSO_INTERESSE"]){SCREEN_KEYS[screen].push("processando","editavel","acao_rodape","rotulo_rodape","mensagem_processamento","job_id","titulo_processamento")}
 
 FORM_DEFAULTS.CURSO_INGRESSO=FORM_DEFAULTS.CURSO_INTERESSE;
 SCREEN_KEYS.CURSO_INGRESSO=[...SCREEN_KEYS.CURSO_ENEM];
