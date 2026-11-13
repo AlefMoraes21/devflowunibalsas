@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** de inscrição nos processos seletivos da UniBalsas. O candidato faz a inscrição, a redação online, acompanha as etapas e envia documentos sem sair do WhatsApp. O servidor traduz cada tela do Flow em chamadas ao **Rubeus** (CRM e portal do candidato), ao módulo de **avaliação** (redação) e à **API acadêmica da UniBalsas** (documentos).
 
-- Versão atual: **1.6.9** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-1.6.9`); documentos de matrícula do Vestibular via DocumentPicker (desligar com `MATRICULA_DOCS_UPLOAD=off`)
+- Versão atual: **1.6.16** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-1.6.16`); documentos de matrícula do Vestibular via DocumentPicker (desligar com `MATRICULA_DOCS_UPLOAD=off`)
 - Execução: Node.js 22+, sem dependências externas (`npm install` não baixa pacotes)
 - Hospedagem: Google Cloud Run (`southamerica-east1`), com Firestore e Cloud Tasks para tarefas lentas
 - Flow: JSON versão 7.3, Data API 3.0 (`flow-waba.json`)
