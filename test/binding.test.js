@@ -26,3 +26,16 @@ test('prepare valida portal e relê após uma única ação do botão',async()=>
 for(const feedback of ['Prova disponível','Prova já iniciada','Prova não finalizada'])test(`não confirma portal com ${feedback}`,()=>assert.equal(portalConfirmsDelivery({stages:[{feedback}]}),false));
 for(const feedback of ['Aguardando correção','Em correção','Prova corrigida'])test(`confirma portal com ${feedback}`,()=>assert.equal(portalConfirmsDelivery({stages:[{feedback}]}),true));
 test('enunciado decodifica acentos e preserva parágrafos',()=>assert.equal(promptText('<p>Reda&ccedil;&atilde;o e sa&uacute;de</p><p>&ldquo;Equil&iacute;brio&rdquo; &#233; essencial.</p>'),'Redação e saúde\n\n“Equilíbrio” é essencial.'));
+// Produção (13/11/2026): o Rubeus aceita o "Iniciar prova" e só depois gera o IDEXECPROVA.
+// A preparação relê o formulário (sem novo envio) até o código aparecer.
+test('prepare espera o código da execução aparecer, sem reenviar o Iniciar prova',async()=>{
+ let submits=0,reads=0,waits=0;
+ const router=createProofRouter({api:async path=>({data:path.startsWith('/stages')?[{id:32,title:'Prova online'}]:[{id:33}]}),getForm:async()=>({data:{form:{content:{buttons:[button],inputs:[{field_id:110,label:'IDEXECPROVA',value:'OLD'}]}}}}),submitForm:async()=>{submits++;return {data:{}}},readPortal:async()=>({}),readSnapshot:async()=>{reads++;const s=snapshot();if(reads<3)s.content[0].value_now=null;return s},sleep:async()=>{waits++},remaining:()=>120000});
+ const result=await router.prepare(application);
+ assert.equal(result.binding.executionCode,'CURRENT-CODE');assert.equal(submits,1);assert.equal(reads,3);assert.equal(waits,2);
+});
+test('prepare desiste após o limite de releituras e mantém o erro original',async()=>{
+ let submits=0,reads=0;
+ const router=createProofRouter({api:async path=>({data:path.startsWith('/stages')?[{id:32,title:'Prova online'}]:[{id:33}]}),getForm:async()=>({data:{form:{content:{buttons:[button],inputs:[{field_id:110,label:'IDEXECPROVA',value:'OLD'}]}}}}),submitForm:async()=>{submits++;return {data:{}}},readPortal:async()=>({}),readSnapshot:async()=>{reads++;const s=snapshot();s.content[0].value_now=null;return s},sleep:async()=>{},remaining:()=>120000,bindingTries:3});
+ await assert.rejects(router.prepare(application),/idExecProva/);assert.equal(submits,1);assert.equal(reads,3);
+});

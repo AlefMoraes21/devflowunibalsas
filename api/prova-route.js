@@ -33,7 +33,7 @@ async function readSiteStatus(step,data){
   if(!r.ok||j.success!==true||Number(j.data?.steps?.currentStep?.id)!==Number(step))throw new Error('[PROVA_STATUS] Não foi possível confirmar a situação da prova nesta sessão.');
   return collectInputs(j.data.steps.currentStep.content);
 }
-export function createProofRouter({api,getForm,submitForm,readStatus=readSiteStatus,remaining=()=>120000,readSnapshot=(step,data)=>loadProofSnapshot(step,data,{remaining}),readPortal=data=>loadPortal(data,{remaining})}){
+export function createProofRouter({api,getForm,submitForm,readStatus=readSiteStatus,remaining=()=>120000,readSnapshot=(step,data)=>loadProofSnapshot(step,data,{remaining}),readPortal=data=>loadPortal(data,{remaining}),sleep=ms=>new Promise(r=>setTimeout(r,ms)),bindingTries=6,bindingDelayMs=2000}){
   async function discover(process){
     const id=Number(process);
     if(!Number.isSafeInteger(id)||id<=0)throw new Error('[PROVA_PROCESSO] Processo inválido.');
@@ -71,8 +71,19 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     await discover(data.processo_seletivo_id);
     await readPortal(data);
     const sent=await dispatch(data);
-    const snapshot=await readSnapshot(sent.step,{...data,token:sent.token});
-    const prepared=buildCanonicalProof(snapshot,data,sent.button,sent.link);
+    // O Rubeus aceita o "Iniciar prova" e gera o código da execução (IDEXECPROVA) alguns segundos depois.
+    // Relê só o formulário (sem novo envio) até o código aparecer, dentro do prazo do job.
+    let snapshot,prepared;
+    for(let tentativa=1;;tentativa++){
+      snapshot=await readSnapshot(sent.step,{...data,token:sent.token});
+      try{prepared=buildCanonicalProof(snapshot,data,sent.button,sent.link);break}
+      catch(e){
+        const aindaGerando=/não foi confirmado pelo formulário atual|registro da prova distribuída não foi confirmado/.test(e.message);
+        if(!aindaGerando||tentativa>=bindingTries||remaining()<bindingDelayMs+5000)throw e;
+        console.info(JSON.stringify({event:'proof_binding_wait',step:sent.step,tentativa,motivo:e.message.slice(0,90)}));
+        await sleep(bindingDelayMs);
+      }
+    }
     console.info(JSON.stringify({event:'proof_binding',applicationId:prepared.binding.applicationId,step:prepared.binding.step,proofId:prepared.binding.proofId,executionCode:prepared.binding.executionCode,redirectMatched:prepared.binding.redirectMatched}));
     return {...prepared,token:sent.token};
   }
