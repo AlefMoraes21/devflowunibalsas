@@ -1182,7 +1182,14 @@ async function routeFlowRequest(requestData) {
 
           const rawShifts = extractDataSourceOptions(shiftsResponse);
           const shifts = flowOptions(rawShifts);
-          console.info(JSON.stringify({ event: "turnos_carregados", processo: toStringValue(data.processo_seletivo_id), recebidos: rawShifts.length, enviados: shifts.length, descartados: rawShifts.length - shifts.length }));
+          // O Rubeus pode devolver um token novo; o próximo /data-source ou /submit usa esse.
+          const tokenNovo = toStringValue(shiftsResponse?.token ?? shiftsResponse?.data?.token);
+          const mesmoCursoComTurno = toStringValue(data.curso_id) === toStringValue(data.curso_selecionado) && (data.turnos ?? []).length > 0;
+          console.info(JSON.stringify({ event: "turnos_carregados", processo: toStringValue(data.processo_seletivo_id), recebidos: rawShifts.length, enviados: shifts.length, descartados: rawShifts.length - shifts.length, mesmo_curso: mesmoCursoComTurno, token_novo: Boolean(tokenNovo) }));
+          if (shifts.length === 0 && mesmoCursoComTurno && customAction === "buscar_turnos") {
+            // Nova busca do mesmo curso voltou vazia: mantém o turno já carregado, sem erro.
+            return responseForScreen("CURSO_INTERESSE", { ...data, ...(tokenNovo ? { token: tokenNovo } : {}), erro: "" });
+          }
           if (shifts.length === 0) {
             throw new Error("Nenhum turno disponível para o curso selecionado.");
           }
@@ -1190,6 +1197,7 @@ async function routeFlowRequest(requestData) {
 
           return responseForScreen("CURSO_INTERESSE", {
             ...data,
+            ...(tokenNovo ? { token: tokenNovo } : {}),
             cursos: data.cursos ?? [],
             turnos: shifts,
             turno_visivel: true,
@@ -1265,7 +1273,8 @@ async function routeFlowRequest(requestData) {
         const retry = courseRetryData(data, e.message);
         // Falha ao buscar o turno do curso escolhido: nada do curso anterior pode ser reaproveitado
         // (turno, oferta, área etc.), senão o envio gravaria o curso novo com a oferta do antigo.
-        if (buscandoTurnos) Object.assign(retry, { turnos: [], turno_visivel: false, turno_id: "", turno_selecionado: "", area_interesse_valor: "", oferta_valor: "", polo_valor: "", coligada_valor: "", filial_valor: "", tipo_curso_valor: "" });
+        const mantemTurno = toStringValue(data.curso_id) === toStringValue(data.curso_selecionado) && (data.turnos ?? []).length > 0;
+        if (buscandoTurnos && !mantemTurno) Object.assign(retry, { turnos: [], turno_visivel: false, turno_id: "", turno_selecionado: "", area_interesse_valor: "", oferta_valor: "", polo_valor: "", coligada_valor: "", filial_valor: "", tipo_curso_valor: "" });
         return responseForScreen("CURSO_INTERESSE", retry);
       }
     }
