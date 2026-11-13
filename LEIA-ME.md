@@ -1,22 +1,3 @@
-# Versão 1.6.16 — CEP no endereço, CPF da sessão protegido e orientação do contrato
-
-Correções P1 do mapeamento de 10–12/11/2026 (`MAPA-JORNADA-2027.md`). **Somente servidor; o `flow-waba.json` não muda** (a tela já enviava `cep`).
-
-- **CEP no endereço:** o site envia o CEP (campo 38568, só dígitos) no passo de endereço; o Flow pedia o CEP mas não gravava. Agora vai no endereço do candidato e, quando o formulário tiver o campo "CEP", no endereço do responsável. CEP com menos de 8 números é recusado antes de gravar.
-- **CPF da sessão protegido:** o Flow roda no Blip, sem a assinatura da Meta (`META_APP_SECRET`). Depois do login, um `cpf` vindo do cliente não troca mais o CPF do candidato no estado selado; ele fica em `cpf_informado` e só é usado como CPF do responsável financeiro. Em erro, a tela reexibe o CPF digitado.
-- **Contrato:** o texto dizia "registre o seu aceite no Portal". O site não tem aceite: o candidato baixa o contrato, assina pelo GOV.BR e envia à central de matrícula por e-mail. O link abre o passo do contrato. Texto de documentos corrigido para "até 5 MB por arquivo".
-- **Não feito:** entregar o PDF do contrato dentro do WhatsApp (precisa enviar mensagem com anexo pelo Blip) e enviar a idade (38704).
-- 137 testes locais (`test/p1-correcoes.test.js`). Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.16`.
-
----
-# Versão 1.6.15 — API da UniBalsas sem depender do processo na sessão
-
-Logs reais da 1.6.14 (documento 46): `matricula_doc_via` mostrou `idps: null`, `processo: null`, `cpf_digitos: 11` — a sessão de "Já sou inscrito" não traz o processo, então a API documentada nunca era tentada. Os controles sem arquivo (campo vazio e sem campos) também deram HTTP 500: o botão 3940449 quebra no `/submit` oficial do Rubeus com qualquer corpo.
-
-- Sem processo na sessão, o servidor procura a inscrição do CPF em cada IDPS conhecido (`223`, `226`, `225`, `224`, lista em `processes.js`) e grava no primeiro em que `/blip/inscritos/{idps}/{cpf}` a encontrar. Erro diferente de "inscrição não encontrada" encerra a busca (o envio pode ter chegado ao RM) e cai no Rubeus.
-- `matricula_doc_via` agora também registra `candidatos`. 128 testes. Versão esperada: `unibalsas-cloudrun-jornada-1.6.15`.
-
----
 # Versão 1.6.14 — Log `matricula_doc_via` (por que a API da UniBalsas não foi usada)
 
 No teste da 1.6.13 (documento 16, JPEG) não apareceu `matricula_doc_api_unibalsas`: o envio foi direto ao Rubeus, então `canApi` deu falso (sem `idps` do processo ou sem CPF de 11 dígitos no estado). O novo evento `matricula_doc_via` registra `canApi`, `apiFirst`, `tem_saveDocument`, `idps`, `processo` e `cpf_digitos` (só o tamanho do CPF) em todo envio de matrícula. 126 testes. Versão esperada: `unibalsas-cloudrun-jornada-1.6.14`.

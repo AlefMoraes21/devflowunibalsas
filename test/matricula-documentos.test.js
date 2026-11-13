@@ -228,26 +228,3 @@ test('ambos falham: mensagem de conferir no portal',async()=>{
  const r=await m.open(SESS_API,STEP);
  await assert.rejects(()=>send(m,r,'15'),/Confira no Portal do candidato/);
 });
-
-test('sessão sem processo (login por CPF): procura a inscrição em cada IDPS e grava no que a encontrar',async()=>{
- const tried=[];
- const docsApi={readDocument:async()=>({base64:'QUJD',type:'pdf',size:3,originalName:'x.pdf'}),listDocuments:async()=>[],
-  saveDocument:async a=>{tried.push(a.idps);if(a.idps!=='225')throw new Error('Ainda não localizamos sua inscrição no sistema acadêmico.');return {primaryKey:'1;225;9;2'}}};
- const submitted=[];
- const m=createMatricula({api:async()=>({}),getForm:async()=>({data:{form:OFFICIAL}}),getDataSource:async()=>({}),render:responseForScreen,
-  submitForm:async(b,f)=>{submitted.push(f);return {success:true}},academicId:()=>null,academicIds:['223','226','225','224'],docs:docsApi});
- const r=await m.open({...SESSION,processo_seletivo_id:''},STEP);
- const out=await send(m,r,'2');
- assert.deepEqual(tried,['223','226','225']);assert.equal(submitted.length,0);
- assert.match(out.data.enviados,/✅ CPF recebido/);
-});
-
-test('sessão sem processo: erro que não é "inscrição não encontrada" encerra a busca (sem tentar outros IDPS)',async()=>{
- const tried=[];
- const m=createMatricula({api:async()=>({}),getForm:async()=>({data:{form:OFFICIAL}}),getDataSource:async()=>({}),render:responseForScreen,
-  submitForm:async()=>{throw new Error('HTTP 500')},academicId:()=>null,academicIds:['223','226'],controlProbe:false,
-  docs:{readDocument:async()=>({base64:'QUJD',type:'pdf',size:3}),listDocuments:async()=>[],saveDocument:async a=>{tried.push(a.idps);throw new Error('Não recebemos a confirmação do envio.')}}});
- const r=await m.open({...SESSION,processo_seletivo_id:''},STEP);
- await assert.rejects(()=>send(m,r,'2'),/Confira no Portal do candidato/);
- assert.deepEqual(tried,['223']);
-});
