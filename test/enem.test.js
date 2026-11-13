@@ -5,6 +5,16 @@ import {enemAverage,enemYears} from '../api/enem.js';
 import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
 import {createJobEngine} from '../api/jobs.js';
 import {workerSignature} from '../api/cloud-store.js';
+// Ação gravada pela fila: segue o job até o resultado (o servidor responde "Só um instante" quando passa de 5,5 s).
+async function settle(engine,request){
+ let out=await engine.route(request);
+ if(out.data?.job_id){
+ await engine.worker(out.data.job_id,workerSignature(out.data.job_id));
+  out=await engine.route({...request,screen:out.screen,data:{acao:"consultar_tarefa",estado:out.data.estado}});
+ }
+ return out;
+}
+
 const notes={nota_natureza_enem:'800,1',nota_humanas_enem:'700.2',nota_matematica_enem:'650,3',nota_linguagens_enem:'750.4',nota_redacao_enem:'900'};
 test('média mantém centésimos, aceita vírgula, zero e mil e rejeita média incompatível',()=>{
  assert.equal(enemAverage(notes),'760.20');
@@ -52,7 +62,7 @@ for(const failRead of [false,true])test(`ENEM até agradecimento / falha de leit
  const req=(screen,acao,estado,user={})=>({screen,action:'data_exchange',flow_token:'unit-flow',data:{acao,estado,...user}});
  try{
   const state=sealState('DADOS_BASICOS',{processo_seletivo_id:'20386',eh_nota_enem:true,token:'unit-basic-token',button_id:'100',campo_nome_id:'1',campo_possui_nome_social_id:'2',campo_nome_social_id:'3',campo_email_id:'4',campo_data_nascimento_id:'5',campo_celular_id:'6',campo_genero_id:'7',campo_consentimento_id:'8',campo_idps_id:'9',campo_lgpd_assinatura_id:'10',campo_lgpd_base_legal_id:'11',campo_genero_rubeus_id:'12'});
-  const course=await e.route(req('DADOS_BASICOS','enviar_dados_basicos',state,{nome:'Pessoa Exemplo',email:'teste@example.invalid',data_nascimento:'2000-01-01',celular:'11900000000',genero:'F',aceite_privacidade:true}));
+  const course=await settle(e,req('DADOS_BASICOS','enviar_dados_basicos',state,{nome:'Pessoa Exemplo',email:'teste@example.invalid',data_nascimento:'2000-01-01',celular:'11900000000',genero:'F',aceite_privacidade:true}));
   assert.equal(course.screen,'CURSO_ENEM');assert.equal(course.data.anos_enem[0].id,'2026');
   const selected=await e.route(req(course.screen,'buscar_turnos',course.data.estado,{curso_id:'unit-course'}));
   const calc=await e.route(req(selected.screen,'calcular_media',selected.data.estado,{curso_id:'unit-course',turno_id:'unit-shift',numero_inscricao_enem:'123456789012',ano_enem:'2026',...notes}));

@@ -4,6 +4,16 @@ import {readFile} from 'node:fs/promises';
 import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
 import {createJobEngine} from '../api/jobs.js';
 import {workerSignature} from '../api/cloud-store.js';
+// Ação gravada pela fila: segue o job até o resultado (o servidor responde "Só um instante" quando passa de 5,5 s).
+async function settle(engine,request){
+ let out=await engine.route(request);
+ if(out.data?.job_id){
+  await engine.worker(out.data.job_id,workerSignature(out.data.job_id));
+  out=await engine.route({...request,screen:out.screen,data:{acao:"consultar_tarefa",estado:out.data.estado}});
+ }
+ return out;
+}
+
 import {processPolicy,isDirectRegistration,requiresEssay} from '../api/processes.js';
 function memory(){const map=new Map();return {async create(id,record){if(map.has(id))return false;map.set(id,{record:structuredClone(record),version:1});return true},async get(id){return structuredClone(map.get(id)??null)},async update(id,record,version){const prev=map.get(id);if(prev.version!==version)return false;map.set(id,{record:structuredClone(record),version:version+1});return true}}}
 test('políticas confirmadas: somente vestibular tem redação; IDs acadêmicos são específicos',()=>{
@@ -42,7 +52,7 @@ for(const processId of ['20384','20385'])for(const fault of ['none','read','403'
  const req=(screen,acao,estado,user={})=>({screen,action:'data_exchange',flow_token:'flow-'+processId,data:{acao,estado,...user}});
  try{
   const state=sealState('DADOS_BASICOS',{processo_seletivo_id:processId,token:'basic-token',button_id:'100',campo_nome_id:'1',campo_possui_nome_social_id:'2',campo_nome_social_id:'3',campo_email_id:'4',campo_data_nascimento_id:'5',campo_celular_id:'6',campo_genero_id:'7',campo_consentimento_id:'8',campo_idps_id:'9',campo_lgpd_assinatura_id:'10',campo_lgpd_base_legal_id:'11',campo_genero_rubeus_id:'12'});
-  const course=await engine.route(req('DADOS_BASICOS','enviar_dados_basicos',state,{nome:'Pessoa Teste',email:'teste@example.invalid',data_nascimento:'2000-01-01',celular:'11900000000',genero:'F',aceite_privacidade:true}));assert.equal(course.screen,'CURSO_INGRESSO');
+  const course=await settle(engine,req('DADOS_BASICOS','enviar_dados_basicos',state,{nome:'Pessoa Teste',email:'teste@example.invalid',data_nascimento:'2000-01-01',celular:'11900000000',genero:'F',aceite_privacidade:true}));assert.equal(course.screen,'CURSO_INGRESSO');
   const selected=await engine.route(req(course.screen,'buscar_turnos',course.data.estado,{curso_id:'unit-course'}));
   const advance=req(selected.screen,'avancar_curso_ingresso',selected.data.estado,{curso_id:'unit-course',turno_id:'unit-shift'});
   const [waiting,duplicate]=await Promise.all([engine.route(advance),engine.route(advance)]);assert.equal(waiting.data.job_id,duplicate.data.job_id);

@@ -110,3 +110,33 @@ test('contrato: orientação de download, GOV.BR e e-mail (sem "aceite no portal
   assert.doesNotMatch(d.mensagem, /aceite/);
   assert.equal(d.link_portal, 'https://vestibular.unibalsas.edu.br/presencial/passo/300669');
 });
+
+// Dados básicos na fila: o segundo toque com estado novo só verifica o job, nunca reenvia.
+test('dados básicos na fila: segundo toque verifica o mesmo job (sem novo envio)', async () => {
+  process.env.FLOW_PRIVATE_KEY = 'unit-p1-jobs';
+  process.env.RBS_TOKEN = 'unit';
+  const { createJobEngine } = await import('../api/jobs.js');
+  const { responseForScreen, openState: open, sealState: seal } = await import('../api/flow.js');
+  const records = new Map();
+  const store = {
+    async create(id, record) { if (records.has(id)) return false; records.set(id, { record: structuredClone(record), version: 1 }); return true; },
+    async get(id) { return structuredClone(records.get(id) ?? null); },
+    async update(id, record, version) { const p = records.get(id); if (p.version !== version) return false; records.set(id, { record: structuredClone(record), version: version + 1 }); return true; }
+  };
+  const enqueued = [];
+  let envios = 0;
+  const { workerSignature } = await import('../api/cloud-store.js');
+  const engine = createJobEngine({ store, enqueue: async id => { enqueued.push(id); }, run: async () => { envios++; return { screen: 'CURSO_INGRESSO', data: {} }; }, render: responseForScreen, openState: open, waitMs: 0 });
+  const estado = seal('DADOS_BASICOS', { processo_seletivo_id: '20383', token: 't', button_id: '1' });
+  const req = { screen: 'DADOS_BASICOS', action: 'data_exchange', flow_token: 'f-jobs', data: { acao: 'enviar_dados_basicos', estado, nome: 'Teste', email: 'a@example.com', data_nascimento: '2000-01-01', celular: '11900000000', genero: 'F', aceite_privacidade: true } };
+  const first = await engine.route(req);
+  assert.match(first.data.job_id, /^[a-f0-9]{64}$/, 'a tela em processamento precisa devolver o job_id');
+  // Estado novo (o IV muda a cada tela), mesmo botão "Avançar".
+  const again = { ...req, data: { ...req.data, estado: first.data.estado } };
+  const second = await engine.route(again);
+  assert.equal(second.data.job_id, first.data.job_id);
+  // O worker confere o estado do job: mesmo sendo chamado duas vezes, o envio ao Rubeus roda uma vez.
+  await engine.worker(first.data.job_id, workerSignature(first.data.job_id));
+  await engine.worker(first.data.job_id, workerSignature(first.data.job_id));
+  assert.equal(envios, 1, 'o envio ao Rubeus não pode rodar duas vezes');
+});
