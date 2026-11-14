@@ -100,10 +100,17 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     console.info(JSON.stringify({event:'proof_resume',applicationId:prepared.binding.applicationId,step,proofId:prepared.binding.proofId,executionCode:prepared.binding.executionCode}));
     return {...prepared,token:data.token};
   }
+  // Conferência leve: só o formulário da prova (rápido). O portal do candidato (~10 s no Rubeus) fica
+  // para quando o resultado dele é usado (confirmação da entrega em followReceipt).
+  async function verifyBinding(data,binding){
+    if(!binding)throw new Error('[PROVA_VINCULO] Esta sessão foi criada antes da verificação de vínculo. Confira a situação no portal.');
+    const snapshot=await readSnapshot(binding.step,data);
+    assertCurrentBinding(snapshot,data,binding);return {snapshot};
+  }
   async function verify(data,binding){
     if(!binding)throw new Error('[PROVA_VINCULO] Esta sessão foi criada antes da verificação de vínculo. Confira a situação no portal.');
     const [snapshot,portal]=await Promise.all([readSnapshot(binding.step,data),readPortal(data)]);
     assertCurrentBinding(snapshot,data,binding);return {snapshot,portal};
   }
-  return {resolve:async data=>(await dispatch(data)).link,prepare,resume,verify};
+  return {resolve:async data=>(await dispatch(data)).link,prepare,resume,verify,verifyBinding};
 }

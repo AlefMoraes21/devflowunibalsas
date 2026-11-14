@@ -483,7 +483,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // -----------------------------------------------------------------------------
 
 function assessmentClient(){return createAssessment({maxRequestMs:flowContext.getStore()?.worker?30000:4500,observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
-const proofRouter=createProofRouter({bindingDelayMs:Number(process.env.PROOF_BINDING_DELAY_MS)||2000,api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
+const proofRouter=createProofRouter({bindingTries:Number(process.env.PROOF_BINDING_TRIES)||10,bindingDelayMs:Number(process.env.PROOF_BINDING_DELAY_MS)||3000,api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
 async function linkDaInscricao(data){return proofRouter.prepare(data)}
 // Pré-carrega a redação logo após a inscrição (no worker): aciona o "Iniciar prova", espera o código da
 // execução e monta o link. NÃO abre a avaliação (create/), que é o que inicia o cronômetro de 2 h.
@@ -1402,12 +1402,12 @@ async function routeFlowRequest(requestData) {
         if(isDirectRegistration(data.processo_seletivo_id))throw new Error("Este processo não utiliza a redação deste Flow. Confira a conclusão da inscrição no portal; não é necessário realizar uma prova por aqui.");
         if(data.proof_resume_required)throw new Error("Confira a prova existente antes de continuar.");
         const prepared=data.prepared_existing??await linkDaInscricao(data);
-        if(data.prepared_existing)await proofRouter.verify(data,prepared.binding);
+        if(data.prepared_existing)await proofRouter.verifyBinding(data,prepared.binding);
         data.token=prepared.token??data.token;
         const sessao=await assessmentClient().init(prepared.link);
         if(String(sessao.exam.IDEXECPROVA).toUpperCase()!==prepared.binding.executionCode.toUpperCase())throw new Error("[PROVA_VINCULO] A avaliação abriu uma execução diferente da execução atual da inscrição.");
         sessao.binding=prepared.binding;
-        await proofRouter.verify(data,sessao.binding);
+        await proofRouter.verifyBinding(data,sessao.binding);
         const tema=promptText(sessao.exam.questoes[0].enunciado);
         return responseForScreen("TELA_REDACAO",{...data,sessao_avaliacao:sessao,tema_redacao:tema,erro:"",tem_erro:false});
       }catch(e){
@@ -1425,7 +1425,7 @@ async function routeFlowRequest(requestData) {
         const texto=String(data.texto_redacao??"").trim();
         if(texto.length<50)throw new Error("Por favor, desenvolva mais a sua redação antes de enviar.");
         if(!data.sessao_avaliacao?.exam)throw new Error("Sessão de prova não encontrada.");
-        await proofRouter.verify(data,data.sessao_avaliacao.binding);
+        await proofRouter.verifyBinding(data,data.sessao_avaliacao.binding);
         await claimDelivery(data.sessao_avaliacao);
         receipt=await assessmentClient().send(data.sessao_avaliacao,texto);
         flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt};

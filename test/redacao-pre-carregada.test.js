@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Releitura rápida nos testes (produção: 2 s).
+// Releitura rápida nos testes (produção: 3 s, até 10 vezes).
 process.env.PROOF_BINDING_DELAY_MS = '1';
 process.env.FLOW_PRIVATE_KEY = 'unit-pre-carga';
 process.env.FLOW_PROJECT_ID = 'unit';
