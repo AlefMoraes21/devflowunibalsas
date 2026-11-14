@@ -1455,7 +1455,9 @@ async function followReceipt(data,receipt){
   const checked=await proofRouter.verify(data,data.sessao_avaliacao?.binding);
   flowContext.getStore().audit={binding:data.sessao_avaliacao.binding,receipt:flowContext.getStore().write?.receipt??data.recibo_avaliacao,portal:checked.portal};
   console.info(JSON.stringify({event:"proof_portal_check",applicationId:String(data.applyment_id),confirmed:portalConfirmsDelivery(checked.portal)}));
-  if(portalConfirmsDelivery(checked.portal))return await acompanhamento(data,{titulo:"Redação enviada",mensagem:`A entrega foi confirmada para a inscrição ${data.applyment_id}. Situação no portal: ${promptText(checked.portal.stages[0]?.feedback??"")}.\nO resultado sai após a correção.${PROXIMOS_PASSOS}`,inscricao_id:String(data.applyment_id)});
+  // Fim da etapa 1 (inscrição + redação): a próxima depende da correção humana, então o Flow fecha aqui.
+  // A etapa seguinte começa por aviso no WhatsApp quando a equipe liberar (sem login nem data de nascimento).
+  if(portalConfirmsDelivery(checked.portal))return responseForScreen("CONFIRMACAO",{titulo:"Redação enviada ✅",mensagem:`Recebemos sua redação! Situação: ${promptText(checked.portal.stages[0]?.feedback??"")}.\n\nAgora nossa equipe vai corrigir. Assim que a correção sair, você recebe uma mensagem aqui no WhatsApp para seguir para a próxima etapa.\n\nProtocolo da inscrição: ${data.applyment_id}.`,inscricao_id:String(data.applyment_id)});
   return receiptScreen(data,receipt);
  }catch(e){return receiptScreen(data,receipt,e.message)}
 }

@@ -39,6 +39,6 @@ for(const resume of [false,true])test(`preparação ${resume?'retomada sem submi
   const delivered=await run('TELA_REDACAO','enviar_redacao',editor.data.estado,{texto_redacao:'Um texto de teste com desenvolvimento suficiente para verificar a entrega da redação.'});
   assert.equal(delivered.screen,'TELA_REDACAO');assert.equal(delivered.data.acao_rodape,'verificar_entrega');assert.equal(delivered.data.titulo_processamento,'Redação recebida');
   portalText='Aguardando correção';
-  const final=await run('TELA_REDACAO','verificar_entrega',delivered.data.estado);assert.equal(final.screen,'CONFIRMACAO');assert.match(final.data.mensagem,/Aguardando correção/);assert.equal(submissions,resume?0:1);assert.equal(saves,1);assert.equal(locks,1);
+  const final=await run('TELA_REDACAO','verificar_entrega',delivered.data.estado);assert.equal(final.screen,'CONFIRMACAO');assert.match(final.data.mensagem,/Aguardando correção/);assert.doesNotMatch(final.data.mensagem,/Já sou inscrito|data de nascimento/,'fim da etapa 1: sem pedido de login');assert.equal(submissions,resume?0:1);assert.equal(saves,1);assert.equal(locks,1);
  }finally{globalThis.fetch=original}
 });
