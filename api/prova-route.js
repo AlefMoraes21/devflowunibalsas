@@ -66,11 +66,12 @@ export function createProofRouter({api,getForm,submitForm,readStatus=readSiteSta
     if(!link)console.warn(JSON.stringify({event:'proof_link_missing',step}));
     return {link,step,button,token:result.token??result.data?.token??form.token??form.data?.token??data.token};
   }
-  async function prepare(data){
+  async function prepare(data,{onDispatched}={}){
     if(!data.token||!data.applyment_id)throw new Error('[PROVA_SESSAO] Inscrição não confirmada. Consulte o portal.');
     await discover(data.processo_seletivo_id);
     await readPortal(data);
     const sent=await dispatch(data);
+    onDispatched?.();
     // O Rubeus aceita o "Iniciar prova" e gera o código da execução (IDEXECPROVA) alguns segundos depois.
     // Relê só o formulário (sem novo envio) até o código aparecer, dentro do prazo do job.
     let snapshot,prepared;

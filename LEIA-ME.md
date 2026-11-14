@@ -1,3 +1,15 @@
+# Versão 1.6.17 — Redação pré-carregada ao concluir a inscrição (Vestibular)
+
+O Rubeus gera o código da execução da prova (IDEXECPROVA) alguns segundos depois do "Iniciar prova", e o "Iniciar redação" esperava ou voltava para a orientação. Agora, no mesmo job que conclui a inscrição:
+
+- **Pré-carga:** aciona o "Iniciar prova", espera o código da execução (relendo o formulário, sem novo envio) e monta o link da avaliação. **Não** abre a avaliação (`create/`), que é o que inicia o cronômetro de 2 h.
+- **Iniciar redação** usa a prova pronta: só confere o vínculo e abre o tema, sem acionar o botão de novo.
+- **Falhas não derrubam a inscrição:** antes do "Iniciar prova", o toque segue o caminho normal; depois, o próximo toque só confere a prova existente (`conferir_prova_existente`).
+- Também desde a 1.6.16: espera do IDEXECPROVA (até 6 releituras de 2 s), tela de curso sem turno/oferta do curso anterior, listas sem opções repetidas, logs `flow_client_error` e `turnos_carregados`.
+- Logs: `redacao_pre_carregada` (ms) e `redacao_pre_carga_falhou` (`enviado`, mensagem). Desligar: `PRECARREGAR_REDACAO=off`.
+- Somente servidor; o `flow-waba.json` não muda. 148 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.6.17`.
+
+---
 # Versão 1.6.16 — CEP no endereço, CPF da sessão protegido e orientação do contrato
 
 Correções P1 do mapeamento de 10–12/11/2026 (`MAPA-JORNADA-2027.md`). **Somente servidor; o `flow-waba.json` não muda** (a tela já enviava `cep`).

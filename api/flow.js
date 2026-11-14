@@ -483,8 +483,25 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
 // -----------------------------------------------------------------------------
 
 function assessmentClient(){return createAssessment({maxRequestMs:flowContext.getStore()?.worker?30000:4500,observe:event=>console.info(JSON.stringify({event:"flow_assessment",...event})),remaining:()=>flowContext.getStore().deadline-Date.now(),markWrite:w=>{flowContext.getStore().write=w}})}
-const proofRouter=createProofRouter({api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
+const proofRouter=createProofRouter({bindingDelayMs:Number(process.env.PROOF_BINDING_DELAY_MS)||2000,api:rubeusRequest,getForm,submitForm,remaining:()=>{const context=flowContext.getStore();return context?context.deadline-Date.now():120000}});
 async function linkDaInscricao(data){return proofRouter.prepare(data)}
+// Pré-carrega a redação logo após a inscrição (no worker): aciona o "Iniciar prova", espera o código da
+// execução e monta o link. NÃO abre a avaliação (create/), que é o que inicia o cronômetro de 2 h.
+// Falha aqui nunca derruba a inscrição: antes do envio, o toque segue o caminho normal; depois do envio,
+// o próximo toque só confere a prova existente (sem acionar o botão de novo).
+async function preCarregarRedacao(data){
+  const ctx=flowContext.getStore();
+  if(!ctx?.worker||process.env.PRECARREGAR_REDACAO==="off")return {};
+  let enviado=false;const inicio=Date.now();
+  try{
+    const prepared=await proofRouter.prepare(data,{onDispatched:()=>{enviado=true}});
+    console.info(JSON.stringify({event:"redacao_pre_carregada",applicationId:toStringValue(data.applyment_id),ms:Date.now()-inicio}));
+    return {prepared_existing:prepared,prova_pre_carregada:true,token:prepared.token??data.token};
+  }catch(e){
+    console.warn(JSON.stringify({event:"redacao_pre_carga_falhou",applicationId:toStringValue(data.applyment_id),enviado,ms:Date.now()-inicio,message:String(e?.message??e).slice(0,160)}));
+    return enviado?{proof_resume_required:true}:{};
+  }
+}
 const academicId=id=>{try{return processPolicy(id).academicId}catch{return null}};
 // Sondagem (só leitura) da API interna do portal: confirma se o token do Flow vale lá. Loga só nomes de campos e contagens.
 const PORTAL_API_URL="https://processoseletivo.azurewebsites.net/api";
@@ -852,7 +869,7 @@ function responseForScreen(screen, data) {
   if(screen==="TELA_ORIENTACAO_PROVA"&&data.proof_resume_required&&!(next.processando&&next.job_id)){
     next.acao_rodape="conferir_prova_existente";next.rotulo_rodape="Conferir prova existente";
   }
-  if(screen==="TELA_ORIENTACAO_PROVA"&&data.prepared_existing&&!(next.processando&&next.job_id))next.rotulo_rodape="Continuar para redação";
+  if(screen==="TELA_ORIENTACAO_PROVA"&&data.prepared_existing&&!data.prova_pre_carregada&&!(next.processando&&next.job_id))next.rotulo_rodape="Continuar para redação";
   if(screen==="CURSO_ENEM"&&data.continuacao_enem&&!(next.processando&&next.job_id)){
     next.editavel=false;next.acao_rodape="retomar_etapa_enem";next.rotulo_rodape="Retomar inscrição";
     next.mensagem_processamento="Suas notas foram recebidas. Vamos consultar a próxima etapa sem enviá-las novamente.";
@@ -1339,13 +1356,14 @@ async function routeFlowRequest(requestData) {
         if(!redirect.applyment_id)throw new Error("A inscrição ainda não foi confirmada pelo Rubeus.");
         // Somente o vestibular validado avança para a redação.
         if (requiresEssay(data.processo_seletivo_id)) {
+          const inscrito = { ...data, applyment_id: String(redirect.applyment_id), token: submitResult.data?.token??data.token };
+          const preCarga = await preCarregarRedacao(inscrito);
           return responseForScreen("TELA_ORIENTACAO_PROVA", {
-            ...data,
+            ...inscrito,
+            ...preCarga,
             // O tema é sorteado pelo módulo de avaliação e só é lido em iniciar_redacao.
             tema_redacao: "",
             texto_motivador: "",
-            applyment_id: String(redirect.applyment_id),
-            token: submitResult.data?.token??data.token,
             erro: "",
             tem_erro: false
           });
@@ -1395,6 +1413,8 @@ async function routeFlowRequest(requestData) {
       }catch(e){
         console.warn(JSON.stringify({event:"flow_error",action:"iniciar_redacao",message:e.message,write:flowContext.getStore()?.write?.status??null}));
         const uncertain=pendingAfterWrite(data);if(uncertain)return uncertain;
+        // Prova pré-carregada que não confere mais: descarta e passa a conferir a prova existente (sem novo envio).
+        if(data.prova_pre_carregada)return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,prepared_existing:null,prova_pre_carregada:false,proof_resume_required:true,erro:e.message,tem_erro:true});
         return responseForScreen("TELA_ORIENTACAO_PROVA",{...data,erro:e.message,tem_erro:true});
       }
     }
@@ -1489,7 +1509,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.16" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.17" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
