@@ -1529,7 +1529,7 @@ export async function workerHandler(req,res){
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.8.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
