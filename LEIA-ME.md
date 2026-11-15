@@ -1,3 +1,11 @@
+# Versão 2.0.0 — Etapas independentes: o Cloud Run confirma na hora e o Rubeus é processado em segundo plano
+
+- **Etapa 1 (Flow `flows/etapa1-vestibular.json`, telas `INSC_*`):** processo → dados básicos → curso e turno → informações complementares (+ notas do ENEM). Cada tela grava no Firestore (`inscricoesFila`) e agenda o worker. Ao tocar **Concluir**, o `/api/flow` valida, grava, agenda e **fecha o Flow na hora** (`SUCCESS`, `response_json`: `status: "dados_recebidos"`, `protocolo_fila`). Sem telas de "Verificar andamento".
+- **Worker (`/internal/flow-worker`):** grava no Rubeus passo a passo (todos os processos). Vestibular: deixa a prova vinculada (pré-carga do "Iniciar prova", sem `create/`, que inicia o cronômetro de 2 h) e manda o aviso da etapa 2 pelo Blip, com um link (`flow_token`) novo. Transferência, Portador e ENEM terminam na inscrição confirmada.
+- **Etapa 2 (redação):** o `INIT` do `/api/flow` com o `flow_token` do aviso abre direto `INSC_REDACAO`, com o tema. **Enviar redação** grava, agenda e fecha o Flow na hora (`status: "redacao_recebida"`); o worker abre a prova, envia e confirma no portal.
+- **Variáveis no Cloud Run:** `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_TEMPLATE_REDACAO` (obrigatórias para o aviso); `BLIP_FLOW_ID`, `BLIP_STATE_ID`, `BLIP_MASTERSTATE` (opcionais). Sem elas o aviso não sai e o log mostra `blip_aviso` `nao_configurado`.
+- **Meta:** republicar `flows/etapa1-vestibular.json` (a tela de orientação saiu; as notas do ENEM entraram). O `flow-waba.json` (Flow antigo) não muda. 163 testes. Versão esperada: `unibalsas-cloudrun-jornada-2.0.0`.
+
 # Versão 1.9.0 — Flow da inscrição grava no Google e o Cloud Run grava no Rubeus em segundo plano
 
 - Cada tela do Flow `INSC_*` grava as respostas no Firestore (`inscricoesFila`) e responde na hora. O worker do Cloud Run vai gravando no Rubeus passo a passo (dados básicos → curso/turno → conclusão → prova → redação), só até onde o candidato já preencheu, enquanto ele segue nas próximas telas.

@@ -9,6 +9,7 @@ import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.j
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
 import { listDocuments, saveDocument, readDocument, findInscription } from "./documentos.js";
 import { createEtapa1 } from "./etapa1-fila.js";
+import { avisarRedacaoLiberada } from "./blip.js";
 import { createStore, enqueueJob, validWorkerSignature } from "./cloud-store.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1514,7 +1515,12 @@ const jobEngine=createJobEngine({
 const etapa1=createEtapa1({
   store:createStore(),enqueue:enqueueJob,sealState,openState,render:responseForScreen,
   runStep:request=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request,write:null,worker:true},()=>routeFlowRequest(request)),
+  // Abertura da prova pelo INIT da etapa 2 (só quando o tema ainda não está guardado), no prazo da Meta.
+  runLive:request=>flowContext.run({request_id:crypto.randomUUID(),deadline:Math.min(Date.now()+8500,flowContext.getStore()?.deadline??Infinity),request,write:null,worker:false},()=>routeFlowRequest(request)),
   validateBasic,validateFinal,origens:ORIGENS_PADRAO,hoje:currentIsoDate,requiresEssay,academicId,userFields:USER_FIELDS,
+  ehEnem:isNotaEnemProcess,anosEnem:ANOS_ENEM,
+  validateEnem:d=>{normalizeEnemRegistration(d.numero_inscricao_enem);if(!ANOS_ENEM.some(y=>y.id===String(d.ano_enem)))throw new Error("Selecione o ano do ENEM.");enemAverage(d,{checkTyped:false})},
+  avisar:dados=>avisarRedacaoLiberada(dados),
   jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
 });
 export async function workerHandler(req,res){
@@ -1530,7 +1536,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.9.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.0.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

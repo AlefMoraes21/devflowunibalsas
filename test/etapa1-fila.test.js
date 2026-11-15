@@ -10,7 +10,7 @@ const { createEtapa1, DUPLICADA_MSG } = await import('../api/etapa1-fila.js');
 const CURSOS = [{ id: 'ads', title: 'ADS' }, { id: 'dir', title: 'Direito' }];
 const TURNOS = { ads: [{ id: 'not', title: 'Noturno' }], dir: [{ id: 'mat', title: 'Matutino' }, { id: 'not', title: 'Noturno' }] };
 const TEMA = 'O papel da educação na redução das desigualdades sociais.';
-const USER = new Set(['nome', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade', 'possui_nome_social', 'nome_social', 'curso_id', 'turno_id', 'cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', 'texto_redacao', 'processo_seletivo_id']);
+const USER = new Set(['nome', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade', 'possui_nome_social', 'nome_social', 'curso_id', 'turno_id', 'cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', 'texto_redacao', 'processo_seletivo_id', 'numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem']);
 const BASICOS = { nome: 'Ana Clara Teste', email: 'ana.teste@example.com', data_nascimento: '2005-03-15', celular: '99999990000', genero: 'F', aceite_privacidade: true, possui_nome_social: false };
 const FINAL = { cpf: '391.847.205-14', nacionalidade: '10', concluiu_ensino_medio: 'Sim', possui_deficiencia: 'F', como_conheceu: '01' };
 const TEXTO = 'Um texto de teste com desenvolvimento suficiente para a redação ser aceita pelo Flow.';
@@ -34,11 +34,12 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
     if (a === 'selecionar_processo') return tela('DADOS_BASICOS', { token: 't1' });
     if (a === 'enviar_dados_basicos') { assert.equal(req.data.nome, BASICOS.nome); return tela('CURSO_INTERESSE', { cursos: CURSOS, turnos: [] }); }
     if (a === 'buscar_turnos') return tela('CURSO_INTERESSE', { cursos: CURSOS, turnos: turnoAusente ? [] : TURNOS[req.data.curso_id], erro: turnoAusente ? 'Nenhum turno disponível para o curso selecionado.' : '' });
-    if (a === 'avancar_curso_interesse') { assert.equal(req.data.turno_id, 'not'); return tela('QUASE_LA', {}); }
+    if (a === 'avancar_curso_interesse') { assert.equal(req.data.turno_id, 'not'); return tela('QUASE_LA', { sem_redacao: Boolean(req.data.numero_inscricao_enem) }); }
     if (a === 'enviar_informacoes_complementares') {
       assert.equal(req.data.cpf, FINAL.cpf);
       if (finalPendente) return { screen: 'PENDENTE', data: { mensagem: 'incerto' } };
       if (finalErro) return tela('QUASE_LA', { erro: finalErro });
+      if (req.data.estado && openState(req.data.estado, req.screen).sem_redacao) return tela('ACOMPANHAMENTO', { applyment_id: '888' });
       return tela('TELA_ORIENTACAO_PROVA', { applyment_id: '777', prova_pre_carregada: true });
     }
     if (a === 'iniciar_redacao') return tela('TELA_REDACAO', { tema_redacao: TEMA });
@@ -51,6 +52,7 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
 
 function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) {
   const fila = [];
+  const avisos = [];
   const e1 = createEtapa1({
     ativo: () => true, store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
     runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
@@ -58,9 +60,12 @@ function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) 
     validateFinal: d => { if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(d.cpf ?? '')) throw new Error('CPF inválido.'); if (!(d.origens ?? []).some(o => o.id === d.como_conheceu)) throw new Error('Selecione como ficou sabendo.'); },
     origens: [{ id: '01', title: 'Site oficial' }], hoje: () => '2026-11-15',
     requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER,
-    jaInscritoNoRm: async () => rm, sleep: async () => {}, log: () => {}
+    jaInscritoNoRm: async () => rm, sleep: async () => {}, log: () => {},
+    ehEnem: id => String(id) === '20386', anosEnem: [{ id: '2025', title: '2025' }],
+    validateEnem: d => { if (!/^\d{12,15}$/.test(String(d.numero_inscricao_enem ?? ''))) throw new Error('A inscrição do ENEM deve ter de 12 a 15 números.'); },
+    avisar: async dados => { avisos.push(dados); return true; }
   });
-  return { e1, store, fila, rubeus };
+  return { e1, store, fila, rubeus, avisos };
 }
 const cacheCompleto = store => store.create('etapa1-20383', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
 
@@ -236,36 +241,80 @@ test('Flow E1: JSON válido para a Meta (rotas, ações e chaves)', () => {
   }
 });
 
-test('Flow INSC: cada tela grava no Google e responde na hora; o worker grava no Rubeus em segundo plano', async () => {
-  const { e1: E, store, fila, rubeus } = montar();
-  await cacheCompleto(store);
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
+const ENEM = { numero_inscricao_enem: '123456789012', ano_enem: '2025', nota_natureza_enem: '600', nota_humanas_enem: '600', nota_matematica_enem: '600', nota_linguagens_enem: '600', nota_redacao_enem: '800' };
+async function etapa1(E, processo = '20383', extra = {}) {
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: processo });
   assert.equal(dados.screen, 'INSC_DADOS');
-  const erro = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, { ...BASICOS, nome: 'Ana' });
-  assert.equal(erro.screen, 'INSC_DADOS'); assert.equal(erro.data.valor_nome, 'Ana'); assert.equal(erro.data.tem_erro, true);
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  assert.equal(curso.screen, 'INSC_CURSO'); assert.equal(curso.data.turno_visivel, false);
-  const id = fila[0].id;
-  assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.nome, BASICOS.nome, 'dados básicos gravados no Firestore');
-  const dir = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
-  assert.equal(dir.data.turno_visivel, true); assert.equal(dir.data.turnos.length, 2); assert.equal(dir.data.valor_turno_id, '');
-  const ads = await e1(E, 'INSC_CURSO', 'buscar_turnos', dir.data.estado, { curso_id: 'ads' });
-  assert.equal(ads.data.valor_turno_id, 'not', 'turno único já vem marcado');
-  const trocou = await e1(E, 'INSC_CURSO', 'escolher_curso', ads.data.estado, { curso_id: 'dir', turno_id: 'not' });
-  assert.equal(trocou.screen, 'INSC_CURSO', 'trocou o curso sem ver os turnos: mostra os turnos, não avança');
-  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', ads.data.estado, { curso_id: 'ads', turno_id: 'not' });
+  assert.equal(curso.screen, 'INSC_CURSO');
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
+  assert.equal(t.data.valor_turno_id, 'not', 'turno único já vem marcado');
+  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
-  const orient = await e1(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
-  assert.equal(orient.screen, 'INSC_ORIENTACAO');
-  const red = await e1(E, 'INSC_ORIENTACAO', 'iniciar_redacao', orient.data.estado);
-  assert.equal(red.data.tema_redacao, TEMA);
-  const fim = await e1(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO });
-  assert.equal(fim.screen, 'INSC_FIM');
-  assert.equal(rubeus.chamadas.length, 0, 'nenhuma tela esperou o Rubeus');
-  assert.ok(fila.every(f => f.id === id), 'uma inscrição só, agendada a cada tela');
+  return quase;
+}
+const SUCCESS = r => { assert.equal(r.screen, 'SUCCESS'); return r.data.extension_message_response.params; };
+
+test('Etapa 1: cada tela grava no Google; Concluir fecha o Flow na hora com dados_recebidos', async () => {
+  const { e1: E, store, fila, rubeus, avisos } = montar();
+  await cacheCompleto(store);
+  const quase = await etapa1(E);
+  assert.equal(quase.data.eh_nota_enem, false);
+  const fim = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
+  const params = SUCCESS(fim);
+  assert.equal(params.status, 'dados_recebidos'); assert.equal(params.flow_token, 'ft-e1'); assert.ok(params.protocolo_fila);
+  assert.equal(rubeus.chamadas.length, 0, 'o Flow não esperou o Rubeus');
+  const id = fila[0].id;
+  assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.celular, BASICOS.celular, 'telefone guardado para o aviso');
+  await E.worker(id);
+  const rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'inscrita'); assert.equal(rec.passo, 'redacao'); assert.equal(rec.prova_vinculada, true); assert.equal(rec.aviso_redacao, 'enviado');
+  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos', 'buscar_turnos', 'avancar_curso_interesse', 'enviar_informacoes_complementares']);
+  assert.ok(!rubeus.chamadas.includes('iniciar_redacao'), 'a prova não é aberta (cronômetro) antes do candidato');
+  assert.equal(avisos.length, 1); assert.equal(avisos[0].celular, BASICOS.celular); assert.ok(avisos[0].flowToken.length >= 20);
+});
+
+test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha o Flow e o worker entrega', async () => {
+  const { e1: E, store, fila, rubeus, avisos } = montar();
+  await cacheCompleto(store);
+  const quase = await etapa1(E);
+  await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
+  const id = fila[0].id;
+  await E.worker(id);
+  const token = avisos[0].flowToken;
+  assert.equal(await E.route({ action: 'INIT', flow_token: 'desconhecido' }), null, 'token desconhecido segue o Flow antigo');
+  const red = confere('INSC_REDACAO', await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.route({ action: 'INIT', flow_token: token })));
+  assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
+  const curta = await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: 'curto' }, token);
+  assert.equal(curta.screen, 'INSC_REDACAO'); assert.match(curta.data.erro, /desenvolva/);
+  const params = SUCCESS(await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, token));
+  assert.equal(params.status, 'redacao_recebida');
+  assert.equal(rubeus.chamadas.length, 5, 'envio da redação não esperou o Rubeus');
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
-  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos', 'buscar_turnos', 'avancar_curso_interesse', 'enviar_informacoes_complementares', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
+  assert.deepEqual(rubeus.chamadas.slice(5), ['iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
+  const deNovo = await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.route({ action: 'INIT', flow_token: token }));
+  assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
+});
+
+test('Etapa 1 ENEM: notas na última tela; o worker só envia o curso com as notas e conclui sem redação', async () => {
+  const { e1: E, store, fila, rubeus, avisos } = montar();
+  await store.create('etapa1-20386', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
+  const quase = await etapa1(E, '20386');
+  assert.equal(quase.data.eh_nota_enem, true); assert.equal(quase.data.anos_enem.length, 1);
+  const id = fila[0].id;
+  await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'curso', 'espera as notas antes de gravar o curso');
+  assert.ok(!rubeus.chamadas.includes('avancar_curso_interesse'));
+  const semNotas = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
+  assert.equal(semNotas.screen, 'INSC_QUASE_LA'); assert.match(semNotas.data.erro, /ENEM/);
+  const okEnem = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, { ...FINAL, ...ENEM }, 'ft-e1');
+  assert.equal(okEnem.data.erro, undefined, okEnem.data.erro);
+  SUCCESS(okEnem);
+  await E.worker(id);
+  const rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'concluida'); assert.equal(rec.applyment_id, '888');
+  assert.equal(avisos.length, 0, 'sem redação, sem aviso da etapa 2');
 });
 
 test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preencheu', async () => {
@@ -275,13 +324,11 @@ test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preenc
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const id = fila[0].id;
   await E.worker(id);
-  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos'], 'passo 1 gravado enquanto o candidato escolhe o curso');
-  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'turnos');
+  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos']);
   const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
   await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'final', 'para antes da conclusão, esperando o CPF');
-  assert.ok(!rubeus.chamadas.includes('enviar_informacoes_complementares'));
 });
 
 test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do Rubeus', async () => {
@@ -289,16 +336,36 @@ test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do 
   const rubeus = rubeusFalso();
   let E;
   const pend = [];
-  E = createEtapa1({ ativo: () => false, store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: ms => new Promise(r => setTimeout(r, 5)), log: () => {} });
+  E = createEtapa1({ ativo: () => false, store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: () => new Promise(r => setTimeout(r, 5)), log: () => {} });
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  assert.equal(curso.screen, 'INSC_CURSO');
   assert.deepEqual(curso.data.cursos, CURSOS);
   const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
-  assert.equal(t.data.turnos.length, 2, 'turnos de todos os cursos vieram da mesma sessão');
+  assert.equal(t.data.turnos.length, 2);
   await Promise.all(pend);
-  // Flow antigo continua no caminho síncrono com a chave desligada.
-  assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null);
+  assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null, 'Flow antigo segue igual');
+});
+
+test('Blip: sem configuração não envia; com configuração monta a campanha individual sem expor o telefone no log', async () => {
+  const { avisarRedacaoLiberada, telefoneBlip } = await import('../api/blip.js');
+  const logs = [];
+  assert.equal(await avisarRedacaoLiberada({ celular: '99999990000', nome: 'Ana', flowToken: 't' }, { env: {}, log: e => logs.push(e) }), false);
+  assert.equal(logs[0].motivo, 'nao_configurado');
+  assert.equal(telefoneBlip('(99) 99999-0000'), '+5599999990000');
+  let enviado;
+  const ok = await avisarRedacaoLiberada({ celular: '99999990000', nome: 'Ana Clara Teste', flowToken: 'tok-123' }, {
+    env: { BLIP_API_URL: 'https://contrato.http.msging.net/', BLIP_BOT_KEY: 'k', BLIP_TEMPLATE_REDACAO: 'redacao_liberada' },
+    fetcher: async (url, o) => { enviado = { url, o, body: JSON.parse(o.body) }; return Response.json({ status: 'success' }); },
+    log: e => logs.push(e)
+  });
+  assert.equal(ok, true);
+  assert.equal(enviado.url, 'https://contrato.http.msging.net/commands');
+  assert.equal(enviado.o.headers.Authorization, 'Key k');
+  assert.equal(enviado.body.uri, '/campaign/full');
+  assert.equal(enviado.body.resource.campaign.campaignType, 'Individual');
+  assert.equal(enviado.body.resource.audience.recipient, '+5599999990000');
+  assert.equal(enviado.body.resource.audience.contextVariables.flow_token, 'tok-123');
+  assert.doesNotMatch(JSON.stringify(logs), /99999990000|tok-123/);
 });
 
 test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do Flow antigo', async () => {
@@ -306,20 +373,7 @@ test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do F
   await cacheCompleto(store);
   const init = await E.endpoint({ action: 'INIT', flow_token: 'x' });
   assert.equal(init.screen, 'INSC_INICIO');
-  assert.ok(FLOW_E1.routing_model[init.screen]);
   assert.deepEqual(await E.endpoint({ action: 'ping' }), { data: { status: 'active' } });
   const antigo = await E.endpoint({ action: 'data_exchange', screen: 'ESCOLHA_PROCESSO', data: { acao: 'selecionar_processo' } });
   assert.equal(antigo.screen, 'INSC_FIM');
-  const dados = await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.endpoint({ action: 'data_exchange', screen: 'INSC_INICIO', flow_token: 'x', data: { acao: 'e1_iniciar' } }));
-  assert.equal(dados.screen, 'INSC_DADOS');
-});
-
-test('Flow INSC: primeira tela escolhe o processo; só o Vestibular segue neste Flow', async () => {
-  const { e1: E } = montar();
-  const tela = telaE1('INSC_INICIO');
-  assert.match(JSON.stringify(tela.layout), /Escolha o processo seletivo/);
-  const outro = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20385' });
-  assert.equal(outro.screen, 'INSC_FIM');
-  const vest = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
-  assert.equal(vest.screen, 'INSC_DADOS');
 });

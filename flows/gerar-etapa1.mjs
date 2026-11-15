@@ -11,7 +11,8 @@ const form = names => Object.fromEntries(names.map(n => [n, '${form.' + n + '}']
 const init = names => Object.fromEntries(names.map(n => [n, '${data.valor_' + n + '}']));
 
 const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade'];
-const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
+const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
+const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM];
 
 const flow = {
   version: '7.3',
@@ -20,8 +21,7 @@ const flow = {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM'],
     INSC_DADOS: ['INSC_CURSO', 'INSC_FIM'],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_QUASE_LA: ['INSC_ORIENTACAO', 'INSC_FIM'],
-    INSC_ORIENTACAO: ['INSC_REDACAO', 'INSC_FIM'],
+    INSC_QUASE_LA: ['INSC_FIM'],
     INSC_REDACAO: ['INSC_FIM'],
     INSC_FIM: []
   },
@@ -104,7 +104,9 @@ const flow = {
         estado: str(), erro: str(), tem_erro: bool(), origens: opcoes(),
         valor_cpf: str(), valor_nacionalidade: str('10'), valor_concluiu_ensino_medio: str(), valor_possui_deficiencia: str(),
         valor_tipos_deficiencia: { type: 'array', items: { type: 'string' }, __example__: [] }, valor_deficiencia_outra: str(),
-        valor_como_conheceu: str(), valor_como_conheceu_outro: str()
+        valor_como_conheceu: str(), valor_como_conheceu_outro: str(),
+        eh_nota_enem: bool(), anos_enem: opcoes(),
+        ...Object.fromEntries(ENEM.map(k => ['valor_' + k, str()]))
       },
       layout: {
         type: 'SingleColumnLayout',
@@ -125,25 +127,20 @@ const flow = {
             ], else: [] },
             { type: 'Dropdown', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
+            { type: 'If', condition: '${data.eh_nota_enem} == true', then: [
+              { type: 'TextSubheading', text: 'Notas do ENEM' },
+              { type: 'TextBody', text: 'Informe os dados oficiais do seu exame (notas entre 0 e 1000):' },
+              { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Nº de inscrição do ENEM', 'helper-text': '12 a 15 números', 'input-type': 'text', required: true },
+              { type: 'Dropdown', name: 'ano_enem', label: 'Ano do exame', 'data-source': '${data.anos_enem}', required: true },
+              { type: 'TextInput', name: 'nota_natureza_enem', label: 'Ciências da Natureza', 'input-type': 'text', required: true },
+              { type: 'TextInput', name: 'nota_humanas_enem', label: 'Ciências Humanas', 'input-type': 'text', required: true },
+              { type: 'TextInput', name: 'nota_matematica_enem', label: 'Matemática', 'input-type': 'text', required: true },
+              { type: 'TextInput', name: 'nota_linguagens_enem', label: 'Linguagens e Códigos', 'input-type': 'text', required: true },
+              { type: 'TextInput', name: 'nota_redacao_enem', label: 'Redação', 'input-type': 'text', required: true }
+            ], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]
         }]
-      }
-    },
-    {
-      id: 'INSC_ORIENTACAO',
-      title: 'Prova online',
-      data: { estado: str(), erro: str(), tem_erro: bool() },
-      layout: {
-        type: 'SingleColumnLayout',
-        children: [
-          { type: 'TextHeading', text: 'Prova de Redação' },
-          { type: 'TextSubheading', text: 'Redação online' },
-          erroTexto,
-          { type: 'TextBody', text: 'Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo sobre o tema apresentado na próxima tela.' },
-          { type: 'TextCaption', text: 'Sua redação só é enviada quando você tocar em Enviar redação.' },
-          { type: 'Footer', label: 'Iniciar prova', 'on-click-action': troca('iniciar_redacao') }
-        ]
       }
     },
     {
@@ -156,7 +153,8 @@ const flow = {
           type: 'Form', name: 'form_redacao',
           'init-values': init(['texto_redacao']),
           children: [
-            { type: 'TextHeading', text: 'Sua Redação' },
+            { type: 'TextHeading', text: 'Prova de Redação' },
+            { type: 'TextCaption', text: 'Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo sobre o tema abaixo.' },
             erroTexto,
             { type: 'TextBody', text: '${data.tema_redacao}' },
             { type: 'TextArea', name: 'texto_redacao', label: 'Digite aqui seu texto dissertativo', required: true, 'max-length': 3000 },
