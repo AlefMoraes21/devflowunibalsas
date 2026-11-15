@@ -236,7 +236,7 @@ test('Flow E1: JSON válido para a Meta (rotas, ações e chaves)', () => {
   }
 });
 
-test('Flow E1: jornada completa instantânea, curso e turno na mesma tela, sem Rubeus', async () => {
+test('Flow INSC: cada tela grava no Google e responde na hora; o worker grava no Rubeus em segundo plano', async () => {
   const { e1: E, store, fila, rubeus } = montar();
   await cacheCompleto(store);
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
@@ -245,17 +245,16 @@ test('Flow E1: jornada completa instantânea, curso e turno na mesma tela, sem R
   assert.equal(erro.screen, 'INSC_DADOS'); assert.equal(erro.data.valor_nome, 'Ana'); assert.equal(erro.data.tem_erro, true);
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO'); assert.equal(curso.data.turno_visivel, false);
+  const id = fila[0].id;
+  assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.nome, BASICOS.nome, 'dados básicos gravados no Firestore');
   const dir = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
-  assert.equal(dir.screen, 'INSC_CURSO'); assert.equal(dir.data.turno_visivel, true); assert.equal(dir.data.turnos.length, 2); assert.equal(dir.data.valor_turno_id, '');
+  assert.equal(dir.data.turno_visivel, true); assert.equal(dir.data.turnos.length, 2); assert.equal(dir.data.valor_turno_id, '');
   const ads = await e1(E, 'INSC_CURSO', 'buscar_turnos', dir.data.estado, { curso_id: 'ads' });
   assert.equal(ads.data.valor_turno_id, 'not', 'turno único já vem marcado');
-  const semTurno = await e1(E, 'INSC_CURSO', 'escolher_curso', dir.data.estado, { curso_id: 'dir' });
-  assert.match(semTurno.data.erro, /turno/);
-  // Trocou de curso e tocou Continuar com o turno do curso anterior: recarrega os turnos, não avança.
   const trocou = await e1(E, 'INSC_CURSO', 'escolher_curso', ads.data.estado, { curso_id: 'dir', turno_id: 'not' });
-  assert.equal(trocou.screen, 'INSC_CURSO');
+  assert.equal(trocou.screen, 'INSC_CURSO', 'trocou o curso sem ver os turnos: mostra os turnos, não avança');
   const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', ads.data.estado, { curso_id: 'ads', turno_id: 'not' });
-  assert.equal(quase.screen, 'INSC_QUASE_LA'); assert.ok(quase.data.origens.length);
+  assert.equal(quase.screen, 'INSC_QUASE_LA');
   const orient = await e1(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
   assert.equal(orient.screen, 'INSC_ORIENTACAO');
   const red = await e1(E, 'INSC_ORIENTACAO', 'iniciar_redacao', orient.data.estado);
@@ -263,18 +262,41 @@ test('Flow E1: jornada completa instantânea, curso e turno na mesma tela, sem R
   const fim = await e1(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO });
   assert.equal(fim.screen, 'INSC_FIM');
   assert.equal(rubeus.chamadas.length, 0, 'nenhuma tela esperou o Rubeus');
-  await E.worker(fila[0].id);
-  assert.equal((await store.get(fila[0].id, 'inscricoesFila')).record.status, 'concluida');
+  assert.ok(fila.every(f => f.id === id), 'uma inscrição só, agendada a cada tela');
+  await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
+  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos', 'buscar_turnos', 'avancar_curso_interesse', 'enviar_informacoes_complementares', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
 });
 
-test('Flow E1: sem cache, encerra com aviso (sem tela quebrada); funciona com a chave ETAPA1_FILA desligada', async () => {
-  const store = memoria();
-  const fila = [];
-  const E = createEtapa1({ ativo: () => false, store, enqueue: async id => fila.push(id), runStep: async () => { throw new Error('x'); }, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, log: () => {} });
-  const fim = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
-  assert.equal(fim.screen, 'INSC_FIM');
+test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preencheu', async () => {
+  const { e1: E, store, fila, rubeus } = montar();
   await cacheCompleto(store);
-  assert.equal((await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined)).screen, 'INSC_DADOS');
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
+  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+  const id = fila[0].id;
+  await E.worker(id);
+  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos'], 'passo 1 gravado enquanto o candidato escolhe o curso');
+  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'turnos');
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
+  await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
+  await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'final', 'para antes da conclusão, esperando o CPF');
+  assert.ok(!rubeus.chamadas.includes('enviar_informacoes_complementares'));
+});
+
+test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do Rubeus', async () => {
+  const store = memoria();
+  const rubeus = rubeusFalso();
+  let E;
+  const pend = [];
+  E = createEtapa1({ ativo: () => false, store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: ms => new Promise(r => setTimeout(r, 5)), log: () => {} });
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
+  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+  assert.equal(curso.screen, 'INSC_CURSO');
+  assert.deepEqual(curso.data.cursos, CURSOS);
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
+  assert.equal(t.data.turnos.length, 2, 'turnos de todos os cursos vieram da mesma sessão');
+  await Promise.all(pend);
   // Flow antigo continua no caminho síncrono com a chave desligada.
   assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null);
 });

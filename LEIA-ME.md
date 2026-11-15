@@ -1,3 +1,10 @@
+# Versão 1.9.0 — Flow da inscrição grava no Google e o Cloud Run grava no Rubeus em segundo plano
+
+- Cada tela do Flow `INSC_*` grava as respostas no Firestore (`inscricoesFila`) e responde na hora. O worker do Cloud Run vai gravando no Rubeus passo a passo (dados básicos → curso/turno → conclusão → prova → redação), só até onde o candidato já preencheu, enquanto ele segue nas próximas telas.
+- Não depende de cache pronto: na primeira inscrição, a tela de curso espera (até 6 s) o worker trazer cursos e turnos do Rubeus; o tema da redação é trazido quando o candidato toca em Iniciar prova. Depois tudo fica guardado e as telas abrem na hora.
+- Mesmo endpoint `/api/flow`. Abrir o Flow direto em `INSC_INICIO` (sem pedir dados na primeira tela). O `flows/etapa1-vestibular.json` não mudou.
+- 160 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.9.0`.
+
 # Versão 1.8.0 — Flow próprio da etapa 1 do Vestibular (`flows/etapa1-vestibular.json`)
 
 - **Flow novo na WABA**, separado do atual: `flows/etapa1-vestibular.json` (gerado por `node flows/gerar-etapa1.mjs`). Telas: `INSC_INICIO` → `INSC_DADOS` → `INSC_CURSO` (curso e turno na mesma tela) → `INSC_QUASE_LA` → `INSC_ORIENTACAO` → `INSC_REDACAO` → `INSC_FIM`. Sem login, sem matrícula, sem telas de "Verificar andamento".

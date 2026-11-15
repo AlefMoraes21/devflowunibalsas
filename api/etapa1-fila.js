@@ -176,10 +176,37 @@ export function createEtapa1({
   }
   const fimE1 = (titulo, mensagem) => renderE1('INSC_FIM', { titulo, mensagem });
   const processoE1 = () => String(process.env.ETAPA1_PROCESSO || '20383');
-  function cacheUtilizavel(c) {
-    return Boolean(c?.tema && c.cursos?.length && clock() - (c.atualizado ?? 0) < 30 * DIA &&
-      c.cursos.every(x => (c.turnos?.[x.id] ?? []).length > 0));
+  const CPF_IDX = 'inscricoesCpf';
+
+  // Grava as respostas da tela no Firestore (cria a inscrição na primeira tela) e agenda o worker,
+  // que vai gravando no Rubeus em segundo plano enquanto o candidato segue para a próxima tela.
+  async function gravarTela(id, processo, flowToken, patch, extra = {}) {
+    const flow = hash(flowToken ?? '');
+    for (let i = 0; i < 5; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) {
+        const novo = { id, processo, flow, respostas: patch, redacao: null, status: 'pendente', passo: 'inicio', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA, ...extra };
+        if (await store.create(id, novo, FILA)) break;
+        continue;
+      }
+      if (atual.record.flow !== flow) throw new Error('inscrição de outra sessão');
+      const rec = { ...atual.record, respostas: { ...atual.record.respostas, ...patch }, ...extra };
+      if (await store.update(id, rec, atual.version, FILA)) break;
+      if (i === 4) throw new Error('conflito');
+    }
+    await disparar(id);
   }
+  // Espera o worker trazer do Rubeus o que a tela precisa (só quando o cache ainda não tem).
+  async function esperarCache(processo, pronto, ms = 6000) {
+    const ate = clock() + ms;
+    for (;;) {
+      const c = await lerCache(processo, { fresco: true });
+      if (pronto(c)) return c;
+      if (clock() + 700 > ate) return c;
+      await sleep(700);
+    }
+  }
+  const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
 
   async function routeE1(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
@@ -187,12 +214,7 @@ export function createEtapa1({
       if (acao !== 'e1_iniciar') return null;
       const processo = processoE1();
       if (!requiresEssay(processo)) return fimE1('Inscrições indisponíveis', 'As inscrições pelo WhatsApp estão fechadas no momento. Acesse vestibular.unibalsas.edu.br/presencial.');
-      const cache = await lerCache(processo);
-      if (!cacheUtilizavel(cache)) {
-        console.error(JSON.stringify({ event: 'etapa1_fila_atencao', motivo: 'cache_indisponivel', processo }));
-        return fimE1('Inscrições indisponíveis agora', 'Não conseguimos abrir a inscrição pelo WhatsApp neste momento. Tente de novo em alguns minutos ou inscreva-se pelo site vestibular.unibalsas.edu.br/presencial.');
-      }
-      return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, data_maxima_nascimento: hoje(), erro: '' });
+      return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, fila_id: hash('insc:' + processo + ':' + (req.flow_token ?? crypto.randomUUID())), data_maxima_nascimento: hoje(), erro: '' });
     }
     if (!INSC_KEYS[screen] || screen === 'INSC_FIM') return null;
     let s;
@@ -200,39 +222,64 @@ export function createEtapa1({
     if (!s.e1) return null;
     const u = pick(d);
     const processo = s.processo_seletivo_id;
+    const base = { e1: true, processo_seletivo_id: processo, fila_id: s.fila_id };
 
     if (screen === 'INSC_DADOS' && acao === 'enviar_dados_basicos') {
       try { validateBasic(u); } catch (e) { return renderE1('INSC_DADOS', { ...s, values: u, erro: e.message }); }
-      const cache = await lerCache(processo);
-      return renderE1('INSC_CURSO', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, ...u }, cursos: cache?.cursos ?? [], turnos: [], turno_visivel: false, erro: '' });
+      try { await gravarTela(s.fila_id, processo, req.flow_token, u); }
+      catch (e) { falha('dados_basicos', e); return renderE1('INSC_DADOS', { ...s, values: u, erro: ERRO_GRAVAR }); }
+      const c = await esperarCache(processo, x => x?.cursos?.length);
+      if (!c?.cursos?.length) return renderE1('INSC_DADOS', { ...s, values: u, erro: 'Seus dados foram salvos. Estamos carregando os cursos: toque em Avançar de novo.' });
+      return renderE1('INSC_CURSO', { ...base, cursos: c.cursos, turnos: [], turno_visivel: false, erro: '' });
     }
 
-    // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo (vindos do cache).
+    // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo.
     if (screen === 'INSC_CURSO' && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
       const curso = String(u.curso_id ?? '');
       if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1('INSC_CURSO', { ...s, erro: 'Selecione um curso.' });
-      const turnos = (await lerCache(processo))?.turnos?.[curso] ?? [];
       if (acao === 'buscar_turnos' || curso !== s.curso_selecionado) {
-        if (!turnos.length) return renderE1('INSC_CURSO', { ...s, curso_selecionado: curso, turnos: [], turno_visivel: false, values: { curso_id: curso }, erro: 'Nenhum turno disponível para este curso. Escolha outro curso.' });
+        const c = await esperarCache(processo, x => x?.turnos?.[curso]?.length);
+        const turnos = c?.turnos?.[curso] ?? [];
+        if (!turnos.length) return renderE1('INSC_CURSO', { ...s, curso_selecionado: '', turnos: [], turno_visivel: false, values: { curso_id: curso }, erro: 'Estamos carregando os turnos deste curso. Toque no curso de novo em alguns segundos.' });
         const unico = turnos.length === 1 ? turnos[0].id : '';
         return renderE1('INSC_CURSO', { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { curso_id: curso, turno_id: unico }, erro: '' });
       }
       const turno = String(u.turno_id ?? '');
       if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1('INSC_CURSO', { ...s, values: { curso_id: curso }, erro: 'Selecione o turno.' });
-      return renderE1('INSC_QUASE_LA', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, curso_id: curso, turno_id: turno }, origens, erro: '' });
+      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: curso, turno_id: turno }); }
+      catch (e) { falha('curso', e); return renderE1('INSC_CURSO', { ...s, values: { curso_id: curso, turno_id: turno }, erro: ERRO_GRAVAR }); }
+      return renderE1('INSC_QUASE_LA', { ...base, origens, erro: '' });
     }
 
     if (screen === 'INSC_QUASE_LA' && acao === 'enviar_informacoes_complementares') {
       try { validateFinal({ ...u, origens: s.origens }); } catch (e) { return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: e.message }); }
-      const rec = await receberInscricao(processo, { ...s.respostas, ...u }, req.flow_token);
-      if (rec.erro) return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: rec.erro });
-      return renderE1('INSC_ORIENTACAO', { e1: true, processo_seletivo_id: processo, fila_id: rec.id, erro: '' });
+      const cpf = digits(u.cpf);
+      try {
+        if (await jaInscritoNoRm(academicId(processo), cpf)) { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_rm' }); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: DUPLICADA_MSG }); }
+        const idx = hash('etapa1:' + processo + ':' + cpf);
+        if (!await store.create(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, CPF_IDX)) {
+          const atual = await store.get(idx, CPF_IDX);
+          if (atual && atual.record.fila_id !== s.fila_id) {
+            const outra = await store.get(atual.record.fila_id, FILA);
+            if (outra && outra.record.status !== 'falhou') { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_fila' }); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: DUPLICADA_MSG }); }
+            await store.update(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, atual.version, CPF_IDX);
+          }
+        }
+        await gravarTela(s.fila_id, processo, req.flow_token, u);
+        log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'recebida', status: 'pendente' });
+      } catch (e) { falha('quase_la', e); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: ERRO_GRAVAR }); }
+      return renderE1('INSC_ORIENTACAO', { ...base, erro: '' });
     }
 
     if (screen === 'INSC_ORIENTACAO' && acao === 'iniciar_redacao') {
-      const tema = (await lerCache(processo))?.tema;
-      if (!tema) return renderE1('INSC_ORIENTACAO', { ...s, erro: 'Não conseguimos carregar o tema agora. Toque em Iniciar redação de novo.' });
-      return renderE1('INSC_REDACAO', { e1: true, processo_seletivo_id: processo, fila_id: s.fila_id, tema_redacao: tema, erro: '' });
+      let tema = (await lerCache(processo))?.tema;
+      if (!tema) {
+        // Tema ainda não guardado: o candidato tocou em Iniciar prova, então o worker abre a prova dele.
+        try { await gravarTela(s.fila_id, processo, req.flow_token, {}, { abrir_prova: true }); } catch (e) { falha('abrir_prova', e); }
+        tema = (await esperarCache(processo, x => x?.tema))?.tema;
+        if (!tema) return renderE1('INSC_ORIENTACAO', { ...s, erro: 'Estamos preparando sua prova. Toque em Iniciar prova de novo em alguns segundos.' });
+      }
+      return renderE1('INSC_REDACAO', { ...base, tema_redacao: tema, erro: '' });
     }
 
     if (screen === 'INSC_REDACAO' && acao === 'enviar_redacao') {
@@ -244,6 +291,7 @@ export function createEtapa1({
     }
     return null;
   }
+  const falha = (passo, e) => log({ event: 'etapa1_fila_erro', passo, message: String(e?.message ?? e).slice(0, 160) });
 
   // Endpoint próprio do Flow da etapa 1 (/api/flow/etapa1): o INIT da Meta não diz qual Flow abriu,
   // então cada Flow tem a sua URL. Aqui nunca se devolve tela do Flow antigo.
@@ -363,12 +411,23 @@ export function createEtapa1({
         return salvar({ passo: 'basicos', ck: ck(r) });
       }
       case 'basicos': {
+        if (!R.nome) return salvar({ parar: true });
         const r = await step(rec.ck.screen, rec.ck.estado, 'enviar_dados_basicos', pick({ nome: R.nome, possui_nome_social: R.possui_nome_social, nome_social: R.nome_social, email: R.email, data_nascimento: R.data_nascimento, celular: R.celular, genero: R.genero, aceite_privacidade: R.aceite_privacidade }), rec.id);
         const st = abrir(r, 'CURSO_INTERESSE');
-        if (!st.cursos?.some(c => c.id === R.curso_id)) throw new ErroPasso('O curso escolhido não está mais disponível no Rubeus.', { final: true, motivo: 'curso_indisponivel' });
+        // Cursos e turnos vêm desta sessão (só leitura) e alimentam as telas do Flow.
+        if (st.cursos?.length) {
+          const c = await lerCache(rec.processo, { fresco: true });
+          if (!c?.cursos?.length || !cacheCompletoSemTema(c) || clock() - (c.atualizado ?? 0) > 6 * 3600000) {
+            await gravarCache(rec.processo, { cursos: st.cursos });
+            try { await turnosDeTodos(r.data.estado, st.cursos, rec.processo); } catch {}
+          }
+        }
         return salvar({ passo: 'turnos', ck: ck(r) });
       }
       case 'turnos': {
+        if (!R.curso_id || !R.turno_id) return salvar({ parar: true });
+        let st0 = {}; try { st0 = openState(rec.ck.estado, rec.ck.screen); } catch {}
+        if (st0.cursos && !st0.cursos.some(c => c.id === R.curso_id)) throw new ErroPasso('O curso escolhido não está mais disponível no Rubeus.', { final: true, motivo: 'curso_indisponivel' });
         const r = await step(rec.ck.screen, rec.ck.estado, 'buscar_turnos', { curso_id: R.curso_id }, rec.id);
         const st = abrir(r, 'CURSO_INTERESSE');
         if (!st.turnos?.some(t => t.id === R.turno_id)) throw new ErroPasso('O turno escolhido não veio na consulta do Rubeus.', { motivo: 'turno' });
@@ -385,6 +444,7 @@ export function createEtapa1({
         return salvar({ passo: 'final', ck: ck(r) });
       }
       case 'final': {
+        if (!R.cpf) return salvar({ parar: true });
         // A partir daqui o envio não é repetido sozinho: se cair no meio, a equipe confere.
         await salvar({ passo: 'final_enviando' });
         const r = await step(rec.ck.screen, rec.ck.estado, 'enviar_informacoes_complementares', pick({ cpf: R.cpf, nacionalidade: R.nacionalidade, concluiu_ensino_medio: R.concluiu_ensino_medio, possui_deficiencia: R.possui_deficiencia, tipos_deficiencia: R.tipos_deficiencia, deficiencia_outra: R.deficiencia_outra, como_conheceu: R.como_conheceu, como_conheceu_outro: R.como_conheceu_outro }), rec.id);
@@ -401,7 +461,7 @@ export function createEtapa1({
         return salvar({ passo: 'redacao', status: 'inscrita', applyment_id: String(st.applyment_id ?? ''), ck: ck(r) });
       }
       case 'redacao': {
-        if (!rec.redacao) return salvar({ parar: true });
+        if (!rec.redacao && !rec.abrir_prova) return salvar({ parar: true });
         let r = await step(rec.ck.screen, rec.ck.estado, 'iniciar_redacao', {}, rec.id);
         if (r?.screen === 'TELA_ORIENTACAO_PROVA') {
           let st = {}; try { st = openState(r.data.estado, r.screen); } catch {}
@@ -416,6 +476,7 @@ export function createEtapa1({
         return salvar({ passo: 'redacao_enviar', ck: ck(r) });
       }
       case 'redacao_enviar': {
+        if (!rec.redacao) return salvar({ parar: true });
         await salvar({ passo: 'redacao_enviando' });
         const r = await step(rec.ck.screen, rec.ck.estado, 'enviar_redacao', { texto_redacao: rec.redacao }, rec.id);
         if (r?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
@@ -495,7 +556,9 @@ export function createEtapa1({
     }
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.
     await salvar({ rodando_ate: 0 });
-    const temTrabalho = !FINAIS.has(rec.status) && (rec.passo !== 'redacao' || rec.redacao);
+    const R2 = rec.respostas ?? {};
+    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id && R2.turno_id), curso: true, final: Boolean(R2.cpf), redacao: Boolean(rec.redacao || rec.abrir_prova), redacao_enviar: Boolean(rec.redacao), entrega: true };
+    const temTrabalho = !FINAIS.has(rec.status) && pronto[rec.passo] === true;
     if (temTrabalho) await disparar(id);
     return 204;
   }
