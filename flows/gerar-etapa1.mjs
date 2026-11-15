@@ -6,6 +6,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('base64');
 const LOGO_UNIBALSAS = png('logo_unibalsas.png');
 const LOGO_PORTAL = png('logo_portal.png');
+const LOGO_INSCRICAO = png('logo_inscricao.png');
 const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'contain' });
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
@@ -40,7 +41,8 @@ const flow = {
     INSC_PORTAL: ['INSC_AVALIACAO'],
     INSC_AVALIACAO: ['INSC_ORIENTACAO'],
     INSC_ORIENTACAO: ['INSC_REDACAO', 'INSC_FIM'],
-    INSC_REDACAO: ['INSC_FIM'],
+    INSC_REDACAO: ['INSC_FINALIZADA', 'INSC_FIM'],
+    INSC_FINALIZADA: [],
     INSC_FIM: []
   },
   screens: [
@@ -52,7 +54,7 @@ const flow = {
         children: [{
           type: 'Form', name: 'form_processo',
           children: [
-            { type: 'TextHeading', text: 'Inscrição' },
+            imagem(LOGO_INSCRICAO, 40),
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
             { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
               { id: '20383', title: 'Vestibular Online 2027/1' },
@@ -75,6 +77,7 @@ const flow = {
           type: 'Form', name: 'form_dados',
           'init-values': init(['nome', 'possui_nome_social', 'nome_social', 'email', 'celular', 'genero', 'aceite_privacidade']),
           children: [
+            imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Dados básicos' },
             { type: 'TextBody', text: 'Olá! Para começar, preencha alguns dados básicos sobre você:' },
             erroTexto,
@@ -83,7 +86,7 @@ const flow = {
             { type: 'If', condition: '${form.possui_nome_social} == true', then: [{ type: 'TextInput', name: 'nome_social', label: 'Nome social', 'input-type': 'text', required: true }], else: [] },
             { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
             { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', 'max-date': '${data.data_maxima_nascimento}', required: true },
-            { type: 'TextInput', name: 'celular', label: 'Celular', 'helper-text': 'Para facilitar o nosso contato, informe o seu WhatsApp, de preferência.', 'input-type': 'phone', required: true },
+            { type: 'TextInput', name: 'celular', label: 'Celular', 'helper-text': 'Para facilitar o nosso contato, confirme o seu WhatsApp, de preferência.', 'input-type': 'phone', required: true },
             { type: 'RadioButtonsGroup', name: 'genero', label: 'Gênero', required: true, 'data-source': [{ id: 'M', title: 'Masculino' }, { id: 'F', title: 'Feminino' }] },
             { type: 'OptIn', name: 'aceite_privacidade', label: 'Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.', required: true, 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'INSC_PRIVACIDADE' }, payload: DADOS_PAYLOAD } },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_dados_basicos', form(DADOS)) }
@@ -113,6 +116,7 @@ const flow = {
           type: 'Form', name: 'form_curso',
           'init-values': init(['curso_id', 'turno_id']),
           children: [
+            imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
@@ -140,6 +144,7 @@ const flow = {
           type: 'Form', name: 'form_quase_la',
           'init-values': init(QUASE),
           children: [
+            imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Estamos quase lá!' },
             { type: 'TextBody', text: 'Complete as suas informações para concluir a sua inscrição:' },
             erroTexto,
@@ -253,6 +258,26 @@ const flow = {
             { type: 'Footer', label: 'Enviar redação', 'on-click-action': troca('enviar_redacao', form(['texto_redacao'])) }
           ]
         }]
+      }
+    },
+    {
+      // Igual à tela da avaliação ao finalizar a prova; o botão só fecha o Flow.
+      id: 'INSC_FINALIZADA',
+      title: 'Avaliação online',
+      terminal: true,
+      success: true,
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_UNIBALSAS, 40),
+          { type: 'TextSubheading', text: 'Avaliação online' },
+          { type: 'TextBody', text: 'Parabéns! Você finalizou a sua prova on-line.' },
+          { type: 'TextBody', text: 'Nossa equipe já iniciou a sua correção e, em breve, você terá o resultado.' },
+          { type: 'TextBody', text: 'Recomendamos que você acompanhe o andamento no Portal do Candidato.' },
+          { type: 'TextBody', text: 'Assim que sair o resultado, caso você não tenha alcançado o percentual mínimo de aprovação, poderá "Realizar a avaliação mais uma vez".' },
+          { type: 'TextBody', text: 'Desejamos boa sorte!\nAté breve.' },
+          { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
+        ]
       }
     },
     {

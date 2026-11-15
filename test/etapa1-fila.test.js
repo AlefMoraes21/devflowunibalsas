@@ -26,7 +26,7 @@ function memoria() {
 }
 
 // Simula o caminho síncrono (o que o worker repete no Rubeus) com telas seladas de verdade.
-function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = false } = {}) {
+function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = false, execucoes = ['EX1'] } = {}) {
   const chamadas = [];
   const tela = (screen, data) => ({ screen, data: { estado: sealState(screen, data), ...(screen === 'CONFIRMACAO' ? { titulo: 'ok' } : {}) } });
   async function runStep(req) {
@@ -42,6 +42,7 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
       if (req.data.estado && openState(req.data.estado, req.screen).sem_redacao) return tela('ACOMPANHAMENTO', { applyment_id: '888' });
       return tela('TELA_ORIENTACAO_PROVA', { applyment_id: '777', prova_pre_carregada: true });
     }
+    if (a === 'conferir_prova_existente') { const ex = execucoes.length > 1 ? execucoes.shift() : execucoes[0]; return tela('TELA_ORIENTACAO_PROVA', { prepared_existing: { binding: { executionCode: ex, proofId: '1' } } }); }
     if (a === 'iniciar_redacao') return tela('TELA_REDACAO', { tema_redacao: TEMA });
     if (a === 'enviar_redacao') { assert.equal(req.data.texto_redacao, TEXTO); return tela('TELA_REDACAO', { recibo_avaliacao: { id: 1 } }); }
     if (a === 'verificar_entrega') return { screen: 'CONFIRMACAO', data: { titulo: 'Redação enviada ✅' } };
@@ -60,7 +61,7 @@ function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) 
     validateFinal: d => { if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(d.cpf ?? '')) throw new Error('CPF inválido.'); if (!(d.origens ?? []).some(o => o.id === d.como_conheceu)) throw new Error('Selecione como ficou sabendo.'); },
     origens: [{ id: '01', title: 'Site oficial' }], hoje: () => '2026-11-15',
     requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER,
-    jaInscritoNoRm: async () => rm, sleep: async () => {}, log: () => {},
+    jaInscritoNoRm: async () => rm, sleep: async () => {}, log: () => {}, esperaProvaMs: 0, estabilidadeMs: 0,
     ehEnem: id => String(id) === '20386', anosEnem: [{ id: '2025', title: '2025' }],
     validateEnem: d => { if (!/^\d{12,15}$/.test(String(d.numero_inscricao_enem ?? ''))) throw new Error('A inscrição do ENEM deve ter de 12 a 15 números.'); },
     avisar: async dados => { avisos.push(dados); return true; }
@@ -126,7 +127,7 @@ test('jornada instantânea sem Rubeus; o worker repete os passos e conclui', asy
   assert.equal(rec.status, 'concluida');
   assert.equal(rec.respostas, null, 'dados pessoais apagados depois da entrega');
   assert.equal(rec.redacao, null);
-  assert.deepEqual(rubeus.chamadas.slice(5), ['iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
+  assert.deepEqual(rubeus.chamadas.slice(5), ['conferir_prova_existente', 'conferir_prova_existente', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
 });
 
 test('redação curta é recusada na hora e nada é guardado', async () => {
@@ -299,12 +300,12 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
   const curta = await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: 'curto' }, token);
   assert.equal(curta.screen, 'INSC_REDACAO'); assert.match(curta.data.erro, /desenvolva/);
-  const params = SUCCESS(await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, token));
-  assert.equal(params.status, 'redacao_recebida');
+  const fim = confere('INSC_REDACAO', await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, token));
+  assert.equal(fim.screen, 'INSC_FINALIZADA', 'tela "Parabéns! Você finalizou a sua prova" com Fechar');
   assert.equal(rubeus.chamadas.length, 5, 'envio da redação não esperou o Rubeus');
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
-  assert.deepEqual(rubeus.chamadas.slice(5), ['iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
+  assert.deepEqual(rubeus.chamadas.slice(5), ['conferir_prova_existente', 'conferir_prova_existente', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
   const deNovo = await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.route({ action: 'INIT', flow_token: token }));
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
@@ -403,7 +404,7 @@ test('Realizar prova logo após concluir: abre a redação na hora; o worker ins
   const red = confere('INSC_ORIENTACAO', await toque(E, 'INSC_ORIENTACAO', 'iniciar_redacao', orient.data.estado, {}, 'ft-e1'));
   assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
   assert.equal(rubeus.chamadas.length, 0);
-  assert.equal(SUCCESS(await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, 'ft-e1')).status, 'redacao_recebida');
+  assert.equal((await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, 'ft-e1')).screen, 'INSC_FINALIZADA');
   await E.worker(fila[0].id);
   const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
   assert.equal(rec.status, 'concluida');
@@ -421,4 +422,32 @@ test('Mesmo flow_token (prévia da WABA ou mensagem reaberta): cada Iniciar insc
   const ids = [...new Set(fila.map(f => f.id))];
   assert.equal(ids.length, 2);
   assert.equal((await store.get(ids[0], 'inscricoesFila')).record.respostas.nome, BASICOS.nome, 'a primeira não é sobrescrita');
+});
+
+test('Redação com calma: espera a prova da inscrição ficar estável antes de enviar', async () => {
+  const rubeus = rubeusFalso({ execucoes: ['PROVISORIA', 'DEFINITIVA', 'DEFINITIVA', 'DEFINITIVA'] });
+  const store = memoria();
+  const fila = [];
+  let agora = Date.now();
+  const E = createEtapa1({ ativo: () => true, store, enqueue: async (id, o) => fila.push({ id, ...o }), runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
+    validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER,
+    sleep: async () => {}, log: () => {}, clock: () => agora, esperaProvaMs: 600000, estabilidadeMs: 60000 });
+  await cacheCompleto(store);
+  ateOrientacao.E = E;
+  const quase = await etapa1(E);
+  await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
+  const id = fila[0].id;
+  await E.worker(id);
+  const red = await (async () => { const concl = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1'); const o = await ateOrientacao(concl); return toque(E, 'INSC_ORIENTACAO', 'iniciar_redacao', o.data.estado, {}, 'ft-e1'); })();
+  await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, 'ft-e1');
+  await E.worker(id);
+  assert.ok(!rubeus.chamadas.includes('enviar_redacao'), 'não envia antes da prova assentar (10 min após a inscrição)');
+  assert.ok(fila.at(-1).atrasoSeg > 0, 'reagenda para depois da espera');
+  agora += 600001;
+  await E.worker(id);
+  assert.ok(!rubeus.chamadas.includes('enviar_redacao'), 'execução mudou entre as duas leituras: espera de novo');
+  agora += 600001;
+  await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
+  assert.equal(rubeus.chamadas.filter(a => a === 'enviar_redacao').length, 1);
 });

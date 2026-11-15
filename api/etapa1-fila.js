@@ -31,6 +31,9 @@ export function createEtapa1({
   jaInscritoNoRm = async () => false,
   clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
   orcamentoMs = 80000, intervaloEntregaMs = 8000,
+  // Calma no envio da redação: o Rubeus/RM ainda ajusta a prova da inscrição por alguns minutos.
+  esperaProvaMs = Number(process.env.ETAPA1_ESPERA_PROVA_MS) || 10 * 60000,
+  estabilidadeMs = Number(process.env.ETAPA1_ESTABILIDADE_MS) || 60000,
   log = e => console.info(JSON.stringify(e))
 }) {
   // ---------------------------------------------------------------- cache
@@ -167,6 +170,7 @@ export function createEtapa1({
     INSC_AVALIACAO: ['estado'],
     INSC_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
     INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
+    INSC_FINALIZADA: [],
     INSC_FIM: ['titulo', 'mensagem']
   };
   const INSC_PADRAO = { tem_erro: false, turno_visivel: false, eh_nota_enem: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [], anos_enem: [] };
@@ -310,7 +314,8 @@ export function createEtapa1({
       if (texto.length < 50) return renderE1('INSC_REDACAO', { ...s, values: u, erro: 'Por favor, desenvolva mais a sua redação antes de enviar.' });
       const erroRed = await receberRedacao(s.fila_id, texto, req.flow_token);
       if (erroRed) return renderE1('INSC_REDACAO', { ...s, values: u, erro: erroRed });
-      return sucesso(req.flow_token, { status: 'redacao_recebida', protocolo_fila: curto(s.fila_id) });
+      // Tela final igual à da avaliação no site; o botão só fecha o Flow. O envio é do worker.
+      return renderE1('INSC_FINALIZADA', {});
     }
     return null;
   }
@@ -357,7 +362,7 @@ export function createEtapa1({
         if (r?.screen === 'TELA_REDACAO' && st.tema_redacao) {
           tema = st.tema_redacao;
           guardarTema(rec.processo, tema).catch(() => {});
-          if (!((rec.rodando_ate ?? 0) > clock())) await store.update(rec.id, { ...rec, passo: 'redacao_enviar', ck: { screen: r.screen, estado: r.data.estado }, ...(aberta ? { redacao_aberta: clock() } : {}) }, f.version, FILA).catch(() => false);
+          if (aberta && !((rec.rodando_ate ?? 0) > clock())) await store.update(rec.id, { ...rec, redacao_aberta: clock() }, f.version, FILA).catch(() => false);
         }
       } catch (e) { falha('abrir_prova', e); }
     }
@@ -555,20 +560,33 @@ export function createEtapa1({
         try { st = abrir(r, 'TELA_ORIENTACAO_PROVA'); }
         catch (e) { throw new ErroPasso(e.message, { final: true, motivo: 'incerto' }); }
         // Vestibular: prova vinculada (pré-carga do Iniciar prova, sem abrir o cronômetro) e aviso da etapa 2.
-        await salvar({ passo: 'redacao', status: 'inscrita', applyment_id: String(st.applyment_id ?? ''), prova_vinculada: Boolean(st.prova_pre_carregada), ck: ck(r) });
+        await salvar({ passo: 'redacao', status: 'inscrita', inscrita_em: clock(), applyment_id: String(st.applyment_id ?? ''), prova_vinculada: Boolean(st.prova_pre_carregada), ck: ck(r) });
         return avisarEtapa2(rec, salvar);
       }
       case 'redacao': {
         if (!rec.redacao) return salvar({ parar: true });
-        let r = await step(rec.ck.screen, rec.ck.estado, 'iniciar_redacao', {}, rec.id);
-        if (r?.screen === 'TELA_ORIENTACAO_PROVA') {
-          let st = {}; try { st = openState(r.data.estado, r.screen); } catch {}
-          if (st.proof_resume_required) {
-            const c = await step(r.screen, r.data.estado, 'conferir_prova_existente', {}, rec.id);
-            abrir(c, 'TELA_ORIENTACAO_PROVA');
-            r = await step(c.screen, c.data.estado, 'iniciar_redacao', {}, rec.id);
-          }
+        // 1) Espera o Rubeus/RM terminar de criar a prova da inscrição (o vínculo lido logo após o
+        //    "Iniciar prova" pode ser provisório).
+        const pronta = (rec.inscrita_em ?? 0) + esperaProvaMs;
+        if (clock() < pronta) return salvar({ parar: true, proxima: pronta });
+        // 2) Lê a prova ATUAL da inscrição, sem acionar "Iniciar prova" de novo, duas vezes com
+        //    intervalo: só segue se a execução e o registro não mudaram.
+        let base = {}; try { base = openState(rec.ck.estado, rec.ck.screen); } catch {}
+        const conferir = async () => {
+          const est = sealState('TELA_ORIENTACAO_PROVA', { ...base, prepared_existing: null, prova_pre_carregada: false, proof_resume_required: true });
+          const c = await step('TELA_ORIENTACAO_PROVA', est, 'conferir_prova_existente', {}, rec.id);
+          const st = abrir(c, 'TELA_ORIENTACAO_PROVA');
+          return { c, b: st.prepared_existing?.binding ?? {} };
+        };
+        const a1 = await conferir();
+        await sleep(estabilidadeMs);
+        const a2 = await conferir();
+        if (a1.b.executionCode !== a2.b.executionCode || a1.b.proofId !== a2.b.proofId) {
+          log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'prova_instavel' });
+          return salvar({ parar: true, proxima: clock() + esperaProvaMs });
         }
+        // 3) Abre a avaliação dessa execução (cronômetro começa agora) e segue para o envio.
+        const r = await step(a2.c.screen, a2.c.data.estado, 'iniciar_redacao', {}, rec.id);
         const st = abrir(r, 'TELA_REDACAO');
         guardarTema(rec.processo, st.tema_redacao).catch(() => {});
         return salvar({ passo: 'redacao_enviar', ck: ck(r) });
@@ -592,6 +610,16 @@ export function createEtapa1({
           const r = await step(rec.ck.screen, rec.ck.estado, 'verificar_entrega', {}, rec.id);
           if (r?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
           await sleep(intervaloEntregaMs);
+        }
+        // A inscrição passou a apontar outra execução depois do envio: o mesmo texto vai para a
+        // prova atual, com calma (até 2 vezes); depois disso, a equipe confere.
+        const ult = await step(rec.ck.screen, rec.ck.estado, 'verificar_entrega', {}, rec.id);
+        if (ult?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
+        let stU = {}; try { stU = openState(ult.data.estado, ult.screen); } catch {}
+        if (/outra execu/i.test(stU.erro ?? '')) {
+          if ((rec.reenvios ?? 0) >= 2) throw new ErroPasso('A inscrição mudou de execução de prova após o envio.', { final: true, motivo: 'execucao_trocada' });
+          log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'reenvio_prova_atual' });
+          return salvar({ passo: 'redacao', reenvios: (rec.reenvios ?? 0) + 1, inscrita_em: clock(), parar: true, proxima: clock() + esperaProvaMs });
         }
         throw new ErroPasso('Portal ainda não confirmou a entrega da redação.', { motivo: 'entrega' });
       }
@@ -657,7 +685,7 @@ export function createEtapa1({
     const R2 = rec.respostas ?? {};
     const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id && R2.turno_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true };
     const temTrabalho = !FINAIS.has(rec.status) && pronto[rec.passo] === true;
-    if (temTrabalho) await disparar(id);
+    if (temTrabalho) await disparar(id, rec.proxima > clock() ? Math.ceil((rec.proxima - clock()) / 1000) : 0);
     return 204;
   }
 
