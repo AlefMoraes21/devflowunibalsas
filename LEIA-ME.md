@@ -1,9 +1,9 @@
 # Versão 1.8.0 — Flow próprio da etapa 1 do Vestibular (`flows/etapa1-vestibular.json`)
 
-- **Flow novo na WABA**, separado do atual: `flows/etapa1-vestibular.json` (gerado por `node flows/gerar-etapa1.mjs`). Telas: `E1_INICIO` → `E1_DADOS` → `E1_CURSO` (curso e turno na mesma tela) → `E1_QUASE_LA` → `E1_ORIENTACAO` → `E1_REDACAO` → `E1_FIM`. Sem login, sem matrícula, sem telas de "Verificar andamento".
-- **Envio pelo Blip:** `flow_action` = `navigate`, tela inicial `E1_INICIO`, sem dados. Não usar `data_exchange` na abertura (o INIT abre o Flow antigo).
+- **Flow novo na WABA**, separado do atual: `flows/etapa1-vestibular.json` (gerado por `node flows/gerar-etapa1.mjs`). Telas: `INSC_INICIO` → `INSC_DADOS` → `INSC_CURSO` (curso e turno na mesma tela) → `INSC_QUASE_LA` → `INSC_ORIENTACAO` → `INSC_REDACAO` → `INSC_FIM`. Sem login, sem matrícula, sem telas de "Verificar andamento".
+- **Envio pelo Blip:** `flow_action` = `navigate`, tela inicial `INSC_INICIO`, sem dados. Não usar `data_exchange` na abertura (o INIT abre o Flow antigo).
 - Sempre em modo fila (a chave `ETAPA1_FILA` vale só para o Flow antigo). Processo: `ETAPA1_PROCESSO` (padrão `20383`).
-- Precisa do cache completo (cursos, turnos e tema; vale 30 dias, renovado a cada inscrição). Sem cache, `E1_INICIO` encerra com aviso e o log `etapa1_fila_atencao` (`cache_indisponivel`). O cache é aquecido por uma inscrição pelo Flow antigo que chegue à redação e é renovado pelo worker a cada envio.
+- Precisa do cache completo (cursos, turnos e tema; vale 30 dias, renovado a cada inscrição). Sem cache, `INSC_INICIO` encerra com aviso e o log `etapa1_fila_atencao` (`cache_indisponivel`). O cache é aquecido por uma inscrição pelo Flow antigo que chegue à redação e é renovado pelo worker a cada envio.
 - 158 testes (inclui o contrato do JSON: chaves e tipos de cada resposta iguais às declaradas). Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.8.0`.
 
 # Versão 1.7.0 — Etapa 1 do Vestibular em modo fila (Flow instantâneo)

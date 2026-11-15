@@ -2,57 +2,53 @@
   "version": "7.3",
   "data_api_version": "3.0",
   "routing_model": {
-    "E1_INICIO": [
-      "E1_DADOS",
-      "E1_FIM"
+    "INSC_INICIO": [
+      "INSC_DADOS",
+      "INSC_FIM"
     ],
-    "E1_DADOS": [
-      "E1_CURSO",
-      "E1_FIM"
+    "INSC_DADOS": [
+      "INSC_CURSO",
+      "INSC_FIM"
     ],
-    "E1_CURSO": [
-      "E1_QUASE_LA",
-      "E1_FIM"
+    "INSC_CURSO": [
+      "INSC_QUASE_LA",
+      "INSC_FIM"
     ],
-    "E1_QUASE_LA": [
-      "E1_ORIENTACAO",
-      "E1_FIM"
+    "INSC_QUASE_LA": [
+      "INSC_ORIENTACAO",
+      "INSC_FIM"
     ],
-    "E1_ORIENTACAO": [
-      "E1_REDACAO",
-      "E1_FIM"
+    "INSC_ORIENTACAO": [
+      "INSC_REDACAO",
+      "INSC_FIM"
     ],
-    "E1_REDACAO": [
-      "E1_FIM"
+    "INSC_REDACAO": [
+      "INSC_FIM"
     ],
-    "E1_FIM": []
+    "INSC_FIM": []
   },
   "screens": [
     {
-      "id": "E1_INICIO",
-      "title": "Inscrição Vestibular",
+      "id": "INSC_INICIO",
+      "title": "Inscrição",
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
             "type": "TextHeading",
-            "text": "Vestibular UniBalsas"
+            "text": "Inscrição"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "Vestibular Online - Cursos presenciais"
           },
           {
             "type": "TextBody",
-            "text": "Faça sua inscrição e a prova de redação aqui mesmo, pelo WhatsApp."
-          },
-          {
-            "type": "TextBody",
-            "text": "1. Seus dados\n2. Curso e turno\n3. Informações complementares\n4. Redação online"
-          },
-          {
-            "type": "TextCaption",
-            "text": "Reserve um tempo para escrever a redação com calma. Se preferir, escreva antes em outro aplicativo e cole o texto."
+            "text": "Dados básicos\nCurso de interesse\nEstamos quase lá\nProva online"
           },
           {
             "type": "Footer",
-            "label": "Começar inscrição",
+            "label": "Iniciar inscrição",
             "on-click-action": {
               "name": "data_exchange",
               "payload": {
@@ -64,7 +60,7 @@
       }
     },
     {
-      "id": "E1_DADOS",
+      "id": "INSC_DADOS",
       "title": "Dados básicos",
       "data": {
         "estado": {
@@ -138,7 +134,7 @@
               },
               {
                 "type": "TextBody",
-                "text": "Para começar, preencha alguns dados sobre você:"
+                "text": "Olá! Para começar, preencha alguns dados básicos sobre você:"
               },
               {
                 "type": "TextBody",
@@ -191,8 +187,8 @@
               {
                 "type": "TextInput",
                 "name": "celular",
-                "label": "Celular (WhatsApp)",
-                "helper-text": "Com DDD. Ex.: 99 99999-9999",
+                "label": "Celular",
+                "helper-text": "Para facilitar o nosso contato, informe o seu WhatsApp, de preferência.",
                 "input-type": "phone",
                 "required": true
               },
@@ -215,7 +211,7 @@
               {
                 "type": "OptIn",
                 "name": "aceite_privacidade",
-                "label": "Aceito receber avisos e concordo com a Política de Privacidade vigente. *",
+                "label": "Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.",
                 "required": true,
                 "on-click-action": {
                   "name": "open_url",
@@ -247,7 +243,7 @@
       }
     },
     {
-      "id": "E1_CURSO",
+      "id": "INSC_CURSO",
       "title": "Curso de interesse",
       "data": {
         "estado": {
@@ -322,7 +318,7 @@
               },
               {
                 "type": "TextBody",
-                "text": "Escolha o curso e o turno:"
+                "text": "Conte-nos mais detalhes sobre o curso de seu interesse!"
               },
               {
                 "type": "TextBody",
@@ -360,7 +356,7 @@
               },
               {
                 "type": "Footer",
-                "label": "Continuar",
+                "label": "Avançar",
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
@@ -377,7 +373,7 @@
       }
     },
     {
-      "id": "E1_QUASE_LA",
+      "id": "INSC_QUASE_LA",
       "title": "Estamos quase lá",
       "data": {
         "estado": {
@@ -466,7 +462,7 @@
               },
               {
                 "type": "TextBody",
-                "text": "Complete as suas informações para concluir a inscrição:"
+                "text": "Complete as suas informações para concluir a sua inscrição:"
               },
               {
                 "type": "TextBody",
@@ -606,7 +602,7 @@
               },
               {
                 "type": "Footer",
-                "label": "Concluir inscrição",
+                "label": "Concluir",
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
@@ -629,8 +625,8 @@
       }
     },
     {
-      "id": "E1_ORIENTACAO",
-      "title": "Prova de redação",
+      "id": "INSC_ORIENTACAO",
+      "title": "Prova online",
       "data": {
         "estado": {
           "type": "string",
@@ -650,11 +646,11 @@
         "children": [
           {
             "type": "TextHeading",
-            "text": "Inscrição recebida! ✅"
+            "text": "Prova de Redação"
           },
           {
-            "type": "TextBody",
-            "text": "Agora é a prova de redação online."
+            "type": "TextSubheading",
+            "text": "Redação online"
           },
           {
             "type": "TextBody",
@@ -663,15 +659,15 @@
           },
           {
             "type": "TextBody",
-            "text": "• Texto dissertativo-argumentativo sobre o tema da próxima tela.\n• Até 3.000 caracteres.\n• O texto só é enviado quando você tocar em Enviar redação."
+            "text": "Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo sobre o tema apresentado na próxima tela."
           },
           {
             "type": "TextCaption",
-            "text": "Dica: se preferir, escreva em outro aplicativo e cole o texto."
+            "text": "Sua redação só é enviada quando você tocar em Enviar redação."
           },
           {
             "type": "Footer",
-            "label": "Iniciar redação",
+            "label": "Iniciar prova",
             "on-click-action": {
               "name": "data_exchange",
               "payload": {
@@ -684,7 +680,7 @@
       }
     },
     {
-      "id": "E1_REDACAO",
+      "id": "INSC_REDACAO",
       "title": "Redação",
       "data": {
         "estado": {
@@ -720,7 +716,7 @@
             "children": [
               {
                 "type": "TextHeading",
-                "text": "Sua redação"
+                "text": "Sua Redação"
               },
               {
                 "type": "TextBody",
@@ -734,7 +730,7 @@
               {
                 "type": "TextArea",
                 "name": "texto_redacao",
-                "label": "Digite aqui seu texto",
+                "label": "Digite aqui seu texto dissertativo",
                 "required": true,
                 "max-length": 3000
               },
@@ -756,8 +752,8 @@
       }
     },
     {
-      "id": "E1_FIM",
-      "title": "Inscrição",
+      "id": "INSC_FIM",
+      "title": "Prova online",
       "terminal": true,
       "success": true,
       "data": {

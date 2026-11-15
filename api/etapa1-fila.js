@@ -148,33 +148,33 @@ export function createEtapa1({
     return null;
   }
 
-  // ---------------------------------------------------------------- Flow próprio da etapa 1 (telas E1_*)
+  // ---------------------------------------------------------------- Flow próprio da etapa 1 (telas INSC_*)
   // Flow separado (flows/etapa1-vestibular.json): sem login, sem matrícula e sem telas de espera.
   // Sempre em modo fila; a chave ETAPA1_FILA vale só para o Flow antigo.
   const valor = (...n) => n.map(x => 'valor_' + x);
-  const E1_KEYS = {
-    E1_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
-    E1_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
-    E1_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
-    E1_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
-    E1_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
-    E1_FIM: ['titulo', 'mensagem']
+  const INSC_KEYS = {
+    INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
+    INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
+    INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
+    INSC_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
+    INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
+    INSC_FIM: ['titulo', 'mensagem']
   };
-  const E1_PADRAO = { tem_erro: false, turno_visivel: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [] };
+  const INSC_PADRAO = { tem_erro: false, turno_visivel: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [] };
   const proj = l => (l ?? []).map(o => ({ id: String(o.id), title: String(o.title) }));
   function renderE1(screen, data) {
     const { values = {}, ...trusted } = data;
     const out = {};
-    for (const k of E1_KEYS[screen]) {
+    for (const k of INSC_KEYS[screen]) {
       if (k === 'estado') out.estado = sealState(screen, trusted);
       else if (k === 'tem_erro') out.tem_erro = Boolean(trusted.erro);
-      else if (k.startsWith('valor_')) out[k] = values[k.slice(6)] ?? E1_PADRAO[k] ?? '';
+      else if (k.startsWith('valor_')) out[k] = values[k.slice(6)] ?? INSC_PADRAO[k] ?? '';
       else if (['cursos', 'turnos', 'origens'].includes(k)) out[k] = proj(trusted[k]);
-      else out[k] = trusted[k] ?? E1_PADRAO[k] ?? '';
+      else out[k] = trusted[k] ?? INSC_PADRAO[k] ?? '';
     }
     return { screen, data: out };
   }
-  const fimE1 = (titulo, mensagem) => renderE1('E1_FIM', { titulo, mensagem });
+  const fimE1 = (titulo, mensagem) => renderE1('INSC_FIM', { titulo, mensagem });
   const processoE1 = () => String(process.env.ETAPA1_PROCESSO || '20383');
   function cacheUtilizavel(c) {
     return Boolean(c?.tema && c.cursos?.length && clock() - (c.atualizado ?? 0) < 30 * DIA &&
@@ -183,7 +183,7 @@ export function createEtapa1({
 
   async function routeE1(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
-    if (screen === 'E1_INICIO') {
+    if (screen === 'INSC_INICIO') {
       if (acao !== 'e1_iniciar') return null;
       const processo = processoE1();
       if (!requiresEssay(processo)) return fimE1('Inscrições indisponíveis', 'As inscrições pelo WhatsApp estão fechadas no momento. Acesse vestibular.unibalsas.edu.br/presencial.');
@@ -192,62 +192,62 @@ export function createEtapa1({
         console.error(JSON.stringify({ event: 'etapa1_fila_atencao', motivo: 'cache_indisponivel', processo }));
         return fimE1('Inscrições indisponíveis agora', 'Não conseguimos abrir a inscrição pelo WhatsApp neste momento. Tente de novo em alguns minutos ou inscreva-se pelo site vestibular.unibalsas.edu.br/presencial.');
       }
-      return renderE1('E1_DADOS', { e1: true, processo_seletivo_id: processo, data_maxima_nascimento: hoje(), erro: '' });
+      return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, data_maxima_nascimento: hoje(), erro: '' });
     }
-    if (!E1_KEYS[screen] || screen === 'E1_FIM') return null;
+    if (!INSC_KEYS[screen] || screen === 'INSC_FIM') return null;
     let s;
     try { s = openState(d.estado, screen); } catch { return fimE1('Sessão expirada', 'Esta inscrição ficou muito tempo parada e expirou. Abra a mensagem de inscrição de novo para recomeçar.'); }
     if (!s.e1) return null;
     const u = pick(d);
     const processo = s.processo_seletivo_id;
 
-    if (screen === 'E1_DADOS' && acao === 'enviar_dados_basicos') {
-      try { validateBasic(u); } catch (e) { return renderE1('E1_DADOS', { ...s, values: u, erro: e.message }); }
+    if (screen === 'INSC_DADOS' && acao === 'enviar_dados_basicos') {
+      try { validateBasic(u); } catch (e) { return renderE1('INSC_DADOS', { ...s, values: u, erro: e.message }); }
       const cache = await lerCache(processo);
-      return renderE1('E1_CURSO', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, ...u }, cursos: cache?.cursos ?? [], turnos: [], turno_visivel: false, erro: '' });
+      return renderE1('INSC_CURSO', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, ...u }, cursos: cache?.cursos ?? [], turnos: [], turno_visivel: false, erro: '' });
     }
 
     // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo (vindos do cache).
-    if (screen === 'E1_CURSO' && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
+    if (screen === 'INSC_CURSO' && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
       const curso = String(u.curso_id ?? '');
-      if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1('E1_CURSO', { ...s, erro: 'Selecione um curso.' });
+      if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1('INSC_CURSO', { ...s, erro: 'Selecione um curso.' });
       const turnos = (await lerCache(processo))?.turnos?.[curso] ?? [];
       if (acao === 'buscar_turnos' || curso !== s.curso_selecionado) {
-        if (!turnos.length) return renderE1('E1_CURSO', { ...s, curso_selecionado: curso, turnos: [], turno_visivel: false, values: { curso_id: curso }, erro: 'Nenhum turno disponível para este curso. Escolha outro curso.' });
+        if (!turnos.length) return renderE1('INSC_CURSO', { ...s, curso_selecionado: curso, turnos: [], turno_visivel: false, values: { curso_id: curso }, erro: 'Nenhum turno disponível para este curso. Escolha outro curso.' });
         const unico = turnos.length === 1 ? turnos[0].id : '';
-        return renderE1('E1_CURSO', { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { curso_id: curso, turno_id: unico }, erro: '' });
+        return renderE1('INSC_CURSO', { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { curso_id: curso, turno_id: unico }, erro: '' });
       }
       const turno = String(u.turno_id ?? '');
-      if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1('E1_CURSO', { ...s, values: { curso_id: curso }, erro: 'Selecione o turno.' });
-      return renderE1('E1_QUASE_LA', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, curso_id: curso, turno_id: turno }, origens, erro: '' });
+      if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1('INSC_CURSO', { ...s, values: { curso_id: curso }, erro: 'Selecione o turno.' });
+      return renderE1('INSC_QUASE_LA', { e1: true, processo_seletivo_id: processo, respostas: { ...s.respostas, curso_id: curso, turno_id: turno }, origens, erro: '' });
     }
 
-    if (screen === 'E1_QUASE_LA' && acao === 'enviar_informacoes_complementares') {
-      try { validateFinal({ ...u, origens: s.origens }); } catch (e) { return renderE1('E1_QUASE_LA', { ...s, values: u, erro: e.message }); }
+    if (screen === 'INSC_QUASE_LA' && acao === 'enviar_informacoes_complementares') {
+      try { validateFinal({ ...u, origens: s.origens }); } catch (e) { return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: e.message }); }
       const rec = await receberInscricao(processo, { ...s.respostas, ...u }, req.flow_token);
-      if (rec.erro) return renderE1('E1_QUASE_LA', { ...s, values: u, erro: rec.erro });
-      return renderE1('E1_ORIENTACAO', { e1: true, processo_seletivo_id: processo, fila_id: rec.id, erro: '' });
+      if (rec.erro) return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: rec.erro });
+      return renderE1('INSC_ORIENTACAO', { e1: true, processo_seletivo_id: processo, fila_id: rec.id, erro: '' });
     }
 
-    if (screen === 'E1_ORIENTACAO' && acao === 'iniciar_redacao') {
+    if (screen === 'INSC_ORIENTACAO' && acao === 'iniciar_redacao') {
       const tema = (await lerCache(processo))?.tema;
-      if (!tema) return renderE1('E1_ORIENTACAO', { ...s, erro: 'Não conseguimos carregar o tema agora. Toque em Iniciar redação de novo.' });
-      return renderE1('E1_REDACAO', { e1: true, processo_seletivo_id: processo, fila_id: s.fila_id, tema_redacao: tema, erro: '' });
+      if (!tema) return renderE1('INSC_ORIENTACAO', { ...s, erro: 'Não conseguimos carregar o tema agora. Toque em Iniciar redação de novo.' });
+      return renderE1('INSC_REDACAO', { e1: true, processo_seletivo_id: processo, fila_id: s.fila_id, tema_redacao: tema, erro: '' });
     }
 
-    if (screen === 'E1_REDACAO' && acao === 'enviar_redacao') {
+    if (screen === 'INSC_REDACAO' && acao === 'enviar_redacao') {
       const texto = String(u.texto_redacao ?? '').trim();
-      if (texto.length < 50) return renderE1('E1_REDACAO', { ...s, values: u, erro: 'Por favor, desenvolva mais a sua redação antes de enviar.' });
+      if (texto.length < 50) return renderE1('INSC_REDACAO', { ...s, values: u, erro: 'Por favor, desenvolva mais a sua redação antes de enviar.' });
       const erroRed = await receberRedacao(s.fila_id, texto, req.flow_token);
-      if (erroRed) return renderE1('E1_REDACAO', { ...s, values: u, erro: erroRed });
-      return fimE1('Redação enviada ✅', 'Recebemos sua inscrição e sua redação!\n\nAgora nossa equipe vai corrigir. Assim que a correção sair, você recebe uma mensagem aqui no WhatsApp para seguir para a próxima etapa.');
+      if (erroRed) return renderE1('INSC_REDACAO', { ...s, values: u, erro: erroRed });
+      return fimE1('Redação enviada ✅', 'Você realizou a sua prova. Em breve o resultado estará disponível.\n\nAssim que a correção sair, você recebe uma mensagem aqui no WhatsApp para seguir para a próxima etapa.');
     }
     return null;
   }
 
   async function route(req) {
     if (req?.action !== 'data_exchange') return null;
-    if (String(req.screen ?? '').startsWith('E1_')) {
+    if (String(req.screen ?? '').startsWith('INSC_')) {
       try { return await routeE1(req); }
       catch (e) {
         console.error(JSON.stringify({ event: 'etapa1_fila_atencao', motivo: 'erro_tela', screen: req.screen, message: String(e?.message ?? e).slice(0, 160) }));
