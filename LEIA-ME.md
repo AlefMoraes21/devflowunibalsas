@@ -1,3 +1,13 @@
+# Versão 1.7.0 — Etapa 1 do Vestibular em modo fila (Flow instantâneo)
+
+- **Desligado por padrão.** Liga com a variável `ETAPA1_FILA=on` no Cloud Run (desliga voltando para `off`, sem novo deploy).
+- Com o modo fila ligado e o cache completo, as telas de dados básicos, curso, "Estamos quase lá", abrir e enviar a redação respondem na hora, sem esperar o Rubeus. As respostas são conferidas com as mesmas regras do caminho de sempre.
+- Ao concluir a inscrição, os dados ficam guardados no Firestore (coleção `inscricoesFila`, criptografados) e um worker do Cloud Run repete no Rubeus exatamente os passos do caminho síncrono, conferindo cada tela. A redação é enviada assim que o candidato a entrega. Depois da entrega confirmada, os dados pessoais e o texto são apagados do registro.
+- Cache (coleção `flowCache`): cursos, turnos de todos os cursos e tema da redação. É aquecido pelo caminho síncrono (o primeiro candidato após ligar usa o caminho de sempre) e renovado pelo worker a cada 6 h. Sem cache completo, o Flow usa o caminho de sempre.
+- Duplicidade: consulta rápida na API da UniBalsas (`/blip/inscritos`, 2,5 s; `ETAPA1_CONSULTA_RM=off` desliga) e na própria fila; mostra a mensagem do site. Se o Rubeus acusar no envio, a inscrição fica `duplicada`.
+- Falhas: antes da conclusão, nova tentativa automática numa sessão nova (até 6, com espera crescente). Envio sem confirmação (conclusão ou redação) nunca é repetido: fica `conferir`. Logs: `etapa1_fila`, `etapa1_fila_erro`, `etapa1_fila_atencao` (erro, para a equipe), `etapa1_cache`.
+- O `flow-waba.json` não muda. 155 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-1.7.0`.
+
 # Versão 1.6.17 — Redação pré-carregada ao concluir a inscrição (Vestibular)
 
 O Rubeus gera o código da execução da prova (IDEXECPROVA) alguns segundos depois do "Iniciar prova", e o "Iniciar redação" esperava ou voltava para a orientação. Agora, no mesmo job que conclui a inscrição:

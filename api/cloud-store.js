@@ -29,19 +29,20 @@ export function createStore({request=googleRequest}={}){
     const r=await request(`${base()}/${collection}?documentId=${id}`,{method:'POST',body:{fields:fields(record)}});
     if(r.status===409)return false;if(r.status!==200)throw new Error('Não foi possível registrar o processamento.');return true;
   }
-  async function update(id,record,version){
-    const r=await request(`${base()}/flowJobs/${id}?currentDocument.updateTime=${encodeURIComponent(version)}`,{method:'PATCH',body:{fields:fields(record)}});
+  async function update(id,record,version,collection='flowJobs'){
+    const r=await request(`${base()}/${collection}/${id}?currentDocument.updateTime=${encodeURIComponent(version)}`,{method:'PATCH',body:{fields:fields(record)}});
     if([409,412].includes(r.status)||r.json?.error?.status==='FAILED_PRECONDITION')return false;
     if(r.status!==200)throw new Error('Não foi possível atualizar o processamento.');return true;
   }
   return {get,create,update};
 }
-export async function enqueueJob(id){
+// tipo: tarefas além dos jobs de tela (ex.: etapa1). Nome único por disparo; atrasoSeg agenda para depois.
+export async function enqueueJob(id,{tipo,atrasoSeg=0}={}){
   const project=process.env.FLOW_PROJECT_ID,region=process.env.FLOW_TASKS_REGION||'southamerica-east1',queue=process.env.FLOW_TASKS_QUEUE||'unibalsas-flow';
   const origin=new URL(process.env.FLOW_WORKER_ORIGIN);
   if(origin.protocol!=='https:'||!origin.hostname.endsWith('.run.app')||origin.pathname!=='/')throw new Error('Configure FLOW_WORKER_ORIGIN com a URL do Cloud Run.');
   const parent=`projects/${project}/locations/${region}/queues/${queue}`;
-  const r=await googleRequest(`https://cloudtasks.googleapis.com/v2/${parent}/tasks`,{method:'POST',body:{task:{name:`${parent}/tasks/flow-${id}`,dispatchDeadline:'180s',httpRequest:{httpMethod:'POST',url:new URL('/internal/flow-worker',origin).href,headers:{'Content-Type':'application/json','X-Flow-Worker-Signature':workerSignature(id)},body:Buffer.from(JSON.stringify({id})).toString('base64')}}}});
+  const r=await googleRequest(`https://cloudtasks.googleapis.com/v2/${parent}/tasks`,{method:'POST',body:{task:{name:tipo?`${parent}/tasks/${tipo}-${id.slice(0,32)}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`:`${parent}/tasks/flow-${id}`,...(atrasoSeg>0?{scheduleTime:new Date(Date.now()+atrasoSeg*1000).toISOString()}:{}),dispatchDeadline:'180s',httpRequest:{httpMethod:'POST',url:new URL('/internal/flow-worker',origin).href,headers:{'Content-Type':'application/json','X-Flow-Worker-Signature':workerSignature(id)},body:Buffer.from(JSON.stringify(tipo?{id,tipo}:{id})).toString('base64')}}}});
   if(![200,409].includes(r.status))throw new Error('Não foi possível agendar o processamento. Consulte novamente para tentar agendar.');
 }
 export async function claimProofDelivery(session){

@@ -7,7 +7,9 @@ import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
-import { listDocuments, saveDocument, readDocument } from "./documentos.js";
+import { listDocuments, saveDocument, readDocument, findInscription } from "./documentos.js";
+import { createEtapa1 } from "./etapa1-fila.js";
+import { createStore, enqueueJob, validWorkerSignature } from "./cloud-store.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -1162,7 +1164,10 @@ async function routeFlowRequest(requestData) {
 
         const submit = await submitForm(data.button_id, fields, data.token);
         const next = await getForm(submit.data.next, submit.data.local, submit.data.token ?? data.token);
-        return responseForScreen("CURSO_INTERESSE", await buildCourseScreenData(next, data.processo_seletivo_id));
+        const telaCurso = responseForScreen("CURSO_INTERESSE", await buildCourseScreenData(next, data.processo_seletivo_id));
+        // Modo fila: aproveita esta sessão (só leitura) para aquecer o cache de cursos e turnos.
+        if (!flowContext.getStore()?.worker) etapa1.aquecer(toStringValue(data.processo_seletivo_id), telaCurso).catch(() => {});
+        return telaCurso;
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1409,6 +1414,7 @@ async function routeFlowRequest(requestData) {
         sessao.binding=prepared.binding;
         await proofRouter.verifyBinding(data,sessao.binding);
         const tema=promptText(sessao.exam.questoes[0].enunciado);
+        etapa1.guardarTema(toStringValue(data.processo_seletivo_id),tema).catch(()=>{});
         return responseForScreen("TELA_REDACAO",{...data,sessao_avaliacao:sessao,tema_redacao:tema,erro:"",tem_erro:false});
       }catch(e){
         console.warn(JSON.stringify({event:"flow_error",action:"iniciar_redacao",message:e.message,write:flowContext.getStore()?.write?.status??null}));
@@ -1504,14 +1510,26 @@ const jobEngine=createJobEngine({
     return flowContext.run(context,async()=>{const response=await routeFlowRequest(request);return worker?{response,audit:{...context.audit,...(context.write?.receipt?{receipt:context.write.receipt}:{})}}:response})
   }
 });
+// Etapa 1 do Vestibular em modo fila (ETAPA1_FILA=on): telas instantâneas e envio ao Rubeus pelo worker.
+const etapa1=createEtapa1({
+  store:createStore(),enqueue:enqueueJob,sealState,openState,render:responseForScreen,
+  runStep:request=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request,write:null,worker:true},()=>routeFlowRequest(request)),
+  validateBasic,validateFinal,origens:ORIGENS_PADRAO,hoje:currentIsoDate,requiresEssay,academicId,userFields:USER_FIELDS,
+  jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
+});
 export async function workerHandler(req,res){
+  if(req.body?.tipo==="etapa1"){
+    if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
+    try{return res.status(await etapa1.worker(req.body.id)).send("")}
+    catch(error){console.error(JSON.stringify({event:"etapa1_worker_error",message:String(error?.message??error).slice(0,160)}));return res.status(500).send("")}
+  }
   try{return res.status(await jobEngine.worker(req.body?.id,req.headers["x-flow-worker-signature"])).send("")}
   catch(error){console.error(JSON.stringify({event:"flow_worker_error",kind:error.name,message:error.message}));return res.status(500).send("")}
 }
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.6.17" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.7.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1550,7 +1568,7 @@ export default async function handler(req, res) {
 
     const payload = await flowContext.run(
       { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
-      () => jobEngine.route(requestData)
+      async () => (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
     );
 
     const enc = encryptResponse(payload, aesKey, iv);
