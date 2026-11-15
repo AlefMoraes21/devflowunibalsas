@@ -35,7 +35,7 @@ gcloud projects add-iam-policy-binding "$flow_project" --member="serviceAccount:
 gcloud firestore fields ttls update expireAt --project="$flow_project" --database="$flow_database" --collection-group=flowJobs --enable-ttl --async
 gcloud firestore fields ttls update expireAt --project="$flow_project" --database="$flow_database" --collection-group=flowDeliveryLocks --enable-ttl --async
 
-gcloud run deploy "$flow_service" --project="$flow_project" --region="$flow_region" --source="$flow_source_dir" --timeout=180 --concurrency=20 --min-instances=1 --cpu-boost --update-env-vars="FLOW_PROJECT_ID=$flow_project,FLOW_DATABASE_ID=$flow_database,FLOW_TASKS_REGION=$flow_region,FLOW_TASKS_QUEUE=$flow_queue,FLOW_WORKER_ORIGIN=$flow_origin"
+gcloud run deploy "$flow_service" --project="$flow_project" --region="$flow_region" --source="$flow_source_dir" --timeout=180 --concurrency=20 --min-instances=0 --cpu-boost --update-env-vars="FLOW_PROJECT_ID=$flow_project,FLOW_DATABASE_ID=$flow_database,FLOW_TASKS_REGION=$flow_region,FLOW_TASKS_QUEUE=$flow_queue,FLOW_WORKER_ORIGIN=$flow_origin"
 
 echo 'Servidor implantado. Atualize também o flow-waba.json na Meta antes de testar.'
 curl --fail --silent --show-error "$flow_origin/api/flow"
