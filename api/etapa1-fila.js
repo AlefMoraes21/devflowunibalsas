@@ -212,8 +212,9 @@ export function createEtapa1({
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
     if (screen === 'INSC_INICIO') {
       if (acao !== 'e1_iniciar') return null;
-      const processo = processoE1();
-      if (!requiresEssay(processo)) return fimE1('Inscrições indisponíveis', 'As inscrições pelo WhatsApp estão fechadas no momento. Acesse vestibular.unibalsas.edu.br/presencial.');
+      const processo = String(d.processo_seletivo_id || processoE1());
+      // Este Flow faz a etapa 1 do Vestibular (inscrição + redação). Os outros processos têm etapas diferentes.
+      if (!requiresEssay(processo)) return fimE1('Inscrição pelo site', 'A inscrição deste processo seletivo pelo WhatsApp ainda não está disponível. Faça sua inscrição pelo site vestibular.unibalsas.edu.br/presencial.');
       return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, fila_id: hash('insc:' + processo + ':' + (req.flow_token ?? crypto.randomUUID())), data_maxima_nascimento: hoje(), erro: '' });
     }
     if (!INSC_KEYS[screen] || screen === 'INSC_FIM') return null;

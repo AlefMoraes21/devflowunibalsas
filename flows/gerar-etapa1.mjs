@@ -31,12 +31,20 @@ const flow = {
       title: 'Inscrição',
       layout: {
         type: 'SingleColumnLayout',
-        children: [
-          { type: 'TextHeading', text: 'Inscrição' },
-          { type: 'TextSubheading', text: 'Vestibular Online - Cursos presenciais' },
-          { type: 'TextBody', text: 'Dados básicos\nCurso de interesse\nEstamos quase lá\nProva online' },
-          { type: 'Footer', label: 'Iniciar inscrição', 'on-click-action': { name: 'data_exchange', payload: { acao: 'e1_iniciar' } } }
-        ]
+        children: [{
+          type: 'Form', name: 'form_processo',
+          children: [
+            { type: 'TextHeading', text: 'Inscrição' },
+            // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
+            { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
+              { id: '20383', title: 'Vestibular Online 2027/1' },
+              { id: '20385', title: 'Transferência 2027/1' },
+              { id: '20384', title: 'Portador de Diploma 2027/1' },
+              { id: '20386', title: 'Nota do ENEM 2027/1' }
+            ] },
+            { type: 'Footer', label: 'Iniciar inscrição', 'on-click-action': { name: 'data_exchange', payload: { acao: 'e1_iniciar', processo_seletivo_id: '${form.processo_seletivo_id}' } } }
+          ]
+        }]
       }
     },
     {

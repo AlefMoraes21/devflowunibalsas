@@ -239,7 +239,7 @@ test('Flow E1: JSON válido para a Meta (rotas, ações e chaves)', () => {
 test('Flow INSC: cada tela grava no Google e responde na hora; o worker grava no Rubeus em segundo plano', async () => {
   const { e1: E, store, fila, rubeus } = montar();
   await cacheCompleto(store);
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   assert.equal(dados.screen, 'INSC_DADOS');
   const erro = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, { ...BASICOS, nome: 'Ana' });
   assert.equal(erro.screen, 'INSC_DADOS'); assert.equal(erro.data.valor_nome, 'Ana'); assert.equal(erro.data.tem_erro, true);
@@ -271,7 +271,7 @@ test('Flow INSC: cada tela grava no Google e responde na hora; o worker grava no
 test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preencheu', async () => {
   const { e1: E, store, fila, rubeus } = montar();
   await cacheCompleto(store);
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const id = fila[0].id;
   await E.worker(id);
@@ -290,7 +290,7 @@ test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do 
   let E;
   const pend = [];
   E = createEtapa1({ ativo: () => false, store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: ms => new Promise(r => setTimeout(r, 5)), log: () => {} });
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined);
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
   assert.deepEqual(curso.data.cursos, CURSOS);
@@ -312,4 +312,14 @@ test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do F
   assert.equal(antigo.screen, 'INSC_FIM');
   const dados = await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.endpoint({ action: 'data_exchange', screen: 'INSC_INICIO', flow_token: 'x', data: { acao: 'e1_iniciar' } }));
   assert.equal(dados.screen, 'INSC_DADOS');
+});
+
+test('Flow INSC: primeira tela escolhe o processo; só o Vestibular segue neste Flow', async () => {
+  const { e1: E } = montar();
+  const tela = telaE1('INSC_INICIO');
+  assert.match(JSON.stringify(tela.layout), /Escolha o processo seletivo/);
+  const outro = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20385' });
+  assert.equal(outro.screen, 'INSC_FIM');
+  const vest = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
+  assert.equal(vest.screen, 'INSC_DADOS');
 });
