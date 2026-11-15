@@ -393,3 +393,15 @@ test('Realizar prova logo após concluir: abre a redação na hora; o worker ins
   assert.equal(rec.status, 'concluida');
   assert.equal(avisos.length, 0, 'já fez a prova: não recebe o aviso de prova liberada');
 });
+
+test('Mesmo flow_token (prévia da WABA ou mensagem reaberta): cada Iniciar inscrição é uma inscrição nova', async () => {
+  const { e1: E, store, fila } = montar();
+  await cacheCompleto(store);
+  const a = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' }, 'mesmo');
+  await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', a.data.estado, BASICOS, 'mesmo');
+  const b = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' }, 'mesmo');
+  await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', b.data.estado, { ...BASICOS, nome: 'Bruno Lima Teste' }, 'mesmo');
+  const ids = [...new Set(fila.map(f => f.id))];
+  assert.equal(ids.length, 2);
+  assert.equal((await store.get(ids[0], 'inscricoesFila')).record.respostas.nome, BASICOS.nome, 'a primeira não é sobrescrita');
+});

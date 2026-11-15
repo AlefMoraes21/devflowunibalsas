@@ -225,7 +225,7 @@ export function createEtapa1({
       if (acao !== 'e1_iniciar') return null;
       const processo = String(d.processo_seletivo_id || processoE1());
       if (!academicId(processo)) return fimE1('Inscrição pelo site', 'Este processo seletivo não está disponível pelo WhatsApp. Faça sua inscrição pelo site vestibular.unibalsas.edu.br/presencial.');
-      return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, eh_nota_enem: ehEnem(processo), fila_id: hash('insc:' + processo + ':' + (req.flow_token ?? crypto.randomUUID())), data_maxima_nascimento: hoje(), erro: '' });
+      return renderE1('INSC_DADOS', { e1: true, processo_seletivo_id: processo, eh_nota_enem: ehEnem(processo), fila_id: hash('insc:' + processo + ':' + (req.flow_token ?? '') + ':' + crypto.randomUUID()), data_maxima_nascimento: hoje(), erro: '' });
     }
     if (!INSC_KEYS[screen] || screen === 'INSC_FIM') return null;
     let s;
