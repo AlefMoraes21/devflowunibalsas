@@ -1,6 +1,12 @@
 // Gera flows/etapa1-vestibular.json (Flow da etapa 1 do Vestibular: inscrição + redação).
 // Uso: node flows/gerar-etapa1.mjs
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
+
+// Logos vermelhos com fundo transparente (flows/img), embutidos em base64 como pede o Flow JSON.
+const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('base64');
+const LOGO_UNIBALSAS = png('logo_unibalsas.png');
+const LOGO_PORTAL = png('logo_portal.png');
+const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'contain' });
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
 const bool = (ex = false) => ({ type: 'boolean', __example__: ex });
@@ -30,7 +36,10 @@ const flow = {
     INSC_PRIVACIDADE: [],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
-    INSC_CONCLUIDA: ['INSC_REDACAO', 'INSC_FIM'],
+    INSC_CONCLUIDA: ['INSC_PORTAL'],
+    INSC_PORTAL: ['INSC_AVALIACAO'],
+    INSC_AVALIACAO: ['INSC_ORIENTACAO'],
+    INSC_ORIENTACAO: ['INSC_REDACAO', 'INSC_FIM'],
     INSC_REDACAO: ['INSC_FIM'],
     INSC_FIM: []
   },
@@ -161,17 +170,68 @@ const flow = {
       }
     },
     {
+      // Igual à tela do site após a inscrição ("Obrigado pelo seu cadastro!").
       id: 'INSC_CONCLUIDA',
       title: 'Inscrição',
+      data: { estado: str() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_UNIBALSAS, 40),
+          { type: 'TextSubheading', text: '✅ Obrigado pelo seu cadastro!' },
+          { type: 'TextBody', text: 'Sua inscrição foi recebida. Agora é só acessar o Portal do Candidato para acompanhar cada etapa.' },
+          { type: 'TextCaption', text: 'Aproveite para conhecer mais sobre a nossa instituição acessando nossas redes sociais!' },
+          { type: 'Footer', label: 'Acessar Portal do Candidato', 'on-click-action': troca('abrir_portal') }
+        ]
+      }
+    },
+    {
+      // Igual ao status do Portal do candidato.
+      id: 'INSC_PORTAL',
+      title: 'Portal do candidato',
+      data: { estado: str() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_PORTAL, 40),
+          { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
+          { type: 'TextSubheading', text: '✅ Inscrição' },
+          { type: 'TextCaption', text: 'Concluída' },
+          { type: 'TextSubheading', text: '❗ Prova online' },
+          { type: 'TextCaption', text: 'Prova disponível' },
+          { type: 'Footer', label: 'Realizar prova', 'on-click-action': troca('realizar_prova') }
+        ]
+      }
+    },
+    {
+      // Igual à página "Avaliação online disponível" do site.
+      id: 'INSC_AVALIACAO',
+      title: 'Prova online',
+      data: { estado: str() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_PORTAL, 40),
+          { type: 'TextSubheading', text: 'Avaliação online disponível ✅' },
+          { type: 'TextBody', text: 'Por ser 100% online, sua prova pode ser feita no conforto da sua casa ou em qualquer lugar com acesso à internet.' },
+          { type: 'TextBody', text: 'Clique no botão abaixo e veja todos os detalhes.' },
+          { type: 'Footer', label: 'Iniciar prova', 'on-click-action': troca('iniciar_prova') }
+        ]
+      }
+    },
+    {
+      id: 'INSC_ORIENTACAO',
+      title: 'Prova online',
       data: { estado: str(), erro: str(), tem_erro: bool() },
       layout: {
         type: 'SingleColumnLayout',
         children: [
-          { type: 'TextHeading', text: 'Obrigado pelo seu cadastro! ✅' },
+          { type: 'TextHeading', text: 'Prova de Redação' },
+          { type: 'TextSubheading', text: 'Redação online' },
           erroTexto,
-          { type: 'TextSubheading', text: 'Prova online: Prova disponível' },
-          { type: 'EmbeddedLink', text: 'Sair (realizar a prova de redação em outro momento)', 'on-click-action': troca('sair') },
-          { type: 'Footer', label: 'Realizar prova', 'on-click-action': troca('iniciar_redacao') }
+          { type: 'TextBody', text: 'Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo sobre o tema apresentado na próxima tela.' },
+          { type: 'TextCaption', text: 'Sua redação só é enviada quando você tocar em Enviar redação.' },
+          { type: 'Footer', label: 'Iniciar redação', 'on-click-action': troca('iniciar_redacao') }
         ]
       }
     },

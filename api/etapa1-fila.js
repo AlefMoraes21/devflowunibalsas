@@ -162,7 +162,10 @@ export function createEtapa1({
     INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
     INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
     INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'anos_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM_CAMPOS)],
-    INSC_CONCLUIDA: ['estado', 'erro', 'tem_erro'],
+    INSC_CONCLUIDA: ['estado'],
+    INSC_PORTAL: ['estado'],
+    INSC_AVALIACAO: ['estado'],
+    INSC_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
     INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
     INSC_FIM: ['titulo', 'mensagem']
   };
@@ -287,16 +290,17 @@ export function createEtapa1({
       return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo });
     }
 
-    // "Obrigado pelo seu cadastro!": Realizar prova agora, ou Sair e fazer depois (aviso pelo WhatsApp).
-    if (screen === 'INSC_CONCLUIDA' && acao === 'sair') {
-      return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo, prova: 'depois' });
-    }
-    if (screen === 'INSC_CONCLUIDA' && acao === 'iniciar_redacao') {
+    // Igual ao site: Obrigado pelo seu cadastro → Portal do candidato → Avaliação online disponível →
+    // instruções → redação. Fechar o Flow em qualquer ponto deixa o candidato só como inscrito.
+    if (screen === 'INSC_CONCLUIDA' && acao === 'abrir_portal') return renderE1('INSC_PORTAL', { ...base });
+    if (screen === 'INSC_PORTAL' && acao === 'realizar_prova') return renderE1('INSC_AVALIACAO', { ...base });
+    if (screen === 'INSC_AVALIACAO' && acao === 'iniciar_prova') return renderE1('INSC_ORIENTACAO', { ...base, erro: '' });
+    if (screen === 'INSC_ORIENTACAO' && acao === 'iniciar_redacao') {
       const f = await store.get(s.fila_id, FILA);
-      if (!f) return renderE1('INSC_CONCLUIDA', { ...s, erro: 'Não encontramos sua inscrição. Toque em Sair e aguarde nossa mensagem.' });
+      if (!f) return renderE1('INSC_ORIENTACAO', { ...s, erro: 'Não encontramos sua inscrição. Tente de novo em alguns minutos.' });
       const pr = await prepararRedacao(f, { aberta: true });
       if (pr.fim) return pr.fim;
-      if (pr.erro) return renderE1('INSC_CONCLUIDA', { ...s, erro: pr.erro });
+      if (pr.erro) return renderE1('INSC_ORIENTACAO', { ...s, erro: pr.erro });
       return renderE1('INSC_REDACAO', { ...base, tema_redacao: pr.tema, erro: '' });
     }
 

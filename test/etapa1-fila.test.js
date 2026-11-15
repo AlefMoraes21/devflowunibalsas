@@ -253,17 +253,27 @@ async function etapa1(E, processo = '20383', extra = {}) {
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   return quase;
 }
+// Como no site: Obrigado pelo seu cadastro → Portal do candidato → Avaliação online → instruções.
+async function ateOrientacao(concl) {
+  const E = ateOrientacao.E;
+  const portal = await e1(E, 'INSC_CONCLUIDA', 'abrir_portal', concl.data.estado, {}, 'ft-e1');
+  assert.equal(portal.screen, 'INSC_PORTAL');
+  const aval = await e1(E, 'INSC_PORTAL', 'realizar_prova', portal.data.estado, {}, 'ft-e1');
+  assert.equal(aval.screen, 'INSC_AVALIACAO');
+  return e1(E, 'INSC_AVALIACAO', 'iniciar_prova', aval.data.estado, {}, 'ft-e1');
+}
 const SUCCESS = r => { assert.equal(r.screen, 'SUCCESS'); return r.data.extension_message_response.params; };
 
 test('Etapa 1: cada tela grava no Google; Concluir fecha o Flow na hora com dados_recebidos', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const quase = await etapa1(E);
   assert.equal(quase.data.eh_nota_enem, false);
   const concl = confere('INSC_QUASE_LA', await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1'));
   assert.equal(concl.screen, 'INSC_CONCLUIDA', 'Vestibular: tela "Obrigado pelo seu cadastro!" com Realizar prova');
-  const params = SUCCESS(await toque(E, 'INSC_CONCLUIDA', 'sair', concl.data.estado, {}, 'ft-e1'));
-  assert.equal(params.status, 'dados_recebidos'); assert.equal(params.flow_token, 'ft-e1'); assert.ok(params.protocolo_fila);
+  const orient = await ateOrientacao(concl);
+  assert.equal(orient.screen, 'INSC_ORIENTACAO', 'Portal do candidato → Avaliação online disponível → instruções');
   assert.equal(rubeus.chamadas.length, 0, 'o Flow não esperou o Rubeus');
   const id = fila[0].id;
   assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.celular, BASICOS.celular, 'telefone guardado para o aviso');
@@ -277,6 +287,7 @@ test('Etapa 1: cada tela grava no Google; Concluir fecha o Flow na hora com dado
 
 test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha o Flow e o worker entrega', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const quase = await etapa1(E);
   await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
@@ -300,6 +311,7 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
 
 test('Etapa 1 ENEM: notas na última tela; o worker só envia o curso com as notas e conclui sem redação', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
+  ateOrientacao.E = E;
   await store.create('etapa1-20386', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
   const quase = await etapa1(E, '20386');
   assert.equal(quase.data.eh_nota_enem, true); assert.equal(quase.data.anos_enem.length, 1);
@@ -320,6 +332,7 @@ test('Etapa 1 ENEM: notas na última tela; o worker só envia o curso com as not
 
 test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preencheu', async () => {
   const { e1: E, store, fila, rubeus } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
@@ -371,6 +384,7 @@ test('Blip: sem configuração não envia; com configuração monta a campanha i
 
 test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do Flow antigo', async () => {
   const { e1: E, store } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const init = await E.endpoint({ action: 'INIT', flow_token: 'x' });
   assert.equal(init.screen, 'INSC_INICIO');
@@ -381,10 +395,12 @@ test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do F
 
 test('Realizar prova logo após concluir: abre a redação na hora; o worker inscreve e entrega sem mandar aviso', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const quase = await etapa1(E);
   const concl = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
-  const red = confere('INSC_CONCLUIDA', await toque(E, 'INSC_CONCLUIDA', 'iniciar_redacao', concl.data.estado, {}, 'ft-e1'));
+  const orient = await ateOrientacao(concl);
+  const red = confere('INSC_ORIENTACAO', await toque(E, 'INSC_ORIENTACAO', 'iniciar_redacao', orient.data.estado, {}, 'ft-e1'));
   assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
   assert.equal(rubeus.chamadas.length, 0);
   assert.equal(SUCCESS(await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, 'ft-e1')).status, 'redacao_recebida');
@@ -396,6 +412,7 @@ test('Realizar prova logo após concluir: abre a redação na hora; o worker ins
 
 test('Mesmo flow_token (prévia da WABA ou mensagem reaberta): cada Iniciar inscrição é uma inscrição nova', async () => {
   const { e1: E, store, fila } = montar();
+  ateOrientacao.E = E;
   await cacheCompleto(store);
   const a = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' }, 'mesmo');
   await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', a.data.estado, BASICOS, 'mesmo');
