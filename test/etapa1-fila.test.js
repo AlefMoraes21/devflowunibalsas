@@ -260,8 +260,9 @@ test('Etapa 1: cada tela grava no Google; Concluir fecha o Flow na hora com dado
   await cacheCompleto(store);
   const quase = await etapa1(E);
   assert.equal(quase.data.eh_nota_enem, false);
-  const fim = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
-  const params = SUCCESS(fim);
+  const concl = confere('INSC_QUASE_LA', await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1'));
+  assert.equal(concl.screen, 'INSC_CONCLUIDA', 'Vestibular: tela "Obrigado pelo seu cadastro!" com Realizar prova');
+  const params = SUCCESS(await toque(E, 'INSC_CONCLUIDA', 'sair', concl.data.estado, {}, 'ft-e1'));
   assert.equal(params.status, 'dados_recebidos'); assert.equal(params.flow_token, 'ft-e1'); assert.ok(params.protocolo_fila);
   assert.equal(rubeus.chamadas.length, 0, 'o Flow não esperou o Rubeus');
   const id = fila[0].id;
@@ -376,4 +377,19 @@ test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do F
   assert.deepEqual(await E.endpoint({ action: 'ping' }), { data: { status: 'active' } });
   const antigo = await E.endpoint({ action: 'data_exchange', screen: 'ESCOLHA_PROCESSO', data: { acao: 'selecionar_processo' } });
   assert.equal(antigo.screen, 'INSC_FIM');
+});
+
+test('Realizar prova logo após concluir: abre a redação na hora; o worker inscreve e entrega sem mandar aviso', async () => {
+  const { e1: E, store, fila, rubeus, avisos } = montar();
+  await cacheCompleto(store);
+  const quase = await etapa1(E);
+  const concl = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
+  const red = confere('INSC_CONCLUIDA', await toque(E, 'INSC_CONCLUIDA', 'iniciar_redacao', concl.data.estado, {}, 'ft-e1'));
+  assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
+  assert.equal(rubeus.chamadas.length, 0);
+  assert.equal(SUCCESS(await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO }, 'ft-e1')).status, 'redacao_recebida');
+  await E.worker(fila[0].id);
+  const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'concluida');
+  assert.equal(avisos.length, 0, 'já fez a prova: não recebe o aviso de prova liberada');
 });

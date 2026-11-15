@@ -162,6 +162,7 @@ export function createEtapa1({
     INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
     INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
     INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'anos_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM_CAMPOS)],
+    INSC_CONCLUIDA: ['estado', 'erro', 'tem_erro'],
     INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
     INSC_FIM: ['titulo', 'mensagem']
   };
@@ -282,7 +283,21 @@ export function createEtapa1({
         await gravarTela(s.fila_id, processo, req.flow_token, u, { concluida_em: clock() });
         log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'dados_recebidos', status: 'pendente' });
       } catch (e) { falha('quase_la', e); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: ERRO_GRAVAR }); }
+      if (requiresEssay(processo)) return renderE1('INSC_CONCLUIDA', { ...base, erro: '' });
       return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo });
+    }
+
+    // "Obrigado pelo seu cadastro!": Realizar prova agora, ou Sair e fazer depois (aviso pelo WhatsApp).
+    if (screen === 'INSC_CONCLUIDA' && acao === 'sair') {
+      return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo, prova: 'depois' });
+    }
+    if (screen === 'INSC_CONCLUIDA' && acao === 'iniciar_redacao') {
+      const f = await store.get(s.fila_id, FILA);
+      if (!f) return renderE1('INSC_CONCLUIDA', { ...s, erro: 'Não encontramos sua inscrição. Toque em Sair e aguarde nossa mensagem.' });
+      const pr = await prepararRedacao(f, { aberta: true });
+      if (pr.fim) return pr.fim;
+      if (pr.erro) return renderE1('INSC_CONCLUIDA', { ...s, erro: pr.erro });
+      return renderE1('INSC_REDACAO', { ...base, tema_redacao: pr.tema, erro: '' });
     }
 
     // Etapa 2: envio da redação também só grava, agenda e fecha o Flow na hora.
@@ -304,13 +319,32 @@ export function createEtapa1({
     try { idx = await store.get(hash(ft), TOKENS); } catch {}
     if (!idx) return null;
     const f = await store.get(idx.record.fila_id, FILA);
-    const rec = f?.record;
-    if (!rec) return fimE1('Inscrição não encontrada', 'Não encontramos sua inscrição. Fale com a nossa equipe por aqui.');
-    if (rec.redacao || ['concluida', 'conferir'].includes(rec.status) || !['redacao', 'redacao_enviar'].includes(rec.passo)) {
-      if (rec.redacao || rec.status === 'concluida') return fimE1('Redação enviada ✅', 'Você realizou a sua prova. Em breve o resultado estará disponível.');
-      return fimE1('Prova em preparação', 'Sua prova ainda está sendo preparada. Abra a mensagem de novo em alguns minutos.');
-    }
+    if (!f?.record) return fimE1('Inscrição não encontrada', 'Não encontramos sua inscrição. Fale com a nossa equipe por aqui.');
+    const pr = await prepararRedacao(f);
+    if (pr.fim) return pr.fim;
+    if (pr.erro) return fimE1('Prova em preparação', pr.erro);
+    return renderE1('INSC_REDACAO', { e1: true, processo_seletivo_id: f.record.processo, fila_id: f.record.id, tema_redacao: pr.tema, erro: '' });
+  }
+
+  // Devolve { tema } quando a redação pode abrir, { erro } para tentar de novo ou { fim } (tela final).
+  async function prepararRedacao(f, { aberta = false } = {}) {
+    const rec = f.record;
+    if (rec.redacao || rec.status === 'concluida') return { fim: fimE1('Redação enviada ✅', 'Você realizou a sua prova. Em breve o resultado estará disponível.') };
+    if (['conferir', 'duplicada', 'falhou'].includes(rec.status)) return { fim: fimE1('Vamos conferir sua inscrição', 'Nossa equipe vai conferir sua inscrição e falar com você por aqui.') };
     let tema = (await lerCache(rec.processo))?.tema;
+    // Tema guardado: a redação abre na hora, mesmo com o worker ainda concluindo a inscrição no Rubeus
+    // (o texto fica guardado e é enviado quando a prova estiver pronta).
+    if (tema) {
+      if (aberta && !rec.redacao_aberta) {
+        for (let i = 0, a = f; i < 3 && a; i++) {
+          if (await store.update(rec.id, { ...a.record, redacao_aberta: clock() }, a.version, FILA).catch(() => false)) break;
+          a = await store.get(rec.id, FILA);
+        }
+      }
+      log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'redacao_aberta' });
+      return { tema };
+    }
+    if (!['redacao', 'redacao_enviar'].includes(rec.passo)) return { erro: 'Estamos concluindo sua inscrição no sistema. Aguarde alguns segundos e toque em Realizar prova de novo.' };
     if (!tema && rec.passo === 'redacao' && rec.ck) {
       // Primeira vez (tema ainda não guardado): o candidato abriu a redação, então a prova é aberta agora.
       try {
@@ -319,13 +353,13 @@ export function createEtapa1({
         if (r?.screen === 'TELA_REDACAO' && st.tema_redacao) {
           tema = st.tema_redacao;
           guardarTema(rec.processo, tema).catch(() => {});
-          if (!((rec.rodando_ate ?? 0) > clock())) await store.update(rec.id, { ...rec, passo: 'redacao_enviar', ck: { screen: r.screen, estado: r.data.estado } }, f.version, FILA).catch(() => false);
+          if (!((rec.rodando_ate ?? 0) > clock())) await store.update(rec.id, { ...rec, passo: 'redacao_enviar', ck: { screen: r.screen, estado: r.data.estado }, ...(aberta ? { redacao_aberta: clock() } : {}) }, f.version, FILA).catch(() => false);
         }
       } catch (e) { falha('abrir_prova', e); }
     }
-    if (!tema) return fimE1('Prova em preparação', 'Não conseguimos carregar o tema agora. Abra a mensagem de novo em alguns minutos.');
+    if (!tema) return { erro: 'Não conseguimos carregar o tema agora. Toque de novo em alguns segundos.' };
     log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'redacao_aberta' });
-    return renderE1('INSC_REDACAO', { e1: true, processo_seletivo_id: rec.processo, fila_id: rec.id, tema_redacao: tema, erro: '' });
+    return { tema };
   }
 
   // Endpoint próprio (/api/flow/etapa1), opcional: o mesmo Flow também funciona em /api/flow.
@@ -443,6 +477,8 @@ export function createEtapa1({
   const abrirCurso = r => abrir(r, TELAS_CURSO.includes(r?.screen) ? r.screen : 'CURSO_INTERESSE');
   // Aviso da etapa 2: link novo (flow_token) guardado só como hash; o texto vai ao Blip.
   async function avisarEtapa2(rec, salvar) {
+    const atual = (await store.get(rec.id, FILA))?.record;
+    if (atual?.redacao || atual?.redacao_aberta) return salvar({ aviso_redacao: 'dispensado' });
     const token = crypto.randomBytes(18).toString('base64url');
     await store.create(hash(token), { fila_id: rec.id, expires: clock() + 30 * DIA }, 'flowTokens');
     const enviado = await avisar({ celular: rec.respostas?.celular, nome: rec.respostas?.nome, flowToken: token }).catch(() => false);

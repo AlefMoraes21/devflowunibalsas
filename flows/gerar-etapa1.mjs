@@ -21,7 +21,8 @@ const flow = {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM'],
     INSC_DADOS: ['INSC_CURSO', 'INSC_FIM'],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_QUASE_LA: ['INSC_FIM'],
+    INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
+    INSC_CONCLUIDA: ['INSC_REDACAO', 'INSC_FIM'],
     INSC_REDACAO: ['INSC_FIM'],
     INSC_FIM: []
   },
@@ -141,6 +142,22 @@ const flow = {
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]
         }]
+      }
+    },
+    {
+      id: 'INSC_CONCLUIDA',
+      title: 'Inscrição',
+      data: { estado: str(), erro: str(), tem_erro: bool() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          { type: 'TextHeading', text: 'Obrigado pelo seu cadastro! ✅' },
+          erroTexto,
+          { type: 'TextSubheading', text: 'Prova online: Prova disponível' },
+          { type: 'TextBody', text: 'Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo.' },
+          { type: 'EmbeddedLink', text: 'Sair (realizar a prova de redação em outro momento)', 'on-click-action': troca('sair') },
+          { type: 'Footer', label: 'Realizar prova', 'on-click-action': troca('iniciar_redacao') }
+        ]
       }
     },
     {

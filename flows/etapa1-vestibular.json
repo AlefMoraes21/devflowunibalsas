@@ -15,6 +15,11 @@
       "INSC_FIM"
     ],
     "INSC_QUASE_LA": [
+      "INSC_CONCLUIDA",
+      "INSC_FIM"
+    ],
+    "INSC_CONCLUIDA": [
+      "INSC_REDACAO",
       "INSC_FIM"
     ],
     "INSC_REDACAO": [
@@ -764,6 +769,68 @@
                 }
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "INSC_CONCLUIDA",
+      "title": "Inscrição",
+      "data": {
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Obrigado pelo seu cadastro! ✅"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.erro}",
+            "visible": "${data.tem_erro}"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "Prova online: Prova disponível"
+          },
+          {
+            "type": "TextBody",
+            "text": "Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo."
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Sair (realizar a prova de redação em outro momento)",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "sair",
+                "estado": "${data.estado}"
+              }
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "Realizar prova",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "acao": "iniciar_redacao",
+                "estado": "${data.estado}"
+              }
+            }
           }
         ]
       }
