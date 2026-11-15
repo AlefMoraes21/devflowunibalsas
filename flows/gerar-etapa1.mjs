@@ -14,12 +14,20 @@ const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nasci
 const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
 const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM];
 
+const DADOS_DATA = {
+  estado: str(), erro: str(), tem_erro: bool(), data_maxima_nascimento: str('2026-11-15'),
+  valor_nome: str(), valor_possui_nome_social: bool(), valor_nome_social: str(), valor_email: str(),
+  valor_data_nascimento: str(), valor_celular: str(), valor_genero: str(), valor_aceite_privacidade: bool()
+};
+const DADOS_PAYLOAD = Object.fromEntries(Object.keys(DADOS_DATA).map(k => [k, '${data.' + k + '}']));
+
 const flow = {
   version: '7.3',
   data_api_version: '3.0',
   routing_model: {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM'],
-    INSC_DADOS: ['INSC_CURSO', 'INSC_FIM'],
+    INSC_DADOS: ['INSC_CURSO', 'INSC_PRIVACIDADE', 'INSC_FIM'],
+    INSC_PRIVACIDADE: ['INSC_DADOS'],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
     INSC_CONCLUIDA: ['INSC_REDACAO', 'INSC_FIM'],
@@ -51,11 +59,7 @@ const flow = {
     {
       id: 'INSC_DADOS',
       title: 'Dados básicos',
-      data: {
-        estado: str(), erro: str(), tem_erro: bool(), data_maxima_nascimento: str('2026-11-15'),
-        valor_nome: str(), valor_possui_nome_social: bool(), valor_nome_social: str(), valor_email: str(),
-        valor_data_nascimento: str(), valor_celular: str(), valor_genero: str(), valor_aceite_privacidade: bool()
-      },
+      data: DADOS_DATA,
       layout: {
         type: 'SingleColumnLayout',
         children: [{
@@ -72,10 +76,22 @@ const flow = {
             { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', 'max-date': '${data.data_maxima_nascimento}', required: true },
             { type: 'TextInput', name: 'celular', label: 'Celular', 'helper-text': 'Para facilitar o nosso contato, informe o seu WhatsApp, de preferência.', 'input-type': 'phone', required: true },
             { type: 'RadioButtonsGroup', name: 'genero', label: 'Gênero', required: true, 'data-source': [{ id: 'M', title: 'Masculino' }, { id: 'F', title: 'Feminino' }] },
-            { type: 'OptIn', name: 'aceite_privacidade', label: 'Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.', required: true, 'on-click-action': { name: 'open_url', url: 'https://lp.unibalsas.edu.br/lgpd/' } },
+            { type: 'OptIn', name: 'aceite_privacidade', label: 'Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.', required: true, 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'INSC_PRIVACIDADE' }, payload: DADOS_PAYLOAD } },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_dados_basicos', form(DADOS)) }
           ]
         }]
+      }
+    },
+    {
+      id: 'INSC_PRIVACIDADE',
+      title: 'Privacidade',
+      data: DADOS_DATA,
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          { type: 'TextCaption', text: 'A Faculdade de Balsas - Unibalsas preza pelos preceitos fundamentais de confiabilidade de seus contratantes e qualidade de seus serviços prestados, levando em consideração o princípio da boa-fé e estando comprometida com a proteção e privacidade dos seus dados pessoais.\n\nOs dados informados serão utilizados exclusivamente para o gerenciamento de sua inscrição e comunicação no processo seletivo vigente.\n\nPara maiores detalhes e contato com nosso DPO, acesse: https://lp.unibalsas.edu.br/lgpd/' },
+          { type: 'Footer', label: 'Voltar', 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'INSC_DADOS' }, payload: DADOS_PAYLOAD } }
+        ]
       }
     },
     {
@@ -154,7 +170,6 @@ const flow = {
           { type: 'TextHeading', text: 'Obrigado pelo seu cadastro! ✅' },
           erroTexto,
           { type: 'TextSubheading', text: 'Prova online: Prova disponível' },
-          { type: 'TextBody', text: 'Você tem até 120 minutos para elaborar um texto dissertativo-argumentativo.' },
           { type: 'EmbeddedLink', text: 'Sair (realizar a prova de redação em outro momento)', 'on-click-action': troca('sair') },
           { type: 'Footer', label: 'Realizar prova', 'on-click-action': troca('iniciar_redacao') }
         ]
