@@ -11,9 +11,7 @@
       "INSC_PRIVACIDADE",
       "INSC_FIM"
     ],
-    "INSC_PRIVACIDADE": [
-      "INSC_DADOS"
-    ],
+    "INSC_PRIVACIDADE": [],
     "INSC_CURSO": [
       "INSC_QUASE_LA",
       "INSC_FIM"
