@@ -1528,6 +1528,7 @@ export async function workerHandler(req,res){
 }
 
 export default async function handler(req, res) {
+  const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
     return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-1.8.0" });
   }
@@ -1568,13 +1569,18 @@ export default async function handler(req, res) {
 
     const payload = await flowContext.run(
       { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
-      async () => (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
+      async () => rotaEtapa1 ? etapa1.endpoint(requestData) : (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
     );
 
     const enc = encryptResponse(payload, aesKey, iv);
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(enc);
   } catch (err) {
+    if (aesKey && iv && rotaEtapa1) {
+      console.error(JSON.stringify({event:"etapa1_fila_atencao",motivo:"erro_endpoint",message:String(err?.message??err).slice(0,160)}));
+      const enc=encryptResponse(etapa1.renderE1("INSC_FIM",{titulo:"Algo deu errado",mensagem:"Não conseguimos continuar sua inscrição agora. Abra a mensagem de inscrição de novo em alguns minutos."}),aesKey,iv);
+      res.setHeader("Content-Type","text/plain");return res.status(200).send(enc);
+    }
     if (aesKey && iv) {
       const current=["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"].includes(requestData?.screen)?requestData.screen:"PENDENTE";
       let trusted={};try{trusted=openState(requestData?.data?.estado,current)}catch{}

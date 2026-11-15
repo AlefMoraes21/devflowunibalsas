@@ -278,3 +278,16 @@ test('Flow E1: sem cache, encerra com aviso (sem tela quebrada); funciona com a 
   // Flow antigo continua no caminho síncrono com a chave desligada.
   assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null);
 });
+
+test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do Flow antigo', async () => {
+  const { e1: E, store } = montar();
+  await cacheCompleto(store);
+  const init = await E.endpoint({ action: 'INIT', flow_token: 'x' });
+  assert.equal(init.screen, 'INSC_INICIO');
+  assert.ok(FLOW_E1.routing_model[init.screen]);
+  assert.deepEqual(await E.endpoint({ action: 'ping' }), { data: { status: 'active' } });
+  const antigo = await E.endpoint({ action: 'data_exchange', screen: 'ESCOLHA_PROCESSO', data: { acao: 'selecionar_processo' } });
+  assert.equal(antigo.screen, 'INSC_FIM');
+  const dados = await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.endpoint({ action: 'data_exchange', screen: 'INSC_INICIO', flow_token: 'x', data: { acao: 'e1_iniciar' } }));
+  assert.equal(dados.screen, 'INSC_DADOS');
+});

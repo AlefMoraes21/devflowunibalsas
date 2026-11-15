@@ -245,6 +245,23 @@ export function createEtapa1({
     return null;
   }
 
+  // Endpoint próprio do Flow da etapa 1 (/api/flow/etapa1): o INIT da Meta não diz qual Flow abriu,
+  // então cada Flow tem a sua URL. Aqui nunca se devolve tela do Flow antigo.
+  async function endpoint(req) {
+    const action = req?.action;
+    if (action === 'ping') return { data: { status: 'active' } };
+    if (req?.data?.error) {
+      console.warn(JSON.stringify({ event: 'flow_client_error', flow: 'etapa1', screen: String(req.screen ?? ''), error: String(req.data.error).slice(0, 120), error_message: String(req.data.error_message ?? '').slice(0, 300) }));
+      return { data: { acknowledged: true } };
+    }
+    if (action === 'INIT') return { screen: 'INSC_INICIO', data: {} };
+    if (action === 'data_exchange' && String(req.screen ?? '').startsWith('INSC_')) {
+      const resposta = await route(req);
+      if (resposta) return resposta;
+    }
+    return fimE1('Algo deu errado', 'Não conseguimos continuar sua inscrição agora. Abra a mensagem de inscrição de novo em alguns minutos.');
+  }
+
   async function route(req) {
     if (req?.action !== 'data_exchange') return null;
     if (String(req.screen ?? '').startsWith('INSC_')) {
@@ -483,5 +500,5 @@ export function createEtapa1({
     return 204;
   }
 
-  return { route, worker, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
+  return { route, endpoint, worker, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
 }
