@@ -1,3 +1,10 @@
+# Versão 2.7.1 — Documentos da etapa 2: idps correto; status do portal no login
+
+- **Correção:** os documentos iam para `/blip/inscritos/0/<cpf>` (HTTP 400): o id de processo que o portal devolve no login do candidato não está na tabela de processos. Agora, fora da tabela, o worker procura a inscrição em cada idps conhecido (223, 224, 225, 226), grava o encontrado na fila (`idps`) e nunca chama a API com 0 (log `idps_desconhecido` com o id real do portal).
+- **Fila que falhou reabre ao entrar de novo** pelo LOGIN (zera tentativas e agenda o worker): os documentos guardados seguem sozinhos.
+- **Status no login:** espera pelo portal de até 7,5 s contando o login (`ETAPA2_ESPERA_PORTAL_MS`); antes era 4,5 s e nunca bastava.
+- 176 testes.
+
 # Versão 2.7.0 — Etapa 2: portal como tela inicial do LOGIN, busca de escola e menor de idade
 
 - **LOGIN → Portal do candidato:** todo login cai no status das etapas (como o site). O botão leva à primeira subetapa que falta (pelo Firestore e pelo que o portal já mostra como concluído), com o texto do botão do site. "Aguardando correção", documentos em análise e etapas ainda fora do Flow (contrato, pagamento) mostram o status e o botão **Fechar**. Prova liberada continua indo à redação.

@@ -113,7 +113,9 @@ export function proximaTela(s2, blocos = {}, menor = false) {
 export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
-  docs = null, academicId = () => null, entrarNaProva = null,
+  docs = null, academicId = () => null, entrarNaProva = null, idpsConhecidos = [],
+  // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
+  esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 7500,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
   esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000
 }) {
@@ -268,6 +270,7 @@ export function createEtapa2({
       if (!validCpf(texto)) return volta('Confira o CPF (11 números).');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(u.data_nascimento ?? ''))) return volta('Informe a data de nascimento.');
       const login = digits(texto);
+      const t0 = clock();
       let sessao;
       try { sessao = await matricula.login(login, u.data_nascimento); }
       catch { return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.'); }
@@ -278,7 +281,7 @@ export function createEtapa2({
       // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
       let resumo = '', s2 = null;
       try {
-        const st = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), 4500))]);
+        const st = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), Math.max(1500, esperaPortalMs - (clock() - t0))))]);
         s2 = summarizeStages(st.stages ?? []);
         resumo = s2.resumo;
         // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
@@ -290,7 +293,15 @@ export function createEtapa2({
       const novo = { id, applyment_id: sessao.applyment_id, flow, login, data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
       const atual = await store.get(id, FILA);
       if (!atual) await store.create(id, novo, FILA);
-      else await store.update(id, { ...atual.record, flow, login, data_nascimento: novo.data_nascimento, status: atual.record.status === 'falhou' ? 'pendente' : atual.record.status }, atual.version, FILA);
+      else {
+        // Fila que falhou (ex.: sistema acadêmico fora do ar): entrar de novo reabre e retoma o envio do que já foi gravado.
+        const reabrir = atual.record.status === 'falhou';
+        await store.update(id, { ...atual.record, flow, login, data_nascimento: novo.data_nascimento, ...(reabrir ? { status: 'pendente', tentativas: 0, rodando_ate: 0 } : {}) }, atual.version, FILA);
+        if (reabrir) {
+          log({ event: 'etapa2_fila', id: curto(id), passo: 'reaberta' });
+          try { await enqueue(id, { tipo: 'etapa2' }); } catch {}
+        }
+      }
       log({ event: 'etapa2_fila', id: curto(id), passo: 'login' });
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
       // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
@@ -438,6 +449,22 @@ export function createEtapa2({
       }
       throw new Error('Não foi possível gravar o andamento da matrícula.');
     }
+    // Processo no sistema acadêmico (idps) para a API de documentos. O id que o portal do Rubeus devolve no
+    // login do candidato nem sempre é o do processo seletivo: se não estiver na tabela, procura a inscrição
+    // em cada processo conhecido (Vestibular, Portador, Transferência, ENEM) e guarda o que achar.
+    async function descobrirIdps(processo) {
+      if (rec.idps) return rec.idps;
+      let idps = academicId(processo);
+      if (!idps) {
+        log({ event: 'etapa2_fila', id: curto(id), passo: 'idps_desconhecido', processo: String(processo ?? '') });
+        for (const c of idpsConhecidos) {
+          try { await docs.findInscription(c, rec.login); idps = c; break; } catch {}
+        }
+      }
+      if (!idps) throw new ErroPasso('Inscrição não localizada no sistema acadêmico em nenhum processo conhecido.', { motivo: 'idps' });
+      await salvar({ idps: String(idps) });
+      return String(idps);
+    }
     try {
       await runCtx(async () => {
         let sessao = await matricula.login(rec.login ?? rec.cpf, rec.data_nascimento);
@@ -456,7 +483,7 @@ export function createEtapa2({
               await enqueue(id, { tipo: 'etapa2', atrasoSeg: Math.ceil((pronta - clock()) / 1000) });
               return;
             }
-            const idps = academicId(sessao.processo_seletivo_id ?? rec.processo);
+            const idps = await descobrirIdps(sessao.processo_seletivo_id);
             for (const doc of DOCS) {
               const media = docsB.arquivos?.[doc.id];
               if (!media?.length || rec.enviados_docs?.[doc.id]) continue;

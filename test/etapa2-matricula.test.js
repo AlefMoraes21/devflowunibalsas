@@ -261,3 +261,35 @@ test('Menor de 18 anos: pula a escolha e vai direto à ficha do responsável; re
   assert.equal(escolherOpcao([{ id: '1', title: 'Balsas' }, { id: '2', title: 'Balsas do Sul' }], 'balsas'), '1');
   assert.equal(idade('2000-12-31', new Date('2026-12-30')), 25);
 });
+
+test('Documentos: idps fora da tabela é descoberto na API (nunca 0); fila que falhou reabre ao entrar de novo', async () => {
+  const store = memoria(); const fila = []; const docsEnviados = []; const consultas = [];
+  const r = rubeusFalso();
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {},
+    docs: {
+      findInscription: async (idps, cpf) => { consultas.push(String(idps)); if (String(idps) !== '223' || cpf !== '39184720514') throw new Error('400'); return {}; },
+      saveDocument: async a => { docsEnviados.push(a); return {}; }
+    },
+    academicId: () => null, idpsConhecidos: ['224', '223', '225'], esperaDocsMs: 0 });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
+  for (const d of DOCS) tela = await toque(E, d.tela, 'enviar_documento', tela.data.estado, { arquivo: d.obrigatorio ? MEDIA(d.id) : [] });
+  const id = fila[0].id;
+  // Simula a fila que esgotou as tentativas com o idps errado.
+  const f = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...f.record, status: 'falhou', tentativas: 6 }, f.version, 'matriculaFila');
+  await E.worker(id);
+  assert.equal(docsEnviados.length, 0, 'fila que falhou não roda sozinha');
+  const n = fila.length;
+  await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(fila.length, n + 1, 'entrar de novo reabre e agenda o worker');
+  await E.worker(id);
+  assert.deepEqual(consultas, ['224', '223']);
+  assert.equal(docsEnviados.length, 3);
+  assert.ok(docsEnviados.every(d => d.idps === '223'), 'idps descoberto, nunca 0');
+  const rec = (await store.get(id, 'matriculaFila')).record;
+  assert.equal(rec.status, 'concluida'); assert.equal(rec.idps, '223');
+});
