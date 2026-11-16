@@ -122,18 +122,16 @@ test('Subetapas: cada uma grava no Firestore e avança na hora; o worker envia a
   assert.match(semNumero.data.erro, /número/);
   const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   assert.equal(ident.screen, 'MATR_IDENTIDADE');
-  const cupom = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
-  assert.equal(cupom.screen, 'MATR_CUPOM');
-  const fim = await toque(E, 'MATR_CUPOM', 'enviar_cupom', cupom.data.estado, { cupom: '' });
+  const fim = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
   assert.equal(fim.screen, 'MATR_FIM');
-  assert.ok(fila.length >= 4, 'cada subetapa agenda o worker');
+  assert.ok(fila.length >= 3, 'cada subetapa agenda o worker');
   await E.worker(id);
   assert.deepEqual(envios.map(e => e.tela), ['RESP_FINANCEIRO', 'ENDERECO', 'IDENTIDADE']);
   const e = envios[1].dados, i = envios[2].dados;
   assert.equal(e.estado_natal, 'MA'); assert.equal(e.cidade_natal, '0907', 'cidade natal pelo nome exato');
   assert.equal(i.cor_raca, '03'); assert.equal(i.estado_civil, 'S'); assert.equal(i.escola, 'E1'); assert.equal(i.rg, 'MA-123456', 'RG como digitado');
   const rec = (await store.get(id, 'matriculaFila')).record;
-  assert.equal(rec.status, 'concluida', 'sem cupom: a etapa 2 termina sem enviar o cupom');
+  assert.equal(rec.status, 'concluida', 'passo de cupom (se aparecer no portal) segue sem cupom');
 });
 
 test('Menor de 18 anos: pede os dados do responsável; regras de seleção', async () => {

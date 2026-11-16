@@ -68,7 +68,6 @@ export function createEtapa2({
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
     MATR_ENDERECO: ['estado', 'erro', 'tem_erro', ...valor(...END)],
     MATR_IDENTIDADE: ['estado', 'erro', 'tem_erro', ...valor('rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola')],
-    MATR_CUPOM: ['estado', 'erro', 'tem_erro', ...valor('cupom')],
     MATR_FIM: ['titulo', 'mensagem']
   };
   function render(screen, data) {
@@ -205,12 +204,8 @@ export function createEtapa2({
         : '';
       if (erro) return render(screen, { ...s, values: u, erro });
       try { await gravarBloco(s, req.flow_token, 'identidade', u); } catch { return render(screen, { ...s, values: u, erro: ERRO_GRAVAR }); }
-      return render('MATR_CUPOM', { ...base, erro: '' });
-    }
-
-    if (screen === 'MATR_CUPOM' && acao === 'enviar_cupom') {
-      const u = pick(d, ['cupom']);
-      try { await gravarBloco(s, req.flow_token, 'cupom', { cupom: String(u.cupom ?? '').trim().toUpperCase() }); } catch { return render(screen, { ...s, values: u, erro: ERRO_GRAVAR }); }
+      // Identidade é a última subetapa da matrícula no site (o passo de cupom existe no processo, mas a
+      // UniBalsas não usa: o worker segue sem cupom se o portal algum dia pedir).
       return fim('Dados da matrícula recebidos ✅', 'Recebemos seus dados de matrícula e estamos registrando tudo no Portal do Candidato.\n\nPróximo passo: o envio dos documentos da matrícula. Você recebe a mensagem aqui no WhatsApp.');
     }
     return null;
@@ -283,7 +278,7 @@ export function createEtapa2({
             await salvar(faltando.length ? { passo: 'aguardando_' + tela.screen.toLowerCase() } : { status: 'concluida', passo: 'fim', proxima_etapa: next.title });
             return;
           }
-          const dados = rec.blocos?.[bloco];
+          const dados = rec.blocos?.[bloco] ?? (bloco === 'cupom' ? { cupom: '' } : null);
           if (!dados) { await salvar({ passo: 'aguardando_' + bloco }); return; }
           const st = openState(tela.data.estado, tela.screen);
           if (tela.screen === 'CUPOM' && !dados.cupom) {

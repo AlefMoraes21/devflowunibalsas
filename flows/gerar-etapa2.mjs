@@ -60,8 +60,7 @@ const flow = {
     MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
     MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
     MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
-    MATR_IDENTIDADE: ['MATR_CUPOM', 'MATR_FIM'],
-    MATR_CUPOM: ['MATR_FIM'],
+    MATR_IDENTIDADE: ['MATR_FIM'],
     MATR_FIM: []
   },
   screens: [
@@ -131,18 +130,7 @@ const flow = {
         { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
         { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio. 4 números. Ex.: 2024', 'input-type': 'text', required: true },
         { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
-        { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
-      ] }] }
-    },
-    {
-      id: 'MATR_CUPOM', title: 'Cupom de desconto', data: dados(['cupom']),
-      layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_cupom', 'init-values': init(['cupom']), children: [
-        imagem(LOGO_MATRICULA),
-        { type: 'TextHeading', text: 'Cupom de desconto' },
-        { type: 'TextBody', text: 'Se você recebeu um cupom de desconto, informe abaixo. Deixe em branco para seguir sem cupom.' },
-        erroTexto,
-        { type: 'TextInput', name: 'cupom', label: 'Cupom', 'input-type': 'text', required: false },
-        { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_cupom', form(['cupom'])) }
+        { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
       ] }] }
     },
     {

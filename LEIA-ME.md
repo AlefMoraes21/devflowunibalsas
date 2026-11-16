@@ -1,7 +1,7 @@
 # Versão 2.4.0 — Etapa 2 (matrícula) pelo Flow `flows/etapa2-matricula.json`
 
 - **Diagnóstico (site/mapeamento):** cada subetapa é um passo próprio no Rubeus, com o seu botão — responsável financeiro (300676), dados do responsável (300668/300675), endereço (300666), identidade (300667, gera o RA), cupom (300674) — e o Rubeus só libera um passo depois que o anterior foi gravado. Envio **incremental e em ordem**.
-- **Flow (telas `MATR_*`, logos no topo):** login (CPF + data de nascimento, como no Portal do candidato) → situação das etapas → responsável financeiro → dados do responsável (se "Outro" ou menor de 18) → endereço (busca pelo CEP) → identidade → cupom → fim. Cada tela grava no Firestore (`matriculaFila`) e responde na hora. Ao vivo só o login e o CEP.
+- **Flow (telas `MATR_*`, logos no topo):** login (CPF + data de nascimento, como no Portal do candidato) → situação das etapas → responsável financeiro → dados do responsável (se "Outro" ou menor de 18) → endereço (busca pelo CEP) → identidade → fim (o passo de cupom do processo não é usado pela UniBalsas; se o portal pedir, o worker segue sem cupom). Cada tela grava no Firestore (`matriculaFila`) e responde na hora. Ao vivo só o login e o CEP.
 - **Worker (`tipo: etapa2`):** entra no Rubeus com o CPF/nascimento guardados, pergunta ao portal o próximo passo, envia o bloco correspondente (convertendo UF, cidade natal, cor/raça, estado civil e escola para os códigos do formulário) e segue; passo sem bloco ainda = espera. Opção não encontrada = `conferir` (log `etapa2_fila_atencao`).
 - RG passa a ir **como digitado** (o RM aceita letras), como no site.
 - Mesmo endpoint `/api/flow`. Flow novo na WABA: abrir em `MATR_INICIO` sem pedir dados na primeira tela. 170 testes.
