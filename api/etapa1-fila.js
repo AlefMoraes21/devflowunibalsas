@@ -26,6 +26,8 @@ class ErroPasso extends Error {
 export function createEtapa1({
   ativo = () => process.env.ETAPA1_FILA === 'on',
   store, enqueue, runStep, runLive = runStep, sealState, openState, render,
+  // Candidato que entrou pelo LOGIN com a prova ainda por fazer: o worker entra no Rubeus por ele.
+  loginRubeus = null, prepararProva = null,
   ehEnem = () => false, validateEnem = () => {}, anosEnem = [], avisar = async () => false,
   validateBasic, validateFinal, origens, hoje, requiresEssay, academicId, userFields,
   jaInscritoNoRm = async () => false,
@@ -571,14 +573,30 @@ export function createEtapa1({
         if (clock() < pronta) return salvar({ parar: true, proxima: pronta });
         // 2) Lê a prova ATUAL da inscrição, sem acionar "Iniciar prova" de novo, duas vezes com
         //    intervalo: só segue se a execução e o registro não mudaram.
-        let base = {}; try { base = openState(rec.ck.estado, rec.ck.screen); } catch {}
+        let base = {};
+        if (rec.via_login) {
+          // Entrou pelo LOGIN: sessão nova no Rubeus com o CPF e a data de nascimento guardados.
+          const sess = await loginRubeus(rec.via_login.login, rec.via_login.data_nascimento);
+          base = { token: sess.token, applyment_id: String(rec.applyment_id), processo_seletivo_id: String(rec.processo), person_id: sess.person_id };
+        } else { try { base = openState(rec.ck.estado, rec.ck.screen); } catch {} }
         const conferir = async () => {
           const est = sealState('TELA_ORIENTACAO_PROVA', { ...base, prepared_existing: null, prova_pre_carregada: false, proof_resume_required: true });
           const c = await step('TELA_ORIENTACAO_PROVA', est, 'conferir_prova_existente', {}, rec.id);
           const st = abrir(c, 'TELA_ORIENTACAO_PROVA');
           return { c, b: st.prepared_existing?.binding ?? {} };
         };
-        const a1 = await conferir();
+        let a1;
+        try { a1 = await conferir(); }
+        catch (e) {
+          // Prova ainda não iniciada (inscrição feita e prova nunca aberta): aciona o "Iniciar prova" como o
+          // site faz, uma vez, e espera a calma antes de conferir e enviar.
+          if (rec.via_login && !rec.prova_preparada && /idexecprova|nao foi confirmad|não foi confirmad|registro da prova/i.test(e.message)) {
+            await prepararProva(base);
+            log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'prova_iniciada_pelo_login' });
+            return salvar({ prova_preparada: true, inscrita_em: clock(), parar: true, proxima: clock() + esperaProvaMs });
+          }
+          throw e;
+        }
         await sleep(estabilidadeMs);
         const a2 = await conferir();
         if (a1.b.executionCode !== a2.b.executionCode || a1.b.proofId !== a2.b.proofId) {
@@ -689,5 +707,18 @@ export function createEtapa1({
     return 204;
   }
 
-  return { route, endpoint, worker, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
+  // LOGIN com a prova disponível: abre o "Portal do candidato" da etapa 1 (Realizar prova → … → redação).
+  // A redação segue o mesmo caminho da jornada direta (guardada e enviada pelo worker, com calma).
+  async function entrarNaProva({ applyment_id, processo, login, data_nascimento, flowToken }) {
+    const id = hash('login-prova:' + applyment_id);
+    const flow = hash(flowToken ?? '');
+    const novo = { id, processo: String(processo), flow, applyment_id: String(applyment_id), via_login: { login, data_nascimento }, respostas: {}, redacao: null, status: 'inscrita', passo: 'redacao', inscrita_em: 0, tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
+    const atual = await store.get(id, FILA);
+    if (!atual) await store.create(id, novo, FILA);
+    else if (atual.record.status !== 'concluida') await store.update(id, { ...atual.record, flow, via_login: novo.via_login, status: atual.record.status === 'falhou' ? 'inscrita' : atual.record.status, tentativas: atual.record.status === 'falhou' ? 0 : atual.record.tentativas }, atual.version, FILA);
+    log({ event: 'etapa1_fila', id: curto(id), passo: 'login_prova' });
+    return renderE1('INSC_PORTAL', { e1: true, processo_seletivo_id: String(processo), eh_nota_enem: false, fila_id: id });
+  }
+
+  return { route, endpoint, worker, entrarNaProva, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
 }

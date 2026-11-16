@@ -40,7 +40,7 @@ const camposEndereco = acaoCep => [
 const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length - 1 ? [DOCS[i + 1].tela, 'MATR_FIM'] : ['MATR_FIM']]));
 
 export const routing = {
-  MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM'],
+  MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM', 'INSC_PORTAL'],
   MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_FIM'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],

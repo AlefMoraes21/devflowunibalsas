@@ -1522,6 +1522,8 @@ const etapa1=createEtapa1({
   ehEnem:isNotaEnemProcess,anosEnem:ANOS_ENEM,
   validateEnem:d=>{normalizeEnemRegistration(d.numero_inscricao_enem);if(!ANOS_ENEM.some(y=>y.id===String(d.ano_enem)))throw new Error("Selecione o ano do ENEM.");enemAverage(d,{checkTyped:false})},
   avisar:dados=>avisarRedacaoLiberada(dados),
+  loginRubeus:(login,nasc)=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+60000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>matricula.login(login,nasc)),
+  prepararProva:data=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>proofRouter.prepare(data)),
   jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
 });
 // Etapa 2 (matrícula): telas MATR_* gravam no Firestore; o worker envia cada subetapa ao Rubeus, em ordem.
@@ -1529,6 +1531,7 @@ const etapa2=createEtapa2({
   store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
   buscarCep:d=>matricula.cep(d),
   docs:{saveDocument},academicId,
+  entrarNaProva:a=>etapa1.entrarNaProva(a),
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
 export async function workerHandler(req,res){
@@ -1549,7 +1552,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.5.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.6.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

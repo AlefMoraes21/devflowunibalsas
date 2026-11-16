@@ -68,7 +68,7 @@ export function idade(nascimentoIso, hoje = new Date()) {
 export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
-  docs = null, academicId = () => null,
+  docs = null, academicId = () => null, entrarNaProva = null,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
   esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000
 }) {
@@ -191,6 +191,10 @@ export function createEtapa2({
         const s2 = summarizeStages(st.stages ?? []);
         resumo = s2.resumo;
         if (!s2.next && s2.aguardandoCorrecao) return fim('Aguardando correção ⏱', 'Você realizou a sua prova. Em breve o resultado estará disponível.');
+        // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
+        if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
+          return await entrarNaProva({ applyment_id: sessao.applyment_id, processo: st.processo_seletivo_id, login, data_nascimento: u.data_nascimento, flowToken: req.flow_token });
+        }
       } catch (e) { log({ event: 'etapa2_fila', passo: 'portal_lento', message: String(e?.message ?? e).slice(0, 60) }); }
       // Inscrição da matrícula no Firestore (login e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
       const novo = { id, applyment_id: sessao.applyment_id, flow, login, data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };

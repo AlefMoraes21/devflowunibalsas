@@ -42,7 +42,8 @@
     "INSC_FIM": [],
     "MATR_LOGIN": [
       "MATR_PORTAL",
-      "MATR_FIM"
+      "MATR_FIM",
+      "INSC_PORTAL"
     ],
     "MATR_PORTAL": [
       "MATR_RESPONSAVEL",
