@@ -12,7 +12,7 @@
 // busca do endereço pelo CEP. Listas (UF, cor/raça, estado civil) são fixas; o worker converte o texto
 // escolhido para o código do formulário do Rubeus.
 import crypto from 'node:crypto';
-import { summarizeStages, stepFromLink } from './matricula.js';
+import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js';
 import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup } from './portal-site.js';
 
 const DIA = 86400000;
@@ -133,6 +133,7 @@ export function createEtapa2({
     MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
     MATR_PORTAL: ['estado', 'resumo', 'botao'],
     CONTR_TERMOS: ['link_contrato'],
+    MATR_STATUS: ['etapas'],
     MATR_RESPONSAVEL: ['estado', 'erro', 'tem_erro', ...valor('responsavel')],
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
     MATR_ENDERECO: ['estado', 'erro', 'tem_erro', ...valor(...END)],
@@ -287,15 +288,44 @@ export function createEtapa2({
     return 204;
   }
   const BUSCANDO = 'Estamos buscando a situação da sua inscrição no Portal do candidato. Aguarde alguns instantes e toque em Atualizar.';
+  // Tela de status igual ao Portal do candidato: cada etapa com o seu status e, nas etapas abertas, o botão
+  // do site (ex.: "Verificar"). Cada linha leva à sua etapa.
+  const emCorrecao = r => !r.conclusive && /aguardando.*correc/.test(norm(r.status));
+  const aberta = r => !r.conclusive && Boolean(r.step && r.action) && !emCorrecao(r);
+  function itensStatus({ id, menor, s2 }) {
+    return (s2.rows ?? []).slice(0, 20).map((r, i) => {
+      const item = {
+        id: 'etapa_' + i,
+        'main-content': { title: `${r.conclusive ? '✅' : '❗'} ${r.title}`.slice(0, 30), metadata: String(r.status || '—').slice(0, 80) },
+        'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: sealState('MATR_STATUS', { m2: true, fila_id: id, menor, etapa: { title: r.title, action: r.action, aberta: aberta(r) } }) } }
+      };
+      if (aberta(r)) item.end = { title: String(r.action).slice(0, 10) };
+      return item;
+    });
+  }
   async function telaPortal({ id, menor, s2, blocos, rec, flowToken }) {
     if (!s2) return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
+    // Prova liberada: segue para o "Portal do candidato" da etapa 1 (Realizar prova → redação), sem mudar a etapa 1.
     if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva && rec) {
       return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken });
     }
-    const destino = proximaTela(s2, blocos ?? {}, menor);
-    log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: destino.tela ?? 'fechar', proxima: s2.next?.title ?? 'nenhuma',
+    log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: 'status', proxima: s2.next?.title ?? 'nenhuma',
       etapas: (s2.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(blocos ?? {}).join(',') });
-    return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: destino.tela, botao: destino.botao, resumo: s2.resumo || 'Sua inscrição foi encontrada.' });
+    return render('MATR_STATUS', { etapas: itensStatus({ id, menor, s2 }) });
+  }
+  // Abre a tela de uma etapa (vale para a lista de status e para o botão da tela de espera).
+  async function abrirDestino(destino, s, base, flowToken) {
+    if (destino === 'CONTR_TERMOS') {
+      // O candidato já está aqui: gera agora (sem a calma do vigia), se ainda não estiver pronto.
+      if (!(await contratoPronto(s.fila_id))) { try { await enqueue(s.fila_id, { tipo: 'etapa3_gerar' }); } catch {} }
+      return render('CONTR_TERMOS', { link_contrato: await criarLinkContrato(s.fila_id) });
+    }
+    // Menor de 18 anos não pode ser o próprio responsável financeiro: grava "Outro" e vai direto à ficha do responsável.
+    if (destino === 'MATR_RESP_DADOS' && s.menor) {
+      try { await gravarBloco(s, flowToken, 'responsavel', { responsavel: 'Outro' }); }
+      catch { return render('MATR_RESPONSAVEL', { ...base, erro: ERRO_GRAVAR }); }
+    }
+    return render(destino, { ...base, erro: '' });
   }
 
   // ---------------------------------------------------------------- contrato (etapa 3)
@@ -347,12 +377,17 @@ export function createEtapa2({
     try { return await gerarContratoAgora(filaId, rec, ip, opcoes); }
     finally { await destravar(filaId).catch(() => {}); }
   }
-  async function gerarContratoAgora(filaId, rec, ip = '', { calma = false } = {}) {
+  async function gerarContratoAgora(filaId, rec, ip = '', { calma = false, statusSalvo = false } = {}) {
     const inicio = clock();
     const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
-    const { processo, stages } = await portalSite.inscricao(sessao);
-    const etapa = (stages ?? []).find(x => /contrato/.test(norm(x.title)));
-    const passoId = stepFromLink(etapa?.cta_link);
+    const passoDe = stages => stepFromLink((stages ?? []).find(x => /contrato/.test(norm(x.title)))?.cta_link);
+    let processo = '', passoId = statusSalvo ? passoDe(rec.ultimo_status?.stages) : null;
+    if (passoId) { try { processo = await portalSite.processo(sessao); } catch {} }
+    if (!passoId || !processo) {
+      const insc = await portalSite.inscricao(sessao);
+      processo = processo || insc.processo;
+      passoId = passoDe(insc.stages);
+    }
     if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
     // Calma (vigia): o portal acabou de liberar o contrato; espera o Rubeus terminar de processar antes de gerar.
     if (calma && (!rec.contrato_liberado_em || clock() - rec.contrato_liberado_em < CALMA_CONTRATO_MS)) throw new ErroContrato('Contrato liberado agora; aguardando o Rubeus processar.', 'calma');
@@ -387,7 +422,7 @@ export function createEtapa2({
       }
       throw new ErroContrato('Estamos gerando o seu contrato. Esta página atualiza sozinha em alguns segundos.', 'gerando');
     }
-    const pdf = await gerarContrato(id, fila.record, ip);
+    const pdf = await gerarContrato(id, fila.record, ip, { statusSalvo: true });
     log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: false });
     return pdf;
   }
@@ -500,19 +535,30 @@ export function createEtapa2({
         const rec = (await store.get(s.fila_id, FILA))?.record;
         return telaPortal({ id: s.fila_id, menor: s.menor, s2: statusSalvo(rec), blocos: rec?.blocos, rec, flowToken: req.flow_token });
       }
-      if (s.destino === 'CONTR_TERMOS') {
-        // O candidato já está aqui: gera agora (sem a calma do vigia).
-        if (!(await contratoPronto(s.fila_id))) { try { await enqueue(s.fila_id, { tipo: 'etapa3_gerar' }); } catch {} }
-        try { return render('CONTR_TERMOS', { link_contrato: await criarLinkContrato(s.fila_id) }); }
-        catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos preparar o contrato agora. Toque de novo em instantes.' }); }
-      }
       const destino = s.destino || (s.menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL');
-      // Menor de 18 anos não pode ser o próprio responsável financeiro: grava "Outro" e vai direto à ficha do responsável.
-      if (destino === 'MATR_RESP_DADOS' && s.menor) {
-        try { await gravarBloco(s, req.flow_token, 'responsavel', { responsavel: 'Outro' }); }
-        catch { return render('MATR_RESPONSAVEL', { ...base, erro: ERRO_GRAVAR }); }
+      try { return await abrirDestino(destino, s, base, req.flow_token); }
+      catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos abrir esta etapa agora. Toque de novo em instantes.' }); }
+    }
+
+    // Lista de status: toque numa etapa.
+    if (screen === 'MATR_STATUS' && acao === 'abrir_etapa') {
+      const rec = (await store.get(s.fila_id, FILA))?.record;
+      const st = statusSalvo(rec);
+      const voltar = () => st ? render('MATR_STATUS', { etapas: itensStatus({ id: s.fila_id, menor: s.menor, s2: st }) }) : render('MATR_PORTAL', { ...base, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
+      const e = s.etapa ?? {};
+      if (!e.aberta) return voltar(); // concluída ou aguardando a equipe: só o status, como no site
+      const t = norm(e.title);
+      if (/prova|avaliacao|redacao/.test(t) && entrarNaProva && rec) {
+        return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token });
       }
-      return render(destino, { ...base, erro: '' });
+      const destino = proximaTela({ next: { title: e.title, action: e.action }, rows: st?.rows ?? [] }, rec?.blocos ?? {}, s.menor).tela;
+      if (destino) {
+        try { return await abrirDestino(destino, s, base, req.flow_token); } catch { return voltar(); }
+      }
+      if (/resp|pre.?matric|document/.test(t)) return fim(e.title, 'Recebemos tudo desta etapa. A equipe vai conferir; acompanhe a situação por aqui.');
+      // Etapa ainda fora do Flow (ex.: pagamento): orientação do site.
+      const info = portalScreenData(e.title);
+      return fim(info.titulo, String(info.mensagem).split('\n\nEntre com')[0]);
     }
 
     if (screen === 'MATR_RESPONSAVEL' && acao === 'enviar_responsavel') {
@@ -643,7 +689,9 @@ export function createEtapa2({
     // lê o passo de documentos, envia num único "Enviar" (multipart file_0…) e confere no próprio passo.
     async function entregarDocumentos(passoId, docsB) {
       const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
-      const { processo } = await portalSite.inscricao(sessao);
+      let processo = '';
+      try { processo = await portalSite.processo(sessao); } catch {}
+      if (!processo) processo = (await portalSite.inscricao(sessao)).processo;
       if (!processo) throw new ErroPasso('Processo seletivo da inscrição não encontrado no portal.', { motivo: 'processo' });
       const passo = await portalSite.passoDocumentos(sessao, passoId, processo);
       const naLista = new Map(passo.docs.map(d => [d.codigo, d]));

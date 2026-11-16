@@ -42,8 +42,9 @@ const camposEndereco = acaoCep => [
 const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length - 1 ? [DOCS[i + 1].tela, 'MATR_FIM'] : ['MATR_FIM']]));
 
 export const routing = {
-  MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM', 'INSC_PORTAL'],
-  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM'],
+  MATR_LOGIN: ['MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
+  MATR_PORTAL: ['MATR_STATUS', 'MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
+  MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
   MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
@@ -76,6 +77,23 @@ export const screens = [
       { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
       { type: 'TextBody', text: '${data.resumo}' },
       { type: 'Footer', label: '${data.botao}', 'on-click-action': troca('continuar') }
+    ] }
+  },
+  {
+    // Status igual ao Portal do candidato: uma linha por etapa (✅ concluída / ❗ pendente), com o status e, nas
+    // etapas abertas, o botão do site (ex.: "Verificar"). A NavigationList não aceita outros componentes na tela.
+    id: 'MATR_STATUS', title: 'Portal do candidato',
+    data: { etapas: { type: 'array', items: { type: 'object', properties: {
+      id: { type: 'string' },
+      'main-content': { type: 'object', properties: { title: { type: 'string' }, metadata: { type: 'string' } } },
+      end: { type: 'object', properties: { title: { type: 'string' } } },
+      'on-click-action': { type: 'object', properties: { name: { type: 'string' }, payload: { type: 'object', properties: { acao: { type: 'string' }, estado: { type: 'string' } } } } }
+    } }, __example__: [
+      { id: 'etapa_0', 'main-content': { title: '✅ Inscrição', metadata: 'Concluída' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'x' } } },
+      { id: 'etapa_1', 'main-content': { title: '❗ Contrato', metadata: 'Pendente' }, end: { title: 'Verificar' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'y' } } }
+    ] } },
+    layout: { type: 'SingleColumnLayout', children: [
+      { type: 'NavigationList', name: 'lista_etapas', label: 'Acompanhe aqui o status da sua inscrição', 'list-items': '${data.etapas}' }
     ] }
   },
   {

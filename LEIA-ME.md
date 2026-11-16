@@ -1,3 +1,10 @@
+# Versão 2.10.0 — Status igual ao portal (botão por etapa) e contrato refinado pela captura do site
+
+- **Login → tela de status igual ao Portal do candidato** (`MATR_STATUS`, componente NavigationList do WhatsApp): uma linha por etapa (✅ concluída / ❗ pendente), com o status do site e, **nas etapas abertas, o botão do site** (ex.: "Verificar"). Tocar numa etapa aberta leva à sua tela (subetapas da matrícula, documentos, contrato); etapa ainda fora do Flow (pagamento) mostra a orientação do site; concluída ou aguardando a equipe só mostra o status. Prova liberada continua indo ao "Portal do candidato" da etapa 1 (sem mudar a etapa 1). Sem status ainda: tela "Estamos buscando…" com **Atualizar**. A NavigationList não aceita outros componentes na tela (sem logo nessa tela).
+- **Contrato igual à captura do site (seção 16 da engenharia reversa):** no `button-click` os campos vão com `component_id: null`, `key` numérica e tipo do Form.io (`checkbox`/`textfield`), mais os textos visíveis do passo com valor vazio.
+- **Mais rápido:** o processo da inscrição vem do `person-applyment` (~0,1 s) em vez do `register-portal-data` (~14 s), nos documentos e no contrato; o contrato gerado na hora usa o passo do status salvo.
+- Novo JSON: **colar na WABA**. 184 testes.
+
 # Versão 2.9.1 — Contrato: uma geração por vez
 
 - Validado em 16/11 (Bárbara): o link entregou o contrato gerado pelo portal (PDF de ~252 KB). No 1º toque deu erro porque o link tentou gerar em paralelo com a geração pedida ao tocar em Verificar (dois logins da mesma pessoa no portal ao mesmo tempo).

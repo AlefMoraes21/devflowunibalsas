@@ -108,6 +108,13 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
     return { processo: str(atual?.id), stages: r?.data?.stages ?? [] };
   }
 
+  async function processo(sessao) {
+    const r = await post("person-applyment", { token: sessao.token, domain: DOMAIN }, { timeoutMs: 20000 });
+    const lista = Array.isArray(r?.data) ? r.data : [];
+    const atual = lista.find(a => str(a.applyment_id) === sessao.applyment_id) ?? lista.find(a => str(a.current_process) === "1") ?? lista[0];
+    return str(atual?.id);
+  }
+
   async function passoDocumentos(sessao, passo, processo) {
     return lerPassoDocumentos(await post(`getApplymentDataByStep/${Number(passo)}`, { execute_stage_query: 1, token: sessao.token, process_id: Number(processo) }));
   }
@@ -130,7 +137,7 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
     return post("popup", { popup_id: Number(popupId), stage: { stage_id: Number(stageId) }, token: sessao.token }, { timeoutMs: 60000 });
   }
 
-  return { entrar, inscricao, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup };
+  return { entrar, inscricao, processo, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup };
 }
 
 // Corpo multipart do button-click (campos de controle iguais ao site). data: lista de campos do passo.
@@ -157,18 +164,23 @@ export function lerPassoContrato(resp) {
   const botao = todos.find(c => c.type === "button" && /download.*contrato|contrato/i.test(str(c.label)) && !/portal/i.test(str(c.label)));
   if (!botao) throw new Error("Passo do contrato sem o botão de download.");
   const campos = todos.filter(c => c.field_id).map(c => ({
-    field_id: Number(c.field_id), field_settings_id: c.field_settings_id ?? null, component_id: c.id, key: str(c.key || c.field_id),
-    type: c.type, ps_table: c.ps_table ?? null, rubeus_table: c.rubeus_table ?? null, label: str(c.label)
+    field_id: Number(c.field_id), field_settings_id: c.field_settings_id ?? null, type: c.type, ps_table: c.ps_table ?? null, rubeus_table: c.rubeus_table ?? null, label: str(c.label)
   }));
-  return { passo: Number(cs.id), stage_id: Number(cs.stage_id), botao: Number(botao.id), botao_relacionado: Number(botao.related_component_id), campos };
+  // Componentes de texto visíveis (sem lógica de exibição) também vão no clique, com valor vazio, como o site faz.
+  const conteudos = todos.filter(c => !c.field_id && (c.type === "text" || c.type === "html") && Number(c.logic_enabled) !== 1)
+    .map(c => ({ component_id: c.id, key: str(c.key), type: c.type === "html" ? "htmlelement" : "content" }));
+  return { passo: Number(cs.id), stage_id: Number(cs.stage_id), botao: Number(botao.id), botao_relacionado: Number(botao.related_component_id), campos, conteudos };
 }
 
+// Igual ao site: nos campos, component_id nulo, key numérica e tipo do Form.io (checkbox/textfield).
 export function dadosDoContrato(passo, ip) {
-  return passo.campos.map(c => ({
-    field_id: c.field_id, field_settings_id: c.field_settings_id, component_id: c.component_id, key: c.key,
+  const campos = passo.campos.map(c => ({
+    field_id: c.field_id, field_settings_id: c.field_settings_id, component_id: null, key: c.field_id,
     value: c.type === "checkbox" ? false : /\bip\b/i.test(c.label) ? str(ip) : "",
-    rubeus_table: c.rubeus_table, ps_table: c.ps_table, type: c.type
+    rubeus_table: c.rubeus_table, ps_table: c.ps_table, type: c.type === "checkbox" ? "checkbox" : "textfield"
   }));
+  const conteudos = (passo.conteudos ?? []).map(c => ({ field_id: null, field_settings_id: null, component_id: c.component_id, key: c.key, value: "", type: c.type }));
+  return [...campos, ...conteudos];
 }
 
 // PDF do contrato: o site lê o base64 do campo 52138 na resposta do popup "Contrato gerado".

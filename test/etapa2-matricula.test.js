@@ -101,6 +101,15 @@ const toque = (E, screen, acao, estado, user = {}) => {
   const req = { screen, action: 'data_exchange', flow_token: 'ft2', data: { acao, ...(estado ? { estado } : {}), ...user } };
   return flowContext.run({ request: req, deadline: Date.now() + 9500 }, async () => confere(screen, await E.route(req)));
 };
+// Tela de status (lista de etapas, igual ao portal): toca na primeira etapa aberta (ou na que bate com o título).
+const continuar = (E, tela, re = null) => {
+  if (tela.screen === 'MATR_PORTAL') return toque(E, 'MATR_PORTAL', 'continuar', tela.data.estado);
+  const it = tela.data.etapas.find(i => (re ? re.test(i['main-content'].title) : i.end));
+  assert.ok(it, 'etapa na lista');
+  return toque(E, 'MATR_STATUS', it['on-click-action'].payload.acao, it['on-click-action'].payload.estado);
+};
+const filaDe = tela => openState(tela.screen === 'MATR_PORTAL' ? tela.data.estado : tela.data.etapas[0]['on-click-action'].payload.estado, tela.screen).fila_id;
+const textoStatus = tela => tela.data.etapas.map(i => `${i['main-content'].title}: ${i['main-content'].metadata}${i.end ? ' [' + i.end.title + ']' : ''}`).join('\n');
 const END = { cep: '65800000', rua: 'Rua A', numero: '10', bairro: 'Centro', cidade: 'Balsas', uf: 'MA', estado_natal: 'MA', cidade_natal: 'Balsas' };
 const IDENT = { rg: 'MA-123456', orgao_emissor: 'ssp', uf_rg: 'MA', cor_raca: 'parda', estado_civil: 'solteiro_a', ano_conclusao: '', busca_escola: '', escola: '' };
 
@@ -113,7 +122,8 @@ test('Um único Flow: tela inicial da inscrição tem o link "Já sou inscrito" 
   assert.match(inicio, /"name":"MATR_LOGIN"/);
   for (const t of FLOW.screens.filter(s => s.id.startsWith('MATR_'))) {
     assert.match(t.id, /^[A-Za-z_]+$/);
-    assert.match(JSON.stringify(t.layout), /"type":"Image"/, `${t.id} tem imagem no topo`);
+    // A lista de status (NavigationList) não aceita outros componentes na tela.
+    if (t.id !== 'MATR_STATUS') assert.match(JSON.stringify(t.layout), /"type":"Image"/, `${t.id} tem imagem no topo`);
     const pickers = (JSON.stringify(t.layout).match(/"type":"DocumentPicker"/g) ?? []).length;
     assert.ok(pickers <= 1, 'um seletor de arquivo por tela');
   }
@@ -126,29 +136,29 @@ test('Login: CPF + nascimento abre o portal; dados errados não seguem; prova em
   const errado = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: '1999-01-01' });
   assert.equal(errado.screen, 'MATR_LOGIN'); assert.match(errado.data.erro, /Não encontramos/);
   const ok = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  assert.equal(ok.screen, 'MATR_PORTAL'); assert.match(ok.data.resumo, /Prova online/);
-  const s = openState(ok.data.estado, 'MATR_PORTAL');
+  assert.equal(ok.screen, 'MATR_STATUS'); assert.match(textoStatus(ok), /Prova online/);
+  const s = { fila_id: filaDe(ok) };
   assert.equal((await store.get(s.fila_id, 'matriculaFila')).record.applyment_id, '555');
   const c = montar({ prova: 'Aguardando correção', conclusivo: 0, semMatricula: true });
   const espera = await toque(c.E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   // Aguardando correção: a tela inicial é o status do portal; o botão só fecha o Flow.
-  assert.equal(espera.screen, 'MATR_PORTAL'); assert.match(espera.data.resumo, /⏱ Prova online: Aguardando correção/);
-  assert.equal(espera.data.botao, 'Fechar');
-  const fechou = await toque(c.E, 'MATR_PORTAL', 'continuar', espera.data.estado);
-  assert.equal(fechou.screen, 'SUCCESS');
+  assert.equal(espera.screen, 'MATR_STATUS'); assert.match(textoStatus(espera), /❗ Prova online: Aguardando correção$/m);
+  assert.ok(!espera.data.etapas.some(i => i.end), 'nenhuma etapa aberta: sem botão, como no site');
+  const mesma = await continuar(c.E, espera, /Prova/);
+  assert.equal(mesma.screen, 'MATR_STATUS', 'tocar numa etapa sem ação só mostra o status');
 });
 
 test('Portal ao logar de novo: o botão leva à primeira subetapa que falta, com o texto do botão do site', async () => {
   const { E } = montar();
   const p1 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  assert.equal(p1.data.botao, 'Continuar');
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', p1.data.estado);
+  assert.match(textoStatus(p1), /Pré-matrícula: Pendente \[Continuar\]/);
+  const resp = await continuar(E, p1);
   assert.equal(resp.screen, 'MATR_RESPONSAVEL');
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   // Fechou o Flow depois do endereço e entrou de novo: continua na identidade.
   const p2 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const ident = await toque(E, 'MATR_PORTAL', 'continuar', p2.data.estado);
+  const ident = await continuar(E, p2);
   assert.equal(ident.screen, 'MATR_IDENTIDADE');
   // Regras da próxima tela.
   const rows = t => ({ next: { title: t, action: 'Verificar' }, rows: [{ title: 'Pré-matrícula', conclusive: true }] });
@@ -162,7 +172,7 @@ test('Portal ao logar de novo: o botão leva à primeira subetapa que falta, com
 test('Escola: busca pelo nome na lista do site (cache), escolhe e o worker envia o código da lista', async () => {
   const { E, fila, envios, listasCarregadas } = montar();
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(E, portal);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   // O worker envia responsável e endereço e, ao abrir a identidade, guarda a lista de escolas.
@@ -190,7 +200,7 @@ test('Escola: busca pelo nome na lista do site (cache), escolhe e o worker envia
 test('Escola sem cache: a busca abre a identidade no Rubeus uma vez e guarda a lista; "Não encontrei" fica em branco', async () => {
   const r = montar();
   const portal = await toque(r.E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(r.E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(r.E, portal);
   const end = await toque(r.E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   const ident = await toque(r.E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   r.avancar(); r.avancar(); // o worker já enviou responsável e endereço; a identidade é o passo liberado
@@ -204,7 +214,7 @@ test('Escola sem cache: a busca abre a identidade no Rubeus uma vez e guarda a l
 test('Etapa 2 completa: subetapas e documentos gravam no Firestore e avançam na hora; o worker envia ao Rubeus em ordem e os documentos por último', async () => {
   const { E, store, fila, envios, lotes } = montar();
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(E, portal);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   assert.equal(end.screen, 'MATR_ENDERECO');
   const id = fila[0].id;
@@ -245,7 +255,7 @@ test('Documentos esperam a calma depois da identidade antes de ir ao sistema aca
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, clock: () => agora,
     portalSite: site.portalSite, baixarMidia: site.baixarMidia, esperaDocsMs: 120000 });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(E, portal);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
@@ -266,7 +276,7 @@ test('Menor de 18 anos: pula a escolha e vai direto à ficha do responsável; re
   const store = memoria();
   const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
   const portal = await toque(E2, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: menor });
-  const dados = await toque(E2, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const dados = await continuar(E2, portal);
   assert.equal(dados.screen, 'MATR_RESP_DADOS');
   const id = openState(dados.data.estado, 'MATR_RESP_DADOS').fila_id;
   const rec = await store.get(id, 'matriculaFila');
@@ -283,7 +293,7 @@ test('Documentos pelo caminho do site: fila que falhou reabre ao entrar de novo;
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {},
     portalSite: site.portalSite, baixarMidia: site.baixarMidia, esperaDocsMs: 0 });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(E, portal);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
@@ -377,8 +387,8 @@ test('Etapa 3: contrato liberado abre a tela do site com link exclusivo; o link 
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example' });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  assert.equal(portal.screen, 'MATR_PORTAL'); assert.equal(portal.data.botao, 'Verificar');
-  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  assert.equal(portal.screen, 'MATR_STATUS'); assert.match(textoStatus(portal), /❗ Contrato: Pendente \[Verificar\]/);
+  const termos = await continuar(E, portal);
   assert.equal(termos.screen, 'CONTR_TERMOS');
   const m = termos.data.link_contrato.match(/^https:\/\/run\.example\/contrato\/([a-f0-9]{48})$/);
   assert.ok(m, 'link exclusivo no Cloud Run');
@@ -386,7 +396,9 @@ test('Etapa 3: contrato liberado abre a tela do site com link exclusivo; o link 
   assert.deepEqual(pdf, site.pdf);
   const c = site.cliques[0];
   assert.equal(c.passo.botao, 3940424); assert.equal(c.passo.botao_relacionado, 174890); assert.equal(c.passo.stage_id, 261004);
-  assert.deepEqual(c.data.map(x => [x.field_id, x.value]), [[38635, false], [38636, ''], [52136, '200.1.2.3']], 'aceite falso, data vazia e IP de quem abriu, como o site');
+  assert.deepEqual(c.data.map(x => [x.field_id, x.component_id, x.key, x.type, x.value]), [
+    [38635, null, 38635, 'checkbox', false], [38636, null, 38636, 'textfield', ''], [52136, null, 52136, 'textfield', '200.1.2.3'],
+    [null, 3940422, '', 'content', '']], 'igual ao site: aceite falso, data vazia, IP de quem abriu e os textos do passo');
   await assert.rejects(E.baixarContrato('0'.repeat(48), '1.1.1.1'), /expirou/);
   await assert.rejects(E.baixarContrato('xyz', '1.1.1.1'), /inválido/);
 });
@@ -400,14 +412,14 @@ test('Portal lento no login: mostra "Atualizar", busca o status em segundo plano
   const p1 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(p1.data.botao, 'Atualizar'); assert.match(p1.data.resumo, /buscando/);
   assert.equal(fila.at(-1).tipo, 'etapa2_status');
-  const ainda = await toque(E, 'MATR_PORTAL', 'continuar', p1.data.estado);
+  const ainda = await continuar(E, p1);
   assert.equal(ainda.data.botao, 'Atualizar', 'sem status ainda: continua aguardando');
   // A tarefa em segundo plano lê o portal e guarda o status.
   const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
   await E2.atualizarStatus(fila.at(-1).id);
-  const p2 = await toque(E, 'MATR_PORTAL', 'continuar', ainda.data.estado);
-  assert.equal(p2.screen, 'MATR_PORTAL'); assert.equal(p2.data.botao, 'Verificar'); assert.match(p2.data.resumo, /Contrato: Pendente/);
-  const termos = await toque(E, 'MATR_PORTAL', 'continuar', p2.data.estado);
+  const p2 = await continuar(E, ainda);
+  assert.equal(p2.screen, 'MATR_STATUS'); assert.match(textoStatus(p2), /Contrato: Pendente \[Verificar\]/);
+  const termos = await continuar(E, p2);
   assert.equal(termos.screen, 'CONTR_TERMOS');
 });
 
@@ -429,7 +441,7 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const id = openState(portal.data.estado, 'MATR_PORTAL').fila_id;
+  const id = filaDe(portal);
   // Ainda em análise: confere de novo mais tarde.
   await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 0);
@@ -447,7 +459,7 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
   assert.equal(site.cliques[0].data.find(x => x.field_id === 52136).value, '');
   assert.equal(fila.length, n, 'pronto: o vigia para');
   // O candidato entra, toca em Verificar e abre o link: PDF na hora, sem clicar de novo no portal.
-  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const termos = await continuar(E, portal);
   assert.equal(termos.screen, 'CONTR_TERMOS');
   const token = termos.data.link_contrato.split('/').pop();
   const pdf = await E.baixarContrato(token, '200.1.2.3');
@@ -458,7 +470,7 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
 test('Documentos entregues: o vigia do contrato é agendado', async () => {
   const { E, fila } = montar();
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const resp = await continuar(E, portal);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
   let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
@@ -475,8 +487,8 @@ test('Link aberto enquanto o Run gera o contrato: espera o PDF pronto, sem gerar
     portalSite: site.portalSite, urlPublica: 'https://run.example', esperaContratoMs: 10000,
     dormir: async () => { if (outraGeracao) { await outraGeracao(); outraGeracao = null; } } });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  const id = openState(portal.data.estado, 'MATR_PORTAL').fila_id;
-  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const id = filaDe(portal);
+  const termos = await continuar(E, portal);
   assert.equal(fila.at(-1).tipo, 'etapa3_gerar', 'tocar em Verificar já pede a geração');
   // A geração pedida está em andamento (trava no Firestore) quando o candidato abre o link.
   const f = await store.get(id, 'matriculaFila');
@@ -495,4 +507,23 @@ test('Link aberto enquanto o Run gera o contrato: espera o PDF pronto, sem gerar
   await store.update(id, { pdf: '', expires: 0 }, (await store.get(id, 'contratos')).version, 'contratos');
   await E.vigiarContrato(id, { imediato: true });
   assert.equal(site.cliques.length, 0);
+});
+
+test('Status igual ao portal: uma linha por etapa, botão só nas abertas; etapa ainda fora do Flow mostra a orientação do site', async () => {
+  const store = memoria();
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+    { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
+    { title: 'Contrato', feedback: { complementary_text: 'Concluído', conclusive: 1 } },
+    { title: 'Pagamento - Taxa de matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Pagar' }, cta_link: 'presencial/passo/300670' },
+    { title: 'Matriculado', feedback: { complementary_text: 'Existem pendências', conclusive: 0 } }
+  ] });
+  const E = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(st.screen, 'MATR_STATUS');
+  assert.equal(textoStatus(st), '✅ Inscrição: Concluída\n✅ Contrato: Concluído\n❗ Pagamento - Taxa de matrícul: Pendente [Pagar]\n❗ Matriculado: Existem pendências');
+  const pag = await continuar(E, st);
+  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Pix, cartão ou boleto/);
+  const nada = await continuar(E, st, /Matriculado/);
+  assert.equal(nada.screen, 'MATR_STATUS');
 });
