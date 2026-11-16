@@ -122,7 +122,9 @@ export function createEtapa2({
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
   esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 7500,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
-  esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000
+  esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000,
+  // Link do contrato aberto durante uma geração em andamento: espera o PDF ficar pronto (até ~40 s).
+  esperaContratoMs = 40000, dormir = ms => new Promise(r => setTimeout(r, ms))
 }) {
   // ---------------------------------------------------------------- telas do Flow
   const valor = (...n) => n.map(x => 'valor_' + x);
@@ -323,7 +325,29 @@ export function createEtapa2({
   // Gera o contrato no portal como o site: abre o passo do contrato e clica em "Clique aqui para fazer o download
   // do contrato"; o PDF vem do popup "Contrato gerado" (campo 52138). Em segundo plano o IP de aceite vai vazio
   // (não há navegador do candidato; não registramos o IP do servidor como se fosse dele).
-  async function gerarContrato(filaId, rec, ip = '', { calma = false } = {}) {
+  // Uma geração por vez: dois logins da mesma pessoa no portal ao mesmo tempo derrubam um ao outro.
+  async function travar(filaId) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(filaId, FILA);
+      if (!a) return false;
+      if ((a.record.contrato_gerando_ate ?? 0) > clock()) return false;
+      if (await store.update(filaId, { ...a.record, contrato_gerando_ate: clock() + 90000 }, a.version, FILA)) return true;
+    }
+    return false;
+  }
+  async function destravar(filaId) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(filaId, FILA);
+      if (!a) return;
+      if (await store.update(filaId, { ...a.record, contrato_gerando_ate: 0 }, a.version, FILA)) return;
+    }
+  }
+  async function gerarContrato(filaId, rec, ip = '', opcoes = {}) {
+    if (!(await travar(filaId))) throw new ErroContrato('Estamos gerando o seu contrato. Esta página atualiza sozinha em alguns segundos.', 'gerando');
+    try { return await gerarContratoAgora(filaId, rec, ip, opcoes); }
+    finally { await destravar(filaId).catch(() => {}); }
+  }
+  async function gerarContratoAgora(filaId, rec, ip = '', { calma = false } = {}) {
     const inicio = clock();
     const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
     const { processo, stages } = await portalSite.inscricao(sessao);
@@ -353,6 +377,16 @@ export function createEtapa2({
     if (pronto) { log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: true }); return pronto; }
     const fila = await store.get(id, FILA);
     if (!fila) throw new ErroContrato('Inscrição não encontrada. Abra o Flow de novo pelo WhatsApp.', 'fila');
+    // Geração já em andamento (ex.: pedida ao tocar em Verificar): espera ela terminar, sem gerar em paralelo.
+    if ((fila.record.contrato_gerando_ate ?? 0) > clock()) {
+      const limite = clock() + esperaContratoMs;
+      while (clock() < limite) {
+        await dormir(2000);
+        const ok = await contratoPronto(id);
+        if (ok) { log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: true, esperou: true }); return ok; }
+      }
+      throw new ErroContrato('Estamos gerando o seu contrato. Esta página atualiza sozinha em alguns segundos.', 'gerando');
+    }
     const pdf = await gerarContrato(id, fila.record, ip);
     log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: false });
     return pdf;
@@ -374,6 +408,7 @@ export function createEtapa2({
       await gerarContrato(id, rec, '', { calma: !imediato });
       return 204;
     } catch (e) {
+      if (e?.motivo === 'gerando') return 204; // outra geração em andamento
       if (e?.motivo === 'calma') {
         // Acabou de liberar: marca o momento e volta daqui a ~2 minutos para gerar.
         const desde = rec.contrato_liberado_em ?? clock();

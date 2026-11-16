@@ -1561,7 +1561,7 @@ export async function workerHandler(req,res){
 }
 
 // Etapa 3: link exclusivo do contrato (GET /contrato/<token>). Devolve o PDF gerado pelo portal na hora.
-const paginaContrato=(titulo,texto)=>`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contrato UniBalsas</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:32px 16px;background:#f6f4f3;color:#222}main{max-width:520px;margin:auto;background:#fff;border-radius:12px;padding:24px;border-top:6px solid #681006}h1{font-size:1.25rem;color:#681006}</style></head><body><main><h1>${titulo}</h1><p>${texto}</p></main></body></html>`;
+const paginaContrato=(titulo,texto,recarregar=0)=>`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">${recarregar?`<meta http-equiv="refresh" content="${recarregar}">`:""}<meta name="viewport" content="width=device-width,initial-scale=1"><title>Contrato UniBalsas</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:32px 16px;background:#f6f4f3;color:#222}main{max-width:520px;margin:auto;background:#fff;border-radius:12px;padding:24px;border-top:6px solid #681006}h1{font-size:1.25rem;color:#681006}</style></head><body><main><h1>${titulo}</h1><p>${texto}</p></main></body></html>`;
 export async function contratoHandler(req,res){
   const token=String(req.url??"").split("?")[0].split("/").pop();
   const ip=String(req.headers["x-forwarded-for"]??"").split(",")[0].trim()||req.socket?.remoteAddress||"";
@@ -1575,14 +1575,16 @@ export async function contratoHandler(req,res){
     console.error(JSON.stringify({event:"etapa3_contrato_erro",motivo:error?.motivo??"erro",message:String(error?.message??error).slice(0,160)}));
     res.setHeader("Content-Type","text/html; charset=utf-8");res.setHeader("Cache-Control","no-store");
     const msg=error?.motivo?String(error.message):"Não conseguimos gerar o seu contrato agora. Tente de novo em alguns minutos.";
-    return res.status(error?.motivo==="link"||error?.motivo==="expirado"?410:503).send(paginaContrato("Contrato UniBalsas",msg));
+    // Gerando (ou falha passageira): a página tenta de novo sozinha.
+    const recarregar=error?.motivo==="gerando"?6:error?.motivo?0:20;
+    return res.status(error?.motivo==="link"||error?.motivo==="expirado"?410:503).send(paginaContrato("Contrato UniBalsas",msg,recarregar));
   }
 }
 
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.9.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.9.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

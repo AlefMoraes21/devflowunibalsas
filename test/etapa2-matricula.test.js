@@ -466,3 +466,33 @@ test('Documentos entregues: o vigia do contrato é agendado', async () => {
   await E.worker(fila[0].id);
   assert.ok(fila.some(f => f.tipo === 'etapa3_vigia' && f.atrasoSeg > 0));
 });
+
+test('Link aberto enquanto o Run gera o contrato: espera o PDF pronto, sem gerar em paralelo', async () => {
+  const store = memoria(); const fila = [];
+  const site = siteContrato();
+  let outraGeracao = null;
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', esperaContratoMs: 10000,
+    dormir: async () => { if (outraGeracao) { await outraGeracao(); outraGeracao = null; } } });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = openState(portal.data.estado, 'MATR_PORTAL').fila_id;
+  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  assert.equal(fila.at(-1).tipo, 'etapa3_gerar', 'tocar em Verificar já pede a geração');
+  // A geração pedida está em andamento (trava no Firestore) quando o candidato abre o link.
+  const f = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...f.record, contrato_gerando_ate: Date.now() + 60000 }, f.version, 'matriculaFila');
+  outraGeracao = async () => {
+    const a = await store.get(id, 'matriculaFila');
+    await store.update(id, { ...a.record, contrato_gerando_ate: 0 }, a.version, 'matriculaFila');
+    await store.create(id, { pdf: site.pdf.toString('base64'), criado: Date.now(), expires: Date.now() + 86400000 }, 'contratos');
+  };
+  const pdf = await E.baixarContrato(termos.data.link_contrato.split('/').pop(), '1.2.3.4');
+  assert.deepEqual(pdf, site.pdf);
+  assert.equal(site.cliques.length, 0, 'não gerou de novo em paralelo');
+  // E o vigia não gera por cima de uma geração em andamento.
+  const g = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...g.record, contrato_gerando_ate: Date.now() + 60000 }, g.version, 'matriculaFila');
+  await store.update(id, { pdf: '', expires: 0 }, (await store.get(id, 'contratos')).version, 'contratos');
+  await E.vigiarContrato(id, { imediato: true });
+  assert.equal(site.cliques.length, 0);
+});

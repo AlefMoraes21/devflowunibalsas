@@ -1,3 +1,8 @@
+# Versão 2.9.1 — Contrato: uma geração por vez
+
+- Validado em 16/11 (Bárbara): o link entregou o contrato gerado pelo portal (PDF de ~252 KB). No 1º toque deu erro porque o link tentou gerar em paralelo com a geração pedida ao tocar em Verificar (dois logins da mesma pessoa no portal ao mesmo tempo).
+- Agora há trava na fila (`contrato_gerando_ate`, 90 s): uma geração por vez. O link aberto durante a geração espera o PDF ficar pronto (até ~40 s); se ainda não ficou, mostra "Estamos gerando o seu contrato" e a página se atualiza sozinha a cada 6 s. Falha passageira: a página tenta de novo em 20 s. 183 testes. O JSON da WABA não muda.
+
 # Versão 2.9.0 — Etapa 3: Contrato (igual ao site) e status salvo do portal
 
 - **Contrato (passo 300669, conferido ao vivo em 16/11):** quando a próxima etapa do portal é **Contrato**, o botão do Portal (**Verificar**) abre a tela `CONTR_TERMOS` com o texto do site ("Termos da sua matrícula", download, assinatura no GOV.BR, envio para centraldematriculaub@unibalsas.edu.br, WhatsApp (99) 99131-1684) e **Fechar**.
