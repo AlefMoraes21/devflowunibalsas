@@ -1552,7 +1552,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.6.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.7.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

@@ -48,6 +48,9 @@
     "MATR_PORTAL": [
       "MATR_RESPONSAVEL",
       "MATR_RESP_DADOS",
+      "MATR_ENDERECO",
+      "MATR_IDENTIDADE",
+      "MATR_DOC_IDENTIDADE",
       "MATR_FIM"
     ],
     "MATR_RESPONSAVEL": [
@@ -1443,6 +1446,10 @@
         "resumo": {
           "type": "string",
           "__example__": "✅ Inscrição: Concluída"
+        },
+        "botao": {
+          "type": "string",
+          "__example__": "Continuar matrícula"
         }
       },
       "layout": {
@@ -1464,7 +1471,7 @@
           },
           {
             "type": "Footer",
-            "label": "Continuar matrícula",
+            "label": "${data.botao}",
             "on-click-action": {
               "name": "data_exchange",
               "payload": {
@@ -2504,9 +2511,41 @@
           "type": "string",
           "__example__": ""
         },
+        "valor_busca_escola": {
+          "type": "string",
+          "__example__": ""
+        },
         "valor_escola": {
           "type": "string",
           "__example__": ""
+        },
+        "escolas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": [
+            {
+              "id": "1",
+              "title": "Escola exemplo",
+              "description": "Escola exemplo"
+            }
+          ]
+        },
+        "tem_escolas": {
+          "type": "boolean",
+          "__example__": false
         }
       },
       "layout": {
@@ -2522,6 +2561,7 @@
               "cor_raca": "${data.valor_cor_raca}",
               "estado_civil": "${data.valor_estado_civil}",
               "ano_conclusao": "${data.valor_ano_conclusao}",
+              "busca_escola": "${data.valor_busca_escola}",
               "escola": "${data.valor_escola}"
             },
             "children": [
@@ -2741,17 +2781,44 @@
               },
               {
                 "type": "TextInput",
-                "name": "ano_conclusao",
-                "label": "Ano de conclusão",
-                "helper-text": "Ensino médio (opcional). Ex.: 2024",
+                "name": "busca_escola",
+                "label": "Escola de Ensino Médio",
+                "helper-text": "Opcional. Digite parte do nome e toque em Buscar escola",
                 "input-type": "text",
                 "required": false
               },
               {
-                "type": "TextInput",
+                "type": "EmbeddedLink",
+                "text": "Buscar escola",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "buscar_escola",
+                    "estado": "${data.estado}",
+                    "rg": "${form.rg}",
+                    "orgao_emissor": "${form.orgao_emissor}",
+                    "uf_rg": "${form.uf_rg}",
+                    "cor_raca": "${form.cor_raca}",
+                    "estado_civil": "${form.estado_civil}",
+                    "ano_conclusao": "${form.ano_conclusao}",
+                    "busca_escola": "${form.busca_escola}",
+                    "escola": "${form.escola}"
+                  }
+                }
+              },
+              {
+                "type": "RadioButtonsGroup",
                 "name": "escola",
-                "label": "Escola de Ensino Médio",
-                "helper-text": "Opcional",
+                "label": "Escolha a sua escola",
+                "required": false,
+                "visible": "${data.tem_escolas}",
+                "data-source": "${data.escolas}"
+              },
+              {
+                "type": "TextInput",
+                "name": "ano_conclusao",
+                "label": "Ano de conclusão",
+                "helper-text": "Ensino médio (opcional). Ex.: 2024",
                 "input-type": "text",
                 "required": false
               },
@@ -2769,6 +2836,7 @@
                     "cor_raca": "${form.cor_raca}",
                     "estado_civil": "${form.estado_civil}",
                     "ano_conclusao": "${form.ano_conclusao}",
+                    "busca_escola": "${form.busca_escola}",
                     "escola": "${form.escola}"
                   }
                 }

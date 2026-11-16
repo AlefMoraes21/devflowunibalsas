@@ -65,6 +65,51 @@ export function idade(nascimentoIso, hoje = new Date()) {
   return a;
 }
 
+// Escola de Ensino Médio: no site é uma lista fechada (~1.461 escolas, campo opcional). No Flow a pessoa digita
+// parte do nome e toca em "Buscar escola"; a lista vem do cache no Firestore, aquecido pelo worker quando abre
+// a identidade no Rubeus (sem cache, a busca abre a identidade ao vivo uma vez e guarda a lista).
+const CACHE = 'flowCache';
+const CACHE_ESCOLAS = 'escolas-ensino-medio';
+export const SEM_ESCOLA = 'nao_encontrei';
+const OPCAO_SEM_ESCOLA = { id: SEM_ESCOLA, title: 'Não encontrei a minha escola', description: 'O campo fica em branco (é opcional).' };
+export function buscarEscolas(lista, texto, limite = 15) {
+  const limpa = v => norm(v).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const q = limpa(texto), palavras = q.split(' ').filter(p => p.length >= 2);
+  if (!palavras.length) return [];
+  const achadas = (lista ?? []).filter(o => { const n = limpa(o.title); return palavras.every(p => n.includes(p)); });
+  return achadas.sort((a, b) => Number(!limpa(a.title).startsWith(q)) - Number(!limpa(b.title).startsWith(q))).slice(0, limite);
+}
+// O Rubeus repete o nome ("ESCOLA X - ESCOLA X"); no WhatsApp o título da opção tem até 30 caracteres.
+export function opcaoEscola(o) {
+  const t = String(o.title ?? '').trim();
+  const m = t.match(/^(.+?)\s+-\s+(.+)$/);
+  const nome = m && norm(m[1]) === norm(m[2]) ? m[1].trim() : t;
+  if (nome.length <= 30) return { id: String(o.id), title: nome };
+  const corte = nome.slice(0, 29).replace(/\s+\S*$/, '') || nome.slice(0, 29);
+  return { id: String(o.id), title: corte + '…', description: nome.slice(0, 300) };
+}
+
+// Tela de destino do botão do Portal: a primeira subetapa da matrícula que falta, pelo que já está gravado
+// no Firestore e pelo que o portal já mostra como concluído. Etapas que dependem da equipe (correção,
+// análise) ou que ainda não estão no Flow (contrato, pagamento) só mostram o status e fecham.
+export function proximaTela(s2, blocos = {}, menor = false) {
+  const next = s2?.next ?? null;
+  const fechar = { tela: null, botao: 'Fechar' };
+  if (s2 && !next) return fechar;
+  if (next && !/resp|pre.?matric|document/.test(norm(next.title))) return fechar;
+  const concluida = re => (s2?.rows ?? []).some(r => r.conclusive && re.test(norm(r.title)));
+  const quem = blocos.responsavel?.responsavel;
+  const respOk = concluida(/resp/) || (quem === 'Eu' && !menor) || ((quem === 'Outro' || menor) && Boolean(blocos.resp_dados));
+  const preOk = concluida(/pre.?matric/);
+  const tela = !respOk ? (quem === 'Outro' || menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL')
+    : !preOk && !blocos.endereco ? 'MATR_ENDERECO'
+    : !preOk && !blocos.identidade ? 'MATR_IDENTIDADE'
+    : !blocos.documentos?.completo && !concluida(/document/) ? DOCS[0].tela
+    : null;
+  if (!tela) return fechar;
+  return { tela, botao: String(next?.action || 'Continuar matrícula').slice(0, 35) };
+}
+
 export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
@@ -77,11 +122,11 @@ export function createEtapa2({
   const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
   const KEYS = {
     MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
-    MATR_PORTAL: ['estado', 'resumo'],
+    MATR_PORTAL: ['estado', 'resumo', 'botao'],
     MATR_RESPONSAVEL: ['estado', 'erro', 'tem_erro', ...valor('responsavel')],
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
     MATR_ENDERECO: ['estado', 'erro', 'tem_erro', ...valor(...END)],
-    MATR_IDENTIDADE: ['estado', 'erro', 'tem_erro', ...valor('rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola')],
+    MATR_IDENTIDADE: ['estado', 'erro', 'tem_erro', ...valor('rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'busca_escola', 'escola'), 'escolas', 'tem_escolas'],
     ...Object.fromEntries(DOCS.map(x => [x.tela, ['estado', 'erro', 'tem_erro']])),
     MATR_FIM: ['titulo', 'mensagem']
   };
@@ -89,8 +134,10 @@ export function createEtapa2({
     const { values = {}, ...trusted } = data;
     const out = {};
     for (const k of KEYS[screen]) {
-      if (k === 'estado') out.estado = sealState(screen, trusted);
+      if (k === 'estado') { const { escolas, ...selar } = trusted; out.estado = sealState(screen, selar); }
       else if (k === 'tem_erro') out.tem_erro = Boolean(trusted.erro);
+      else if (k === 'escolas') out.escolas = trusted.escolas ?? [];
+      else if (k === 'tem_escolas') out.tem_escolas = Boolean(trusted.escolas?.length);
       else if (k.startsWith('valor_')) out[k] = values[k.slice(6)] == null ? '' : String(values[k.slice(6)]);
       else out[k] = trusted[k] ?? '';
     }
@@ -114,6 +161,50 @@ export function createEtapa2({
     throw new Error('conflito');
   }
   const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
+  const sucesso = flowToken => ({ screen: 'SUCCESS', data: { extension_message_response: { params: { flow_token: String(flowToken ?? '') } } } });
+
+  // ---------------------------------------------------------------- lista de escolas (cache)
+  const memoEscolas = { at: 0, lista: null };
+  async function lerEscolas() {
+    if (memoEscolas.lista && clock() - memoEscolas.at < 3600000) return memoEscolas.lista;
+    let r = null;
+    try { r = (await store.get(CACHE_ESCOLAS, CACHE))?.record ?? null; } catch {}
+    if (!r?.lista?.length || clock() - (r.atualizado ?? 0) > 7 * DIA) return null;
+    memoEscolas.at = clock(); memoEscolas.lista = r.lista;
+    return r.lista;
+  }
+  async function gravarEscolas(lista) {
+    const enxuta = lista.map(o => ({ id: String(o.id), title: String(o.title ?? '') }));
+    const novo = { lista: enxuta, atualizado: clock(), expires: clock() + 30 * DIA };
+    try {
+      const atual = await store.get(CACHE_ESCOLAS, CACHE);
+      if (atual) await store.update(CACHE_ESCOLAS, novo, atual.version, CACHE); else await store.create(CACHE_ESCOLAS, novo, CACHE);
+    } catch {}
+    memoEscolas.at = clock(); memoEscolas.lista = enxuta;
+    log({ event: 'etapa2_fila', passo: 'escolas_cache', quantidade: enxuta.length });
+  }
+  // Sem cache: abre o passo liberado no Rubeus (a identidade, quando a pessoa já chegou nesta tela) e guarda a lista.
+  async function carregarEscolas(filaId) {
+    const em = await lerEscolas();
+    if (em) return em;
+    const f = await store.get(filaId, FILA);
+    if (!f) throw new Error('matrícula não encontrada');
+    let sessao = await matricula.login(f.record.login ?? f.record.cpf, f.record.data_nascimento);
+    const p = await matricula.portal(sessao);
+    sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
+    const next = summarizeStages(p.stages).next;
+    if (!next) throw new Error('sem passo liberado');
+    const tela = await matricula.open(sessao, next);
+    if (tela.screen !== 'IDENTIDADE') throw new Error('identidade ainda não liberada');
+    const lista = await matricula.schoolOptions(openState(tela.data.estado, tela.screen));
+    if (!lista?.length) throw new Error('lista de escolas vazia');
+    await gravarEscolas(lista);
+    return memoEscolas.lista;
+  }
+  async function opcoesDoCache(busca) {
+    const lista = String(busca ?? '').trim() ? await lerEscolas() : null;
+    return lista ? [...buscarEscolas(lista, busca).map(opcaoEscola), OPCAO_SEM_ESCOLA] : [];
+  }
   // Guarda o arquivo (referência criptografada do WhatsApp) e, no último, marca os documentos como completos.
   async function gravarDocumento(s, flowToken, docId, media, completo) {
     for (let i = 0; i < 5; i++) {
@@ -185,12 +276,11 @@ export function createEtapa2({
       const flow = hash(req.flow_token ?? '');
       // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
       // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
-      let resumo = '';
+      let resumo = '', s2 = null;
       try {
         const st = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), 4500))]);
-        const s2 = summarizeStages(st.stages ?? []);
+        s2 = summarizeStages(st.stages ?? []);
         resumo = s2.resumo;
-        if (!s2.next && s2.aguardandoCorrecao) return fim('Aguardando correção ⏱', 'Você realizou a sua prova. Em breve o resultado estará disponível.');
         // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
         if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
           return await entrarNaProva({ applyment_id: sessao.applyment_id, processo: st.processo_seletivo_id, login, data_nascimento: u.data_nascimento, flowToken: req.flow_token });
@@ -203,7 +293,9 @@ export function createEtapa2({
       else await store.update(id, { ...atual.record, flow, login, data_nascimento: novo.data_nascimento, status: atual.record.status === 'falhou' ? 'pendente' : atual.record.status }, atual.version, FILA);
       log({ event: 'etapa2_fila', id: curto(id), passo: 'login' });
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
-      return render('MATR_PORTAL', { m2: true, fila_id: id, menor, resumo: resumo || 'Sua inscrição foi encontrada. Vamos seguir com a sua matrícula.' });
+      // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
+      const destino = proximaTela(s2, atual?.record.blocos ?? {}, menor);
+      return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: destino.tela, botao: destino.botao, resumo: resumo || 'Sua inscrição foi encontrada. Vamos seguir com a sua matrícula.' });
     }
 
     let s;
@@ -212,13 +304,15 @@ export function createEtapa2({
     const base = { m2: true, fila_id: s.fila_id, menor: s.menor };
 
     if (screen === 'MATR_PORTAL' && acao === 'continuar') {
+      // Nada a continuar no Flow agora (aguardando a equipe, ou etapa ainda fora do Flow): fecha.
+      if (s.destino === null) return sucesso(req.flow_token);
+      const destino = s.destino || (s.menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL');
       // Menor de 18 anos não pode ser o próprio responsável financeiro: grava "Outro" e vai direto à ficha do responsável.
-      if (s.menor) {
+      if (destino === 'MATR_RESP_DADOS' && s.menor) {
         try { await gravarBloco(s, req.flow_token, 'responsavel', { responsavel: 'Outro' }); }
         catch { return render('MATR_RESPONSAVEL', { ...base, erro: ERRO_GRAVAR }); }
-        return render('MATR_RESP_DADOS', { ...base, erro: '' });
       }
-      return render('MATR_RESPONSAVEL', { ...base, erro: '' });
+      return render(destino, { ...base, erro: '' });
     }
 
     if (screen === 'MATR_RESPONSAVEL' && acao === 'enviar_responsavel') {
@@ -241,17 +335,37 @@ export function createEtapa2({
       return render(screen === 'MATR_RESP_DADOS' ? 'MATR_ENDERECO' : 'MATR_IDENTIDADE', { ...base, erro: '' });
     }
 
+    const IDENT_CAMPOS = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'busca_escola', 'escola'];
+    if (screen === 'MATR_IDENTIDADE' && acao === 'buscar_escola') {
+      const u = pick(d, IDENT_CAMPOS);
+      const volta = (erro, escolas = []) => render(screen, { ...s, values: { ...u, escola: '' }, escolas, erro });
+      if (norm(u.busca_escola).replace(/[^a-z0-9]/g, '').length < 3) return volta('Digite pelo menos 3 letras do nome da escola e toque em Buscar escola.');
+      let lista;
+      try { lista = await carregarEscolas(s.fila_id); }
+      catch (e) {
+        log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'escolas_indisponivel', message: String(e?.message ?? e).slice(0, 80) });
+        return volta('Não conseguimos buscar a lista de escolas agora. Tente de novo em instantes ou deixe em branco (é opcional).');
+      }
+      const achadas = buscarEscolas(lista, u.busca_escola).map(opcaoEscola);
+      return volta(achadas.length ? '' : 'Nenhuma escola encontrada com esse nome. Tente outra parte do nome ou escolha "Não encontrei a minha escola".', [...achadas, OPCAO_SEM_ESCOLA]);
+    }
+
     if (screen === 'MATR_IDENTIDADE' && acao === 'enviar_identidade') {
-      const u = pick(d, ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola']);
+      const u = pick(d, IDENT_CAMPOS);
+      const escolhida = u.escola && u.escola !== SEM_ESCOLA ? String(u.escola) : '';
       const erro = !String(u.rg ?? '').trim() ? 'Informe o número da identidade.'
         : !String(u.orgao_emissor ?? '').trim() ? 'Informe o órgão emissor.'
         : !UFS.some(o => o.id === u.uf_rg) ? 'Selecione a UF da identidade.'
         : !RACAS.some(o => o.id === u.cor_raca) ? 'Selecione cor/raça.'
         : !ESTADOS_CIVIS.some(o => o.id === u.estado_civil) ? 'Selecione o estado civil.'
         : u.ano_conclusao && !(/^\d{4}$/.test(u.ano_conclusao) && Number(u.ano_conclusao) >= 1995 && Number(u.ano_conclusao) <= new Date().getFullYear() + 1) ? 'Confira o ano de conclusão (4 números, de 1995 em diante).'
+        : String(u.busca_escola ?? '').trim() && !u.escola ? 'Toque em "Buscar escola" e escolha a sua escola na lista, ou apague o nome (é opcional).'
         : '';
-      if (erro) return render(screen, { ...s, values: u, erro });
-      try { await gravarBloco(s, req.flow_token, 'identidade', u); } catch { return render(screen, { ...s, values: u, erro: ERRO_GRAVAR }); }
+      if (erro) return render(screen, { ...s, values: u, escolas: await opcoesDoCache(u.busca_escola), erro });
+      // Grava o código da escola escolhida na lista (o mesmo do formulário do Rubeus) e o nome, para conferência.
+      const nomeEscola = escolhida ? ((await lerEscolas())?.find(o => o.id === escolhida)?.title ?? '') : '';
+      const bloco = { rg: u.rg, orgao_emissor: u.orgao_emissor, uf_rg: u.uf_rg, cor_raca: u.cor_raca, estado_civil: u.estado_civil, ano_conclusao: u.ano_conclusao ?? '', escola_id: escolhida, escola: nomeEscola };
+      try { await gravarBloco(s, req.flow_token, 'identidade', bloco); } catch { return render(screen, { ...s, values: u, escolas: await opcoesDoCache(u.busca_escola), erro: ERRO_GRAVAR }); }
       return render(DOCS[0].tela, { ...base, erro: '' });
     }
 
@@ -294,7 +408,10 @@ export function createEtapa2({
       const civil = escolherOpcao(st.estados_civis, ESTADOS_CIVIS.find(r => r.id === bloco.estado_civil)?.title, { prefixo: 5 });
       if (!uf_rg || !cor || !civil) throw new ErroPasso('Opção de identidade não encontrada no formulário.', { final: true, motivo: 'opcao' });
       let escola = '', escolas = [];
-      if (bloco.escola && st.campos?.escola) {
+      if (bloco.escola_id && st.campos?.escola) {
+        escola = String(bloco.escola_id);
+        escolas = [{ id: escola, title: bloco.escola || escola }];
+      } else if (bloco.escola && !('escola_id' in bloco) && st.campos?.escola) {
         try { escolas = await matricula.schools({ ...st, busca_escola: bloco.escola }); } catch {}
         escola = escolherOpcao(escolas, bloco.escola) ?? (escolas.length === 1 ? escolas[0].id : '');
       }
@@ -352,6 +469,11 @@ export function createEtapa2({
             return;
           }
           const tela = await matricula.open(sessao, next);
+          // Aquece a lista de escolas para a busca do Flow (a pessoa costuma estar preenchendo a identidade agora).
+          if (tela.screen === 'IDENTIDADE' && !(await lerEscolas())) {
+            try { const l = await matricula.schoolOptions(openState(tela.data.estado, tela.screen)); if (l?.length) await gravarEscolas(l); }
+            catch (e) { log({ event: 'etapa2_fila', id: curto(id), passo: 'escolas_cache_erro', message: String(e?.message ?? e).slice(0, 80) }); }
+          }
           const bloco = BLOCO_DA_TELA[tela.screen];
           if (!bloco) {
             // Próximo passo não é desta etapa (documentos, contrato…): a etapa 2 terminou se todos os blocos foram enviados.

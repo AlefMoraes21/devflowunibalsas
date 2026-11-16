@@ -554,6 +554,12 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     return found;
   }
 
+  // Lista completa de escolas do formulário (campo "Escola de Ensino Médio"), para o cache da busca no Flow.
+  async function schoolOptions(data) {
+    if (!data.campos?.escola) return [];
+    return loadOptions(data.formulario, data.token, data.campos.escola);
+  }
+
   function require(data, names) {
     for (const n of names) if (!str(data[n]).trim()) throw new Error(`Preencha ${LABELS[n] ?? n}.`);
   }
@@ -601,5 +607,5 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
     return { token: str(r?.token ?? r?.data?.token, data.token), redirect: r?.data?.redirect ?? (r?.data?.next ? { place_id: r.data.next, place_type_id: r.data.local === "step" ? 1 : 0 } : null) };
   }
 
-  return { login, portal, status, welcome, open, advance, finish, sendDocument, cep, cities, schools, send };
+  return { login, portal, status, welcome, open, advance, finish, sendDocument, cep, cities, schools, schoolOptions, send };
 }

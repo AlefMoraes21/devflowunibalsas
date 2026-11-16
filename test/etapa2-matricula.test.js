@@ -6,7 +6,7 @@ process.env.FLOW_PRIVATE_KEY = 'unit-etapa2';
 process.env.FLOW_PROJECT_ID = 'unit';
 process.env.RBS_TOKEN = 'unit';
 const { sealState, openState, flowContext } = await import('../api/flow.js');
-const { createEtapa2, escolherOpcao, idade, DOCS } = await import('../api/etapa2-matricula.js');
+const { createEtapa2, escolherOpcao, idade, DOCS, proximaTela, buscarEscolas, opcaoEscola, SEM_ESCOLA } = await import('../api/etapa2-matricula.js');
 const { validCpf } = await import('../api/matricula.js');
 
 // Um único Flow: a etapa 2 está no mesmo JSON da etapa 1.
@@ -30,6 +30,7 @@ function rubeusFalso({ prova = 'Aprovado', conclusivo = 1, semMatricula = false 
   const passos = ['RESP_FINANCEIRO', 'ENDERECO', 'IDENTIDADE'];
   let atual = 0;
   const envios = [];
+  const listasCarregadas = { n: 0 };
   const listas = {
     opcoes_responsavel: [{ id: '1', title: 'Eu' }, { id: '2', title: 'Outro' }],
     ufs: [{ id: 'MA', title: 'MA' }],
@@ -50,10 +51,16 @@ function rubeusFalso({ prova = 'Aprovado', conclusivo = 1, semMatricula = false 
     },
     async cities(d) { assert.equal(d.estado_natal, 'MA'); return [{ id: '0907', title: 'Balsas' }, { id: '0908', title: 'Balsas do Sul' }]; },
     async schools() { return [{ id: 'E1', title: 'Escola Estadual Teste' }]; },
+    async schoolOptions() { listasCarregadas.n++; return ESCOLAS_RUBEUS; },
     async send(tela, dados) { envios.push({ tela, dados }); atual++; return { token: 'tok3' }; }
   };
-  return { matricula, envios };
+  return { matricula, envios, listasCarregadas, avancar: () => atual++ };
 }
+const ESCOLAS_RUBEUS = [
+  { id: 'E1', title: 'Escola Estadual Teste - Escola Estadual Teste' },
+  { id: 'E2', title: 'C DE ENSINO MEDIO ROSARIO DE MARIA NINA COSTA - C DE ENSINO MEDIO ROSARIO DE MARIA NINA COSTA' },
+  { id: 'E3', title: 'Colégio Dom Bosco - Colégio Dom Bosco' }
+];
 
 function montar(opts) {
   const store = memoria();
@@ -67,11 +74,12 @@ function montar(opts) {
 }
 // Contrato com o JSON publicado: chaves e tipos da resposta iguais aos declarados, e rota válida.
 function confere(origem, r) {
+  if (r.screen === 'SUCCESS') { assert.ok(r.data.extension_message_response.params.flow_token); return r; }
   const tela = FLOW.screens.find(s => s.id === r.screen);
   assert.ok(tela, 'tela existe: ' + r.screen);
   assert.ok(origem === r.screen || FLOW.routing_model[origem].includes(r.screen), `${origem} → ${r.screen}`);
   assert.deepEqual(Object.keys(r.data).sort(), Object.keys(tela.data ?? {}).sort(), 'chaves de ' + r.screen);
-  for (const [k, v] of Object.entries(r.data)) assert.equal(typeof v, tela.data[k].type, `${r.screen}.${k}`);
+  for (const [k, v] of Object.entries(r.data)) assert.equal(Array.isArray(v) ? 'array' : typeof v, tela.data[k].type, `${r.screen}.${k}`);
   return r;
 }
 const toque = (E, screen, acao, estado, user = {}) => {
@@ -79,7 +87,7 @@ const toque = (E, screen, acao, estado, user = {}) => {
   return flowContext.run({ request: req, deadline: Date.now() + 9500 }, async () => confere(screen, await E.route(req)));
 };
 const END = { cep: '65800000', rua: 'Rua A', numero: '10', bairro: 'Centro', cidade: 'Balsas', uf: 'MA', estado_natal: 'MA', cidade_natal: 'Balsas' };
-const IDENT = { rg: 'MA-123456', orgao_emissor: 'ssp', uf_rg: 'MA', cor_raca: 'parda', estado_civil: 'solteiro_a', ano_conclusao: '', escola: 'Escola Estadual Teste' };
+const IDENT = { rg: 'MA-123456', orgao_emissor: 'ssp', uf_rg: 'MA', cor_raca: 'parda', estado_civil: 'solteiro_a', ano_conclusao: '', busca_escola: '', escola: '' };
 
 test('Um único Flow: tela inicial da inscrição tem o link "Já sou inscrito" para o login da etapa 2', () => {
   const ids = FLOW.screens.map(s => s.id);
@@ -108,7 +116,75 @@ test('Login: CPF + nascimento abre o portal; dados errados não seguem; prova em
   assert.equal((await store.get(s.fila_id, 'matriculaFila')).record.applyment_id, '555');
   const c = montar({ prova: 'Aguardando correção', conclusivo: 0, semMatricula: true });
   const espera = await toque(c.E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
-  assert.equal(espera.screen, 'MATR_FIM'); assert.match(espera.data.titulo, /correção/);
+  // Aguardando correção: a tela inicial é o status do portal; o botão só fecha o Flow.
+  assert.equal(espera.screen, 'MATR_PORTAL'); assert.match(espera.data.resumo, /⏱ Prova online: Aguardando correção/);
+  assert.equal(espera.data.botao, 'Fechar');
+  const fechou = await toque(c.E, 'MATR_PORTAL', 'continuar', espera.data.estado);
+  assert.equal(fechou.screen, 'SUCCESS');
+});
+
+test('Portal ao logar de novo: o botão leva à primeira subetapa que falta, com o texto do botão do site', async () => {
+  const { E } = montar();
+  const p1 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(p1.data.botao, 'Continuar');
+  const resp = await toque(E, 'MATR_PORTAL', 'continuar', p1.data.estado);
+  assert.equal(resp.screen, 'MATR_RESPONSAVEL');
+  const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  // Fechou o Flow depois do endereço e entrou de novo: continua na identidade.
+  const p2 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const ident = await toque(E, 'MATR_PORTAL', 'continuar', p2.data.estado);
+  assert.equal(ident.screen, 'MATR_IDENTIDADE');
+  // Regras da próxima tela.
+  const rows = t => ({ next: { title: t, action: 'Verificar' }, rows: [{ title: 'Pré-matrícula', conclusive: true }] });
+  assert.equal(proximaTela(rows('Documentos matrícula'), { responsavel: { responsavel: 'Eu' } }).tela, DOCS[0].tela);
+  assert.equal(proximaTela(rows('Documentos matrícula'), { responsavel: { responsavel: 'Eu' }, documentos: { completo: true } }).tela, null, 'documentos já enviados: em análise');
+  assert.equal(proximaTela(rows('Contrato'), {}).tela, null, 'contrato ainda fora do Flow: só o status');
+  assert.equal(proximaTela(null, {}, true).tela, 'MATR_RESP_DADOS', 'portal lento: decide pelo Firestore');
+  assert.equal(proximaTela(null, { responsavel: { responsavel: 'Outro' }, resp_dados: {} }).tela, 'MATR_ENDERECO');
+});
+
+test('Escola: busca pelo nome na lista do site (cache), escolhe e o worker envia o código da lista', async () => {
+  const { E, fila, envios, listasCarregadas } = montar();
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  // O worker envia responsável e endereço e, ao abrir a identidade, guarda a lista de escolas.
+  await E.worker(fila[0].id);
+  assert.equal(listasCarregadas.n, 1);
+  const curta = await toque(E, 'MATR_IDENTIDADE', 'buscar_escola', ident.data.estado, { ...IDENT, busca_escola: 'ro' });
+  assert.match(curta.data.erro, /3 letras/);
+  const busca = await toque(E, 'MATR_IDENTIDADE', 'buscar_escola', ident.data.estado, { ...IDENT, busca_escola: 'rosario maria' });
+  assert.equal(busca.data.tem_escolas, true);
+  assert.deepEqual(busca.data.escolas.map(o => o.id), ['E2', SEM_ESCOLA]);
+  assert.ok(busca.data.escolas.every(o => o.title.length <= 30));
+  assert.equal(listasCarregadas.n, 1, 'busca usa o cache');
+  const sem = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', busca.data.estado, { ...IDENT, busca_escola: 'rosario maria' });
+  assert.match(sem.data.erro, /Buscar escola/);
+  assert.equal(sem.data.tem_escolas, true, 'a lista continua na tela');
+  const docs = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', busca.data.estado, { ...IDENT, busca_escola: 'rosario maria', escola: 'E2' });
+  assert.equal(docs.screen, DOCS[0].tela);
+  await E.worker(fila[0].id);
+  const id = envios.find(e => e.tela === 'IDENTIDADE');
+  assert.equal(id.dados.escola, 'E2');
+  assert.deepEqual(id.dados.escolas.map(o => o.id), ['E2']);
+  assert.equal(buscarEscolas(ESCOLAS_RUBEUS, 'dom bosco')[0].id, 'E3');
+  assert.deepEqual(opcaoEscola(ESCOLAS_RUBEUS[0]), { id: 'E1', title: 'Escola Estadual Teste' });
+});
+
+test('Escola sem cache: a busca abre a identidade no Rubeus uma vez e guarda a lista; "Não encontrei" fica em branco', async () => {
+  const r = montar();
+  const portal = await toque(r.E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await toque(r.E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const end = await toque(r.E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const ident = await toque(r.E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  r.avancar(); r.avancar(); // o worker já enviou responsável e endereço; a identidade é o passo liberado
+  const busca = await toque(r.E, 'MATR_IDENTIDADE', 'buscar_escola', ident.data.estado, { ...IDENT, busca_escola: 'escola estadual' });
+  assert.deepEqual(busca.data.escolas.map(o => o.id), ['E1', SEM_ESCOLA]);
+  assert.equal(r.listasCarregadas.n, 1);
+  const nada = await toque(r.E, 'MATR_IDENTIDADE', 'enviar_identidade', busca.data.estado, { ...IDENT, busca_escola: 'escola estadual', escola: SEM_ESCOLA });
+  assert.equal(nada.screen, DOCS[0].tela);
 });
 
 test('Etapa 2 completa: subetapas e documentos gravam no Firestore e avançam na hora; o worker envia ao Rubeus em ordem e os documentos por último', async () => {

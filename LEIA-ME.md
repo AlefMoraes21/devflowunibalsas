@@ -1,3 +1,10 @@
+# Versão 2.7.0 — Etapa 2: portal como tela inicial do LOGIN, busca de escola e menor de idade
+
+- **LOGIN → Portal do candidato:** todo login cai no status das etapas (como o site). O botão leva à primeira subetapa que falta (pelo Firestore e pelo que o portal já mostra como concluído), com o texto do botão do site. "Aguardando correção", documentos em análise e etapas ainda fora do Flow (contrato, pagamento) mostram o status e o botão **Fechar**. Prova liberada continua indo à redação.
+- **Escola de Ensino Médio:** no site é uma lista fechada (~1.461 escolas, opcional). No Flow: digita parte do nome → **Buscar escola** → escolhe na lista (até 15) ou "Não encontrei a minha escola" (fica em branco). A lista fica em cache no Firestore (`flowCache/escolas-ensino-medio`, 7 dias), aquecida pelo worker ao abrir a identidade; sem cache, a busca abre a identidade no Rubeus uma vez. O worker envia o código da escola escolhida.
+- **Menor de 18:** pula a pergunta "Eu/Outro" e vai direto à ficha do responsável financeiro ("Outro" é gravado sozinho).
+- 175 testes. **Colar o JSON novo na WABA.**
+
 # Versão 2.5.0 — Um único Flow: inscrição (etapa 1) + matrícula e documentos (etapa 2)
 
 - `flows/etapa1-vestibular.json` agora tem as duas etapas. A etapa 1 não mudou (só a tela inicial ganhou o link **"Já sou inscrito (LOGIN)"**). O `flows/etapa2-matricula.json` separado deixou de existir.

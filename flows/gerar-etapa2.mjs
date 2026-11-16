@@ -19,7 +19,9 @@ const dados = (names, extra = {}) => ({ estado: str(), erro: str(), tem_erro: bo
 
 const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
 const RESP = ['nome', 'email', 'cpf', 'data_nascimento', 'celular'];
-const IDENT = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola'];
+const IDENT = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'busca_escola', 'escola'];
+const ESCOLAS = { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } },
+  __example__: [{ id: '1', title: 'Escola exemplo', description: 'Escola exemplo' }] };
 
 // Dados iniciais da tela de login quando aberta pelo link da tela inicial (navigate).
 export const LOGIN_VAZIO = { erro: '', tem_erro: false, valor_login: '', valor_data_nascimento: '' };
@@ -41,7 +43,7 @@ const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length 
 
 export const routing = {
   MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM', 'INSC_PORTAL'],
-  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_FIM'],
+  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'MATR_FIM'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
   MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
@@ -67,12 +69,12 @@ export const screens = [
   {
     // Igual ao status do Portal do candidato.
     id: 'MATR_PORTAL', title: 'Portal do candidato',
-    data: { estado: str(), resumo: str('✅ Inscrição: Concluída') },
+    data: { estado: str(), resumo: str('✅ Inscrição: Concluída'), botao: str('Continuar matrícula') },
     layout: { type: 'SingleColumnLayout', children: [
       imagem(LOGO_PORTAL),
       { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
       { type: 'TextBody', text: '${data.resumo}' },
-      { type: 'Footer', label: 'Continuar matrícula', 'on-click-action': troca('continuar') }
+      { type: 'Footer', label: '${data.botao}', 'on-click-action': troca('continuar') }
     ] }
   },
   {
@@ -114,7 +116,7 @@ export const screens = [
     ] }] }
   },
   {
-    id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT),
+    id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT, { escolas: ESCOLAS, tem_escolas: bool() }),
     layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT), children: [
       imagem(LOGO_MATRICULA),
       { type: 'TextHeading', text: 'Documento e perfil' },
@@ -125,8 +127,11 @@ export const screens = [
       { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
       { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
       { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
+      // No site é uma lista fechada: busca pelo nome e escolhe na lista (opcional).
+      { type: 'TextInput', name: 'busca_escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional. Digite parte do nome e toque em Buscar escola', 'input-type': 'text', required: false },
+      { type: 'EmbeddedLink', text: 'Buscar escola', 'on-click-action': troca('buscar_escola', form(IDENT)) },
+      { type: 'RadioButtonsGroup', name: 'escola', label: 'Escolha a sua escola', required: false, visible: '${data.tem_escolas}', 'data-source': '${data.escolas}' },
       { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio (opcional). Ex.: 2024', 'input-type': 'text', required: false },
-      { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
       { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
     ] }] }
   },
