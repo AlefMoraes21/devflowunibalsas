@@ -58,6 +58,8 @@ const flow = {
           type: 'Form', name: 'form_processo',
           children: [
             imagem(LOGO_INSCRICAO, 40),
+            // Página 1 = porta de entrada: "Iniciar inscrição" (etapa 1) ou "LOGIN" (o servidor leva à etapa em que parou).
+            { type: 'TextSubheading', text: 'Escolha seu processo e selecione uma opção' },
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
             { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
               { id: '20383', title: 'Vestibular Online 2027/1' },
@@ -65,6 +67,7 @@ const flow = {
               { id: '20384', title: 'Portador de Diploma 2027/1' },
               { id: '20386', title: 'Nota do ENEM 2027/1' }
             ] },
+            { type: 'TextCaption', text: 'Já iniciou sua inscrição ou matrícula?\nToque em "LOGIN" abaixo para continuar da etapa em que parou.' },
             { type: 'EmbeddedLink', text: 'Já sou inscrito (LOGIN)', 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'MATR_LOGIN' }, payload: LOGIN_VAZIO } },
             { type: 'Footer', label: 'Iniciar inscrição', 'on-click-action': { name: 'data_exchange', payload: { acao: 'e1_iniciar', processo_seletivo_id: '${form.processo_seletivo_id}' } } }
           ]

@@ -112,6 +112,10 @@
                 "scale-type": "contain"
               },
               {
+                "type": "TextSubheading",
+                "text": "Escolha seu processo e selecione uma opção"
+              },
+              {
                 "type": "Dropdown",
                 "name": "processo_seletivo_id",
                 "label": "Escolha o processo seletivo",
@@ -134,6 +138,10 @@
                     "title": "Nota do ENEM 2027/1"
                   }
                 ]
+              },
+              {
+                "type": "TextCaption",
+                "text": "Já iniciou sua inscrição ou matrícula?\nToque em \"LOGIN\" abaixo para continuar da etapa em que parou."
               },
               {
                 "type": "EmbeddedLink",
