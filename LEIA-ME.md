@@ -1,3 +1,7 @@
+# Versão 2.8.2 — Diagnóstico do arquivo do WhatsApp
+
+- O envio pelo site chegou ao passo de documentos (login, processo e passo com HTTP 200), mas o arquivo do DocumentPicker falhou ao baixar/decifrar ("Arquivo inválido"). Novo log `midia_download` (sem segredos): em que etapa falhou (url, baixar, http, decifrar), host, HTTP, tamanho baixado, tipo da resposta, nomes dos campos e **tamanhos** dos campos de criptografia. Download com até 20 s.
+
 # Versão 2.8.1 — Escola não trava a identidade
 
 - "Buscar escola" sem a lista em cache tentava carregar do Rubeus ao vivo (login + portal, mais de 10 s) e o WhatsApp ficava girando. Agora tenta no máximo 5 s e libera a tela com aviso.

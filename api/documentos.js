@@ -75,15 +75,26 @@ export function decryptMedia(cdnFile, meta) {
   return plain;
 }
 
-export async function downloadMedia(media, { fetcher = fetch, timeoutMs = 8000 } = {}) {
+// Diagnóstico sem segredos: só tamanhos (em bytes, depois do base64) dos campos de criptografia.
+function metaLens(meta) {
+  const m = meta && typeof meta === "object" ? meta : {};
+  return Object.fromEntries(["encrypted_hash", "iv", "encryption_key", "hmac_key", "plaintext_hash"].map(k => [k, m[k] == null ? null : Buffer.from(String(m[k]), "base64").length]));
+}
+
+export async function downloadMedia(media, { fetcher = fetch, timeoutMs = 20000, log = e => console.info(JSON.stringify(e)) } = {}) {
+  const falha = (etapa, extra = {}) => log({ event: "midia_download", ok: false, etapa, media_keys: Object.keys(media ?? {}).sort().slice(0, 12), lens: metaLens(media?.encryption_metadata), ...extra });
   let url;
-  try { url = new URL(String(media?.cdn_url ?? "")); } catch { throw new Error("Arquivo inválido. Envie novamente."); }
-  if (url.protocol !== "https:") throw new Error("Arquivo inválido. Envie novamente.");
+  try { url = new URL(String(media?.cdn_url ?? "")); } catch { falha("url", { cdn_url_len: String(media?.cdn_url ?? "").length }); throw new Error("Arquivo inválido. Envie novamente."); }
+  if (url.protocol !== "https:") { falha("url_https", { protocolo: url.protocol }); throw new Error("Arquivo inválido. Envie novamente."); }
   let r;
-  try { r = await fetcher(url.href, { signal: AbortSignal.timeout(timeoutMs) }); } catch { throw new Error("Não conseguimos baixar o arquivo enviado agora. Tente enviar novamente."); }
-  if (!r.ok) throw new Error("Não conseguimos baixar o arquivo enviado. Envie novamente.");
-  try { return decryptMedia(Buffer.from(await r.arrayBuffer()), media.encryption_metadata ?? {}); }
-  catch (e) { throw new Error(/não confere/.test(e.message) ? e.message : "Arquivo inválido. Envie novamente."); }
+  try { r = await fetcher(url.href, { signal: AbortSignal.timeout(timeoutMs) }); } catch (e) { falha("baixar", { host: url.hostname, erro: String(e?.name ?? e).slice(0, 40) }); throw new Error("Não conseguimos baixar o arquivo enviado agora. Tente enviar novamente."); }
+  if (!r.ok) { falha("http", { host: url.hostname, http: r.status }); throw new Error("Não conseguimos baixar o arquivo enviado. Envie novamente."); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  try { return decryptMedia(buf, media.encryption_metadata ?? {}); }
+  catch (e) {
+    falha("decifrar", { host: url.hostname, bytes: buf.length, tipo_resposta: String(r.headers?.get?.("content-type") ?? "").slice(0, 40), erro: String(e?.message ?? e).slice(0, 80) });
+    throw new Error(/não confere/.test(e.message) ? e.message : "Arquivo inválido. Envie novamente.");
+  }
 }
 
 // O tipo real vem do conteúdo (não do nome nem do mime informado pelo aparelho).
