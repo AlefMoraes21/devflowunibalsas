@@ -47,6 +47,7 @@
     ],
     "MATR_PORTAL": [
       "MATR_RESPONSAVEL",
+      "MATR_RESP_DADOS",
       "MATR_FIM"
     ],
     "MATR_RESPONSAVEL": [

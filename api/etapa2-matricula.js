@@ -211,7 +211,15 @@ export function createEtapa2({
     if (!s.m2) return null;
     const base = { m2: true, fila_id: s.fila_id, menor: s.menor };
 
-    if (screen === 'MATR_PORTAL' && acao === 'continuar') return render('MATR_RESPONSAVEL', { ...base, erro: '' });
+    if (screen === 'MATR_PORTAL' && acao === 'continuar') {
+      // Menor de 18 anos não pode ser o próprio responsável financeiro: grava "Outro" e vai direto à ficha do responsável.
+      if (s.menor) {
+        try { await gravarBloco(s, req.flow_token, 'responsavel', { responsavel: 'Outro' }); }
+        catch { return render('MATR_RESPONSAVEL', { ...base, erro: ERRO_GRAVAR }); }
+        return render('MATR_RESP_DADOS', { ...base, erro: '' });
+      }
+      return render('MATR_RESPONSAVEL', { ...base, erro: '' });
+    }
 
     if (screen === 'MATR_RESPONSAVEL' && acao === 'enviar_responsavel') {
       const u = pick(d, ['responsavel']);

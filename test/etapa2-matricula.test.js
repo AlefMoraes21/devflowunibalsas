@@ -168,16 +168,19 @@ test('Documentos esperam a calma depois da identidade antes de ir ao sistema aca
   assert.equal(docsEnviados.length, 3);
 });
 
-test('Menor de 18 anos: pede os dados do responsável; regras de seleção', async () => {
+test('Menor de 18 anos: pula a escolha e vai direto à ficha do responsável; regras de seleção', async () => {
   const hoje = new Date();
   const menor = `${hoje.getFullYear() - 16}-01-01`;
   const r = rubeusFalso();
   r.matricula.login = async () => ({ token: 't', applyment_id: '777' });
-  const E2 = createEtapa2({ store: memoria(), enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
+  const store = memoria();
+  const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
   const portal = await toque(E2, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: menor });
-  const resp = await toque(E2, 'MATR_PORTAL', 'continuar', portal.data.estado);
-  const dados = await toque(E2, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const dados = await toque(E2, 'MATR_PORTAL', 'continuar', portal.data.estado);
   assert.equal(dados.screen, 'MATR_RESP_DADOS');
+  const id = openState(dados.data.estado, 'MATR_RESP_DADOS').fila_id;
+  const rec = await store.get(id, 'matriculaFila');
+  assert.equal(rec.record.blocos.responsavel.responsavel, 'Outro');
   assert.equal(escolherOpcao([{ id: 'S', title: 'Solteiro' }], 'Solteiro(a)', { prefixo: 5 }), 'S');
   assert.equal(escolherOpcao([{ id: '1', title: 'Balsas' }, { id: '2', title: 'Balsas do Sul' }], 'balsas'), '1');
   assert.equal(idade('2000-12-31', new Date('2026-12-30')), 25);
