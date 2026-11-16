@@ -23,7 +23,7 @@ function memoria() {
 }
 
 // Rubeus simulado: o portal libera um passo por vez; cada /submit conclui o passo atual.
-function rubeusFalso({ prova = 'Aprovado', conclusivo = 1 } = {}) {
+function rubeusFalso({ prova = 'Aprovado', conclusivo = 1, semMatricula = false } = {}) {
   const passos = ['RESP_FINANCEIRO', 'ENDERECO', 'IDENTIDADE', 'CUPOM', 'DOCUMENTOS_INSCRICAO'];
   let atual = 0;
   const envios = [];
@@ -38,7 +38,7 @@ function rubeusFalso({ prova = 'Aprovado', conclusivo = 1 } = {}) {
     async portal() { return { token: 'tok2', processo_seletivo_id: '20383', stages: [
       { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
       { title: 'Prova online', feedback: { complementary_text: prova, conclusive: conclusivo } },
-      { title: 'Matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Continuar' }, cta_link: '/passo/30066' + atual }
+      ...(semMatricula ? [] : [{ title: 'Matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Continuar' }, cta_link: '/passo/30066' + atual }])
     ] }; },
     async open(sessao, next) {
       const tela = passos[atual];
@@ -92,20 +92,24 @@ test('Flow da etapa 2: JSON válido para a Meta (ids, rotas, dados declarados, i
 
 test('Login: CPF + nascimento abre o portal; dados errados ou redação em correção não seguem', async () => {
   const { E, store } = montar();
-  const errado = await toque(E, 'MATR_INICIO', 'entrar', null, { cpf: CPF, data_nascimento: '1999-01-01' });
+  const errado = await toque(E, 'MATR_INICIO', 'entrar', null, { login: CPF, data_nascimento: '1999-01-01' });
   assert.equal(errado.screen, 'MATR_LOGIN'); assert.match(errado.data.erro, /Não encontramos/);
-  const ok = await toque(E, 'MATR_INICIO', 'entrar', null, { cpf: CPF, data_nascimento: NASC });
+  const ok = await toque(E, 'MATR_INICIO', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(ok.screen, 'MATR_PORTAL'); assert.match(ok.data.resumo, /Prova online/);
   const s = openState(ok.data.estado, 'MATR_PORTAL');
   assert.equal((await store.get(s.fila_id, 'matriculaFila')).record.applyment_id, '555');
-  const c = montar({ prova: 'Aguardando correção', conclusivo: 0 });
-  const espera = await toque(c.E, 'MATR_INICIO', 'entrar', null, { cpf: CPF, data_nascimento: NASC });
+  const c = montar({ prova: 'Aguardando correção', conclusivo: 0, semMatricula: true });
+  const espera = await toque(c.E, 'MATR_INICIO', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(espera.screen, 'MATR_FIM'); assert.match(espera.data.titulo, /correção/);
+  // Login por e-mail, como no portal.
+  const r2 = montar();
+  r2.matricula.login = async (login) => { assert.equal(login, 'ana@example.com'); return { token: 't', applyment_id: '9' }; };
+  assert.equal((await toque(r2.E, 'MATR_INICIO', 'entrar', null, { login: 'ana@example.com', data_nascimento: NASC })).screen, 'MATR_PORTAL');
 });
 
 test('Subetapas: cada uma grava no Firestore e avança na hora; o worker envia ao Rubeus em ordem', async () => {
   const { E, store, fila, envios } = montar();
-  const portal = await toque(E, 'MATR_INICIO', 'entrar', null, { cpf: CPF, data_nascimento: NASC });
+  const portal = await toque(E, 'MATR_INICIO', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
   assert.equal(resp.screen, 'MATR_RESPONSAVEL');
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
@@ -141,7 +145,7 @@ test('Menor de 18 anos: pede os dados do responsável; regras de seleção', asy
   const r = rubeusFalso();
   r.matricula.login = async () => ({ token: 't', applyment_id: '777' });
   const E2 = createEtapa2({ store: memoria(), enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
-  const portal = await toque(E2, 'MATR_INICIO', 'entrar', null, { cpf: CPF, data_nascimento: menor });
+  const portal = await toque(E2, 'MATR_INICIO', 'entrar', null, { login: CPF, data_nascimento: menor });
   const resp = await toque(E2, 'MATR_PORTAL', 'continuar', portal.data.estado);
   const dados = await toque(E2, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
   assert.equal(dados.screen, 'MATR_RESP_DADOS');

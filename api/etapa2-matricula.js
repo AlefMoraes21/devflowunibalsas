@@ -62,7 +62,7 @@ export function createEtapa2({
   const valor = (...n) => n.map(x => 'valor_' + x);
   const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
   const KEYS = {
-    MATR_LOGIN: ['erro', 'tem_erro', ...valor('cpf', 'data_nascimento')],
+    MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
     MATR_PORTAL: ['estado', 'resumo'],
     MATR_RESPONSAVEL: ['estado', 'erro', 'tem_erro', ...valor('responsavel')],
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
@@ -134,36 +134,38 @@ export function createEtapa2({
   async function routeTela(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
 
-    // Login igual ao Portal do candidato: CPF + data de nascimento (validado no Rubeus, ao vivo).
+    // Login igual ao Portal do candidato: CPF ou e-mail + data de nascimento (validado no Rubeus, ao vivo).
     if ((screen === 'MATR_INICIO' || screen === 'MATR_LOGIN') && acao === 'entrar') {
-      const u = pick(d, ['cpf', 'data_nascimento']);
+      const u = pick(d, ['login', 'data_nascimento']);
       const volta = erro => render('MATR_LOGIN', { values: u, erro });
-      if (!validCpf(u.cpf)) return volta('Confira o CPF (11 números).');
+      const texto = String(u.login ?? '').trim();
+      const ehEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto);
+      if (!ehEmail && !validCpf(texto)) return volta('Informe o CPF (11 números) ou o e-mail usado na inscrição.');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(u.data_nascimento ?? ''))) return volta('Informe a data de nascimento.');
+      const login = ehEmail ? texto : digits(texto);
       let sessao;
-      try { sessao = await matricula.login(digits(u.cpf), u.data_nascimento); }
-      catch { return volta('Não encontramos uma inscrição com esse CPF e data de nascimento. Confira os dados e tente de novo.'); }
-      if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esse CPF e data de nascimento.');
+      try { sessao = await matricula.login(login, u.data_nascimento); }
+      catch { return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.'); }
+      if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esses dados.');
       const id = hash('matr:' + sessao.applyment_id);
       const flow = hash(req.flow_token ?? '');
-      // Situação das etapas, como no portal (rápido; se demorar, segue para a matrícula e o worker confere).
-      let resumo = '', liberada = true;
+      // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
+      // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
+      let resumo = '';
       try {
-        const st = await Promise.race([matricula.portal(sessao).then(p => p), new Promise((_, r) => setTimeout(() => r(new Error('lento')), 4500))]);
-        const linhas = (st.stages ?? []).map(x => ({ t: String(x.title ?? ''), s: String(x.feedback?.complementary_text ?? ''), ok: Number(x.feedback?.conclusive) === 1 }));
-        resumo = linhas.map(l => `${l.ok ? '✅' : /aguardando.*correc/.test(norm(l.s)) ? '⏱' : '❗'} ${l.t}\n${l.s || '—'}`).join('\n\n');
-        const prova = linhas.find(l => /prova|avaliacao|redacao/.test(norm(l.t)));
-        if (prova && !prova.ok) liberada = false;
+        const st = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), 4500))]);
+        const s2 = summarizeStages(st.stages ?? []);
+        resumo = s2.resumo;
+        if (!s2.next && s2.aguardandoCorrecao) return fim('Aguardando correção ⏱', 'Você realizou a sua prova. Em breve o resultado estará disponível.');
       } catch (e) { log({ event: 'etapa2_fila', passo: 'portal_lento', message: String(e?.message ?? e).slice(0, 60) }); }
-      if (!liberada) return fim('Sua redação está em correção ⏱', 'Você realizou a sua prova. Em breve o resultado estará disponível.\n\nAssim que a matrícula for liberada, você poderá continuar por aqui.');
-      // Inscrição da matrícula no Firestore (CPF e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
-      const novo = { id, applyment_id: sessao.applyment_id, flow, cpf: digits(u.cpf), data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
+      // Inscrição da matrícula no Firestore (login e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
+      const novo = { id, applyment_id: sessao.applyment_id, flow, login, data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
       const atual = await store.get(id, FILA);
       if (!atual) await store.create(id, novo, FILA);
-      else await store.update(id, { ...atual.record, flow, cpf: novo.cpf, data_nascimento: novo.data_nascimento, status: atual.record.status === 'falhou' ? 'pendente' : atual.record.status }, atual.version, FILA);
+      else await store.update(id, { ...atual.record, flow, login, data_nascimento: novo.data_nascimento, status: atual.record.status === 'falhou' ? 'pendente' : atual.record.status }, atual.version, FILA);
       log({ event: 'etapa2_fila', id: curto(id), passo: 'login' });
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
-      return render('MATR_PORTAL', { m2: true, fila_id: id, menor, resumo: resumo || '✅ Inscrição\nConcluída\n\n✅ Prova online\nAprovada' });
+      return render('MATR_PORTAL', { m2: true, fila_id: id, menor, resumo: resumo || 'Sua inscrição foi encontrada. Vamos seguir com a sua matrícula.' });
     }
 
     let s;
@@ -200,7 +202,7 @@ export function createEtapa2({
         : !UFS.some(o => o.id === u.uf_rg) ? 'Selecione a UF da identidade.'
         : !RACAS.some(o => o.id === u.cor_raca) ? 'Selecione cor/raça.'
         : !ESTADOS_CIVIS.some(o => o.id === u.estado_civil) ? 'Selecione o estado civil.'
-        : !(/^\d{4}$/.test(u.ano_conclusao ?? '') && Number(u.ano_conclusao) >= 1950 && Number(u.ano_conclusao) <= new Date().getFullYear()) ? 'Informe o ano de conclusão com 4 números (ex.: 2024).'
+        : u.ano_conclusao && !(/^\d{4}$/.test(u.ano_conclusao) && Number(u.ano_conclusao) >= 1995 && Number(u.ano_conclusao) <= new Date().getFullYear() + 1) ? 'Confira o ano de conclusão (4 números, de 1995 em diante).'
         : '';
       if (erro) return render(screen, { ...s, values: u, erro });
       try { await gravarBloco(s, req.flow_token, 'identidade', u); } catch { return render(screen, { ...s, values: u, erro: ERRO_GRAVAR }); }
@@ -239,7 +241,7 @@ export function createEtapa2({
         try { escolas = await matricula.schools({ ...st, busca_escola: bloco.escola }); } catch {}
         escola = escolherOpcao(escolas, bloco.escola) ?? (escolas.length === 1 ? escolas[0].id : '');
       }
-      return { ...st, rg: bloco.rg, orgao_emissor: bloco.orgao_emissor, uf_rg, cor_raca: cor, estado_civil: civil, escola, escolas, ano_conclusao: st.campos?.ano_conclusao ? bloco.ano_conclusao : '' };
+      return { ...st, rg: bloco.rg, orgao_emissor: bloco.orgao_emissor, uf_rg, cor_raca: cor, estado_civil: civil, escola, escolas, ano_conclusao: st.campos?.ano_conclusao ? (bloco.ano_conclusao ?? '') : '' };
     }
     if (tela === 'CUPOM') return { ...st, cupom: bloco.cupom ?? '' };
     throw new ErroPasso('Tela inesperada: ' + tela, { final: true });
@@ -263,7 +265,7 @@ export function createEtapa2({
     }
     try {
       await runCtx(async () => {
-        let sessao = await matricula.login(rec.cpf, rec.data_nascimento);
+        let sessao = await matricula.login(rec.login ?? rec.cpf, rec.data_nascimento);
         while (clock() - inicio < orcamentoMs) {
           // O portal diz qual é o próximo passo liberado (os concluídos ficam de fora).
           const p = await matricula.portal(sessao);

@@ -585,10 +585,10 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
       require(data, ["rg", "orgao_emissor", "uf_rg", "cor_raca", "estado_civil"]);
       for (const [n, list] of [["uf_rg", "ufs"], ["cor_raca", "racas"], ["estado_civil", "estados_civis"]]) if (!(data[list] ?? []).some(o => o.id === data[n])) throw new Error(`Selecione ${LABELS[n]}.`);
       if (data.escola && !(data.escolas ?? []).some(o => o.id === data.escola)) throw new Error("Busque e selecione a escola, ou deixe em branco.");
-      // Obrigatório quando a etapa tem o campo (4 números, de 1950 até o ano atual).
-      if (data.campos?.ano_conclusao) {
+      // Opcional, como no site (lista de 1995 até o ano seguinte): valida só quando informado.
+      if (data.campos?.ano_conclusao && str(data.ano_conclusao).trim()) {
         const year = onlyDigits(data.ano_conclusao);
-        if (!/^\d{4}$/.test(year) || Number(year) < 1950 || Number(year) > new Date().getFullYear()) throw new Error("Informe o ano de conclusão do ensino médio com 4 números (ex.: 2024).");
+        if (!/^\d{4}$/.test(year) || Number(year) < 1995 || Number(year) > new Date().getFullYear() + 1) throw new Error("Confira o ano de conclusão do ensino médio (4 números, de 1995 em diante).");
         data.ano_conclusao = year;
       }
       set("rg", str(data.rg).trim()); set("orgao_emissor", str(data.orgao_emissor).trim().toUpperCase());

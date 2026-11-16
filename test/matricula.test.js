@@ -170,16 +170,18 @@ test('IDENTIDADE: ano de conclusão é campo de texto obrigatório de 4 caracter
  assert.ok(!JSON.stringify(s).includes('data.anos'));
 });
 
-test('IDENTIDADE: servidor exige ano de conclusão com 4 números entre 1950 e o ano atual e envia ao campo certo',async()=>{
+test('IDENTIDADE: ano de conclusão é opcional (como no site); se informado, 4 números de 1995 ao ano seguinte',async()=>{
  const {createMatricula}=await import('../api/matricula.js');
  const sent=[];
  const m=createMatricula({api:async()=>({}),getForm:async()=>({}),getDataSource:async()=>({}),render:()=>({}),submitForm:async(button,fields)=>{sent.push({button,fields});return {token:'t'}}});
  const base={rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'2',estado_civil:'S',ufs:[{id:'MA'}],racas:[{id:'2'}],estados_civis:[{id:'S'}],
   campos:{rg:'38642',orgao_emissor:'38643',uf_rg:'38644',cor_raca:'38645',estado_civil:'38646',ano_conclusao:'38680'},button_id:'3940407',token:'t',ocultos:[]};
  const year=new Date().getFullYear();
- for(const bad of ['','abcd','202','20245',String(year+1),'1949'])
+ for(const bad of ['abcd','202','20245',String(year+2),'1994'])
   await assert.rejects(m.send('IDENTIDADE',{...base,ano_conclusao:bad}),/ano de conclusão/i,`"${bad}" deveria ser recusado`);
  assert.equal(sent.length,0,'nada é enviado ao Rubeus com ano inválido');
+ await m.send('IDENTIDADE',{...base,ano_conclusao:''});
+ assert.equal(sent.length,1,'sem ano: envia sem o campo');assert.equal(sent[0].fields.find(f=>f.field_id===38680),undefined);sent.length=0;
  await m.send('IDENTIDADE',{...base,ano_conclusao:' 2024 '});
  assert.equal(sent.length,1);assert.deepEqual(sent[0].fields.find(f=>f.field_id===38680),{field_id:38680,value:'2024'});
  // Etapa sem o campo do ano (formulário diferente): não bloqueia.

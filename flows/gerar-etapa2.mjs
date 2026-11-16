@@ -37,15 +37,15 @@ const login = comErro => ({
   type: 'SingleColumnLayout',
   children: [{
     type: 'Form', name: 'form_login',
-    ...(comErro ? { 'init-values': init(['cpf']) } : {}),
+    ...(comErro ? { 'init-values': init(['login']) } : {}),
     children: [
       imagem(LOGO_PORTAL),
       { type: 'TextSubheading', text: 'Já sou inscrito' },
-      { type: 'TextBody', text: 'Entre com o CPF e a data de nascimento usados na inscrição para continuar de onde parou.' },
+      { type: 'TextBody', text: 'Entre com o CPF ou e-mail e a data de nascimento usados na inscrição para continuar de onde parou.' },
       ...(comErro ? [erroTexto] : []),
-      { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
+      { type: 'TextInput', name: 'login', label: 'CPF ou e-mail', 'input-type': 'text', required: true },
       { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
-      { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', cpf: '${form.cpf}', data_nascimento: '${form.data_nascimento}' } } }
+      { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', login: '${form.login}', data_nascimento: '${form.data_nascimento}' } } }
     ]
   }]
 });
@@ -65,7 +65,7 @@ const flow = {
   },
   screens: [
     { id: 'MATR_INICIO', title: 'Portal do candidato', layout: login(false) },
-    { id: 'MATR_LOGIN', title: 'Portal do candidato', data: { erro: str(), tem_erro: bool(), valor_cpf: str(), valor_data_nascimento: str() }, layout: login(true) },
+    { id: 'MATR_LOGIN', title: 'Portal do candidato', data: { erro: str(), tem_erro: bool(), valor_login: str(), valor_data_nascimento: str() }, layout: login(true) },
     {
       // Igual ao status do Portal do candidato.
       id: 'MATR_PORTAL', title: 'Portal do candidato',
@@ -128,7 +128,7 @@ const flow = {
         { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
         { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
         { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
-        { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio. 4 números. Ex.: 2024', 'input-type': 'text', required: true },
+        { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio (opcional). Ex.: 2024', 'input-type': 'text', required: false },
         { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
         { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
       ] }] }

@@ -56,13 +56,12 @@
               },
               {
                 "type": "TextBody",
-                "text": "Entre com o CPF e a data de nascimento usados na inscrição para continuar de onde parou."
+                "text": "Entre com o CPF ou e-mail e a data de nascimento usados na inscrição para continuar de onde parou."
               },
               {
                 "type": "TextInput",
-                "name": "cpf",
-                "label": "CPF",
-                "helper-text": "Somente os 11 números",
+                "name": "login",
+                "label": "CPF ou e-mail",
                 "input-type": "text",
                 "required": true
               },
@@ -81,7 +80,7 @@
                   "name": "data_exchange",
                   "payload": {
                     "acao": "entrar",
-                    "cpf": "${form.cpf}",
+                    "login": "${form.login}",
                     "data_nascimento": "${form.data_nascimento}"
                   }
                 }
@@ -103,7 +102,7 @@
           "type": "boolean",
           "__example__": false
         },
-        "valor_cpf": {
+        "valor_login": {
           "type": "string",
           "__example__": ""
         },
@@ -119,7 +118,7 @@
             "type": "Form",
             "name": "form_login",
             "init-values": {
-              "cpf": "${data.valor_cpf}"
+              "login": "${data.valor_login}"
             },
             "children": [
               {
@@ -134,7 +133,7 @@
               },
               {
                 "type": "TextBody",
-                "text": "Entre com o CPF e a data de nascimento usados na inscrição para continuar de onde parou."
+                "text": "Entre com o CPF ou e-mail e a data de nascimento usados na inscrição para continuar de onde parou."
               },
               {
                 "type": "TextBody",
@@ -143,9 +142,8 @@
               },
               {
                 "type": "TextInput",
-                "name": "cpf",
-                "label": "CPF",
-                "helper-text": "Somente os 11 números",
+                "name": "login",
+                "label": "CPF ou e-mail",
                 "input-type": "text",
                 "required": true
               },
@@ -164,7 +162,7 @@
                   "name": "data_exchange",
                   "payload": {
                     "acao": "entrar",
-                    "cpf": "${form.cpf}",
+                    "login": "${form.login}",
                     "data_nascimento": "${form.data_nascimento}"
                   }
                 }
@@ -1489,9 +1487,9 @@
                 "type": "TextInput",
                 "name": "ano_conclusao",
                 "label": "Ano de conclusão",
-                "helper-text": "Ensino médio. 4 números. Ex.: 2024",
+                "helper-text": "Ensino médio (opcional). Ex.: 2024",
                 "input-type": "text",
-                "required": true
+                "required": false
               },
               {
                 "type": "TextInput",
