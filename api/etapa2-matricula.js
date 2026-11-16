@@ -105,7 +105,7 @@ export function proximaTela(s2, blocos = {}, menor = false) {
   const tela = !respOk ? (quem === 'Outro' || menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL')
     : !preOk && !blocos.endereco ? 'MATR_ENDERECO'
     : !preOk && !blocos.identidade ? 'MATR_IDENTIDADE'
-    : !blocos.documentos?.completo && !concluida(/document/) ? DOCS[0].tela
+    : !blocos.documentos?.completo && (/document/.test(norm(next?.title)) || !concluida(/document/)) ? DOCS[0].tela
     : null;
   if (!tela) return fechar;
   return { tela, botao: String(next?.action || 'Continuar matrícula').slice(0, 35) };
@@ -307,6 +307,9 @@ export function createEtapa2({
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
       // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
       const destino = proximaTela(s2, atual?.record.blocos ?? {}, menor);
+      // Diagnóstico sem dados pessoais: o que o portal disse e para onde o botão leva.
+      log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: destino.tela ?? 'fechar', proxima: s2?.next?.title ?? (s2 ? 'nenhuma' : 'portal_lento'),
+        etapas: (s2?.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(atual?.record.blocos ?? {}).join(',') });
       return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: destino.tela, botao: destino.botao, resumo: resumo || 'Sua inscrição foi encontrada. Vamos seguir com a sua matrícula.' });
     }
 

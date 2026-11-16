@@ -1,3 +1,8 @@
+# Versão 2.8.3 — Portal: etapa de documentos sempre leva às telas de documentos
+
+- Quando o portal aponta "Documentos matrícula" como próxima etapa e o Flow ainda não recebeu os documentos, o botão leva às telas de documentos (antes uma linha "documentos" marcada como concluída podia trocar o botão por Fechar).
+- Log `portal_destino` no login (sem dados pessoais): próxima etapa do portal, cada etapa com C (concluída) / P (passo) / A (ação), destino do botão e blocos já gravados.
+
 # Versão 2.8.2 — Diagnóstico do arquivo do WhatsApp
 
 - O envio pelo site chegou ao passo de documentos (login, processo e passo com HTTP 200), mas o arquivo do DocumentPicker falhou ao baixar/decifrar ("Arquivo inválido"). Novo log `midia_download` (sem segredos): em que etapa falhou (url, baixar, http, decifrar), host, HTTP, tamanho baixado, tipo da resposta, nomes dos campos e **tamanhos** dos campos de criptografia. Download com até 20 s.
