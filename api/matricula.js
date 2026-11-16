@@ -591,7 +591,7 @@ export function createMatricula({ api, getForm, submitForm, getDataSource, rende
         if (!/^\d{4}$/.test(year) || Number(year) < 1950 || Number(year) > new Date().getFullYear()) throw new Error("Informe o ano de conclusão do ensino médio com 4 números (ex.: 2024).");
         data.ano_conclusao = year;
       }
-      set("rg", onlyDigits(data.rg) || str(data.rg).trim()); set("orgao_emissor", str(data.orgao_emissor).trim().toUpperCase());
+      set("rg", str(data.rg).trim()); set("orgao_emissor", str(data.orgao_emissor).trim().toUpperCase());
       set("uf_rg", data.uf_rg); set("cor_raca", data.cor_raca); set("estado_civil", data.estado_civil); set("escola", data.escola); set("ano_conclusao", data.ano_conclusao);
     } else if (screen === "CUPOM") {
       if (!str(data.cupom).trim()) return { token: str(data.token), redirect: null };

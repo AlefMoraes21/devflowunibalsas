@@ -10,6 +10,7 @@ import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA
 import { listDocuments, saveDocument, readDocument, findInscription } from "./documentos.js";
 import { createEtapa1 } from "./etapa1-fila.js";
 import { avisarRedacaoLiberada } from "./blip.js";
+import { createEtapa2 } from "./etapa2-matricula.js";
 import { createStore, enqueueJob, validWorkerSignature } from "./cloud-store.js";
 import crypto from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1523,7 +1524,18 @@ const etapa1=createEtapa1({
   avisar:dados=>avisarRedacaoLiberada(dados),
   jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
 });
+// Etapa 2 (matrícula): telas MATR_* gravam no Firestore; o worker envia cada subetapa ao Rubeus, em ordem.
+const etapa2=createEtapa2({
+  store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
+  buscarCep:d=>matricula.cep(d),
+  runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
+});
 export async function workerHandler(req,res){
+  if(req.body?.tipo==="etapa2"){
+    if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
+    try{return res.status(await etapa2.worker(req.body.id)).send("")}
+    catch(error){console.error(JSON.stringify({event:"etapa2_worker_error",message:String(error?.message??error).slice(0,160)}));return res.status(500).send("")}
+  }
   if(req.body?.tipo==="etapa1"){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
     try{return res.status(await etapa1.worker(req.body.id)).send("")}
@@ -1536,7 +1548,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.3.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.4.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1575,7 +1587,7 @@ export default async function handler(req, res) {
 
     const payload = await flowContext.run(
       { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
-      async () => rotaEtapa1 ? etapa1.endpoint(requestData) : (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
+      async () => rotaEtapa1 ? etapa1.endpoint(requestData) : (await etapa2.route(requestData)) ?? (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
     );
 
     const enc = encryptResponse(payload, aesKey, iv);

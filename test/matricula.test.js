@@ -110,7 +110,7 @@ test('jornada de matrícula: login, responsável, endereço com busca de cidade,
   assert.equal(sent[38573],'MA');assert.equal(sent[38640],'00069');assert.equal(sent[38641],'MA');assert.equal(sent[38704],'19');assert.equal(sent[38572],undefined);
   assert.equal(identity.screen,'IDENTIDADE');assert.equal('anos' in identity.data,false,'ano de conclusão não é mais lista');
   const docs=await run(ask('IDENTIDADE','enviar_identidade',identity.data.estado,{rg:'12.345.678-9',orgao_emissor:'ssp',uf_rg:'MA',cor_raca:'3',estado_civil:'S',ano_conclusao:'2025'}));
-  assert.equal(submits.length,3);const idSent=Object.fromEntries(submits[2].data.map(f=>[f.field_id,f.value]));assert.equal(idSent[38642],'123456789');assert.equal(idSent[38643],'SSP');assert.equal(idSent[38699],undefined);
+  assert.equal(submits.length,3);const idSent=Object.fromEntries(submits[2].data.map(f=>[f.field_id,f.value]));assert.equal(idSent[38642],'12.345.678-9');assert.equal(idSent[38643],'SSP');assert.equal(idSent[38699],undefined);
   // Documentos matrícula vem antes de IDENTIDADE na ordem de rotas da Meta (só para frente): na mesma sessão o Flow
   // encerra com a situação e o candidato retoma por "Já sou inscrito" (o hub abre a tela de documentos).
   assert.equal(docs.screen,'STATUS_FINAL');assert.match(docs.data.mensagem,/Próxima etapa: Documentos matrícula/);assert.match(docs.data.resumo,/Documentos matrícula: Pendentes/);
