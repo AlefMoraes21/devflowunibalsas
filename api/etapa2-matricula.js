@@ -353,10 +353,11 @@ export function createEtapa2({
       const volta = (erro, escolas = []) => render(screen, { ...s, values: { ...u, escola: '' }, escolas, erro });
       if (norm(u.busca_escola).replace(/[^a-z0-9]/g, '').length < 3) return volta('Digite pelo menos 3 letras do nome da escola e toque em Buscar escola.');
       let lista;
-      try { lista = await carregarEscolas(s.fila_id); }
+      // O Rubeus pode passar do tempo do WhatsApp (~10 s): sem cache, tenta no máximo 5 s e libera a tela.
+      try { lista = await Promise.race([carregarEscolas(s.fila_id), new Promise((_, r) => setTimeout(() => r(new Error('lento')), 5000))]); }
       catch (e) {
         log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'escolas_indisponivel', message: String(e?.message ?? e).slice(0, 80) });
-        return volta('Não conseguimos buscar a lista de escolas agora. Tente de novo em instantes ou deixe em branco (é opcional).');
+        return volta('Não conseguimos carregar a lista de escolas agora. Pode tocar em Avançar: guardamos o nome digitado (o campo é opcional).');
       }
       const achadas = buscarEscolas(lista, u.busca_escola).map(opcaoEscola);
       return volta(achadas.length ? '' : 'Nenhuma escola encontrada com esse nome. Tente outra parte do nome ou escolha "Não encontrei a minha escola".', [...achadas, OPCAO_SEM_ESCOLA]);
@@ -371,11 +372,11 @@ export function createEtapa2({
         : !RACAS.some(o => o.id === u.cor_raca) ? 'Selecione cor/raça.'
         : !ESTADOS_CIVIS.some(o => o.id === u.estado_civil) ? 'Selecione o estado civil.'
         : u.ano_conclusao && !(/^\d{4}$/.test(u.ano_conclusao) && Number(u.ano_conclusao) >= 1995 && Number(u.ano_conclusao) <= new Date().getFullYear() + 1) ? 'Confira o ano de conclusão (4 números, de 1995 em diante).'
-        : String(u.busca_escola ?? '').trim() && !u.escola ? 'Toque em "Buscar escola" e escolha a sua escola na lista, ou apague o nome (é opcional).'
         : '';
       if (erro) return render(screen, { ...s, values: u, escolas: await opcoesDoCache(u.busca_escola), erro });
       // Grava o código da escola escolhida na lista (o mesmo do formulário do Rubeus) e o nome, para conferência.
-      const nomeEscola = escolhida ? ((await lerEscolas())?.find(o => o.id === escolhida)?.title ?? '') : '';
+      // Escolhida na lista: código + nome. Só digitada (lista indisponível): vai o nome, e o worker procura no formulário do Rubeus, como antes.
+      const nomeEscola = escolhida ? ((await lerEscolas())?.find(o => o.id === escolhida)?.title ?? '') : u.escola === SEM_ESCOLA ? '' : String(u.busca_escola ?? '').trim();
       const bloco = { rg: u.rg, orgao_emissor: u.orgao_emissor, uf_rg: u.uf_rg, cor_raca: u.cor_raca, estado_civil: u.estado_civil, ano_conclusao: u.ano_conclusao ?? '', escola_id: escolhida, escola: nomeEscola };
       try { await gravarBloco(s, req.flow_token, 'identidade', bloco); } catch { return render(screen, { ...s, values: u, escolas: await opcoesDoCache(u.busca_escola), erro: ERRO_GRAVAR }); }
       return render(DOCS[0].tela, { ...base, erro: '' });
@@ -423,7 +424,7 @@ export function createEtapa2({
       if (bloco.escola_id && st.campos?.escola) {
         escola = String(bloco.escola_id);
         escolas = [{ id: escola, title: bloco.escola || escola }];
-      } else if (bloco.escola && !('escola_id' in bloco) && st.campos?.escola) {
+      } else if (bloco.escola && st.campos?.escola) {
         try { escolas = await matricula.schools({ ...st, busca_escola: bloco.escola }); } catch {}
         escola = escolherOpcao(escolas, bloco.escola) ?? (escolas.length === 1 ? escolas[0].id : '');
       }

@@ -1,3 +1,8 @@
+# Versão 2.8.1 — Escola não trava a identidade
+
+- "Buscar escola" sem a lista em cache tentava carregar do Rubeus ao vivo (login + portal, mais de 10 s) e o WhatsApp ficava girando. Agora tenta no máximo 5 s e libera a tela com aviso.
+- Nome digitado sem escolher na lista segue, como antes: vai o nome, e o worker procura no formulário do Rubeus. Escolhida na lista: vai o código.
+
 # Versão 2.8.0 — Documentos de matrícula pelo mesmo caminho do site
 
 - **Por quê:** a API da UniBalsas (`/blip/inscritos`) não encontra candidatos de 2027/1 que ainda não estão no RM (404 em 223–226) e cobre os documentos de **inscrição**, não os de matrícula. O site grava os de matrícula pelo passo do Rubeus (300671 → SDOCALUNO).

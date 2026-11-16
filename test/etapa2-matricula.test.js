@@ -176,8 +176,7 @@ test('Escola: busca pelo nome na lista do site (cache), escolhe e o worker envia
   assert.ok(busca.data.escolas.every(o => o.title.length <= 30));
   assert.equal(listasCarregadas.n, 1, 'busca usa o cache');
   const sem = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', busca.data.estado, { ...IDENT, busca_escola: 'rosario maria' });
-  assert.match(sem.data.erro, /Buscar escola/);
-  assert.equal(sem.data.tem_escolas, true, 'a lista continua na tela');
+  assert.equal(sem.screen, DOCS[0].tela, 'nome digitado sem escolher na lista não trava (vai o nome, como antes)');
   const docs = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', busca.data.estado, { ...IDENT, busca_escola: 'rosario maria', escola: 'E2' });
   assert.equal(docs.screen, DOCS[0].tela);
   await E.worker(fila[0].id);
