@@ -12,8 +12,8 @@
 // busca do endereço pelo CEP. Listas (UF, cor/raça, estado civil) são fixas; o worker converte o texto
 // escolhido para o código do formulário do Rubeus.
 import crypto from 'node:crypto';
-import { summarizeStages } from './matricula.js';
-import { jaEnviado, tipoDoArquivo } from './portal-site.js';
+import { summarizeStages, stepFromLink } from './matricula.js';
+import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup } from './portal-site.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
@@ -97,6 +97,8 @@ export function proximaTela(s2, blocos = {}, menor = false) {
   const next = s2?.next ?? null;
   const fechar = { tela: null, botao: 'Fechar' };
   if (s2 && !next) return fechar;
+  // Etapa 3: contrato (baixar, assinar no GOV.BR e enviar por e-mail, como no site).
+  if (next && /contrato/.test(norm(next.title))) return { tela: 'CONTR_TERMOS', botao: String(next.action || 'Verificar').slice(0, 35) };
   if (next && !/resp|pre.?matric|document/.test(norm(next.title))) return fechar;
   const concluida = re => (s2?.rows ?? []).some(r => r.conclusive && re.test(norm(r.title)));
   const quem = blocos.responsavel?.responsavel;
@@ -115,6 +117,8 @@ export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
   portalSite = null, baixarMidia = null, entrarNaProva = null,
+  // Endereço público do Cloud Run (links do contrato).
+  urlPublica = String(process.env.FLOW_WORKER_ORIGIN ?? '').replace(/\/+$/, ''),
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
   esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 7500,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
@@ -126,6 +130,7 @@ export function createEtapa2({
   const KEYS = {
     MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
     MATR_PORTAL: ['estado', 'resumo', 'botao'],
+    CONTR_TERMOS: ['link_contrato'],
     MATR_RESPONSAVEL: ['estado', 'erro', 'tem_erro', ...valor('responsavel')],
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
     MATR_ENDERECO: ['estado', 'erro', 'tem_erro', ...valor(...END)],
@@ -250,6 +255,80 @@ export function createEtapa2({
     } catch (e) { return render(screen, { ...s, values: u, erro: e.message }); }
   }
 
+  // ---------------------------------------------------------------- status do portal (salvo)
+  // O portal do Rubeus leva ~16 s para devolver as etapas; o WhatsApp espera ~10 s. O último status lido
+  // (no login ou pelo worker) fica na fila e é usado quando o portal não responde a tempo.
+  const STATUS_VALIDO_MS = 6 * 3600000;
+  const enxugar = stages => (stages ?? []).map(x => ({ id: x.id, title: x.title, cta_link: x.cta_link ?? null,
+    feedback: { complementary_text: x.feedback?.complementary_text ?? null, conclusive: x.feedback?.conclusive ?? 0, cta_text: x.feedback?.cta_text ?? null } }));
+  async function salvarStatus(id, stages, processo) {
+    for (let i = 0; i < 4; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) return;
+      if (await store.update(id, { ...atual.record, ultimo_status: { stages: enxugar(stages), processo: String(processo ?? ''), at: clock() } }, atual.version, FILA)) return;
+    }
+  }
+  function statusSalvo(rec) {
+    const u = rec?.ultimo_status;
+    return u?.stages?.length && clock() - (u.at ?? 0) < STATUS_VALIDO_MS ? summarizeStages(u.stages) : null;
+  }
+  // Tarefa em segundo plano: lê o status no portal e guarda (o candidato toca em Atualizar).
+  async function atualizarStatus(id) {
+    const f = await store.get(id, FILA);
+    if (!f) return 204;
+    await runCtx(async () => {
+      const sessao = await matricula.login(f.record.login ?? f.record.cpf, f.record.data_nascimento);
+      const p = await matricula.portal(sessao);
+      await salvarStatus(id, p.stages, p.processo_seletivo_id);
+      log({ event: 'etapa2_fila', id: curto(id), passo: 'status_salvo' });
+    });
+    return 204;
+  }
+  const BUSCANDO = 'Estamos buscando a situação da sua inscrição no Portal do candidato. Aguarde alguns instantes e toque em Atualizar.';
+  async function telaPortal({ id, menor, s2, blocos, rec, flowToken }) {
+    if (!s2) return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
+    if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva && rec) {
+      return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken });
+    }
+    const destino = proximaTela(s2, blocos ?? {}, menor);
+    log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: destino.tela ?? 'fechar', proxima: s2.next?.title ?? 'nenhuma',
+      etapas: (s2.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(blocos ?? {}).join(',') });
+    return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: destino.tela, botao: destino.botao, resumo: s2.resumo || 'Sua inscrição foi encontrada.' });
+  }
+
+  // ---------------------------------------------------------------- contrato (etapa 3)
+  // Link exclusivo e temporário (24 h). Ao abrir, o Cloud Run faz o que o navegador faz no passo do contrato:
+  // entra no portal como o candidato, clica em "Clique aqui para fazer o download do contrato" e devolve o PDF
+  // que o portal gera (campo 52138 do popup "Contrato gerado"). O PDF não fica guardado.
+  const LINKS = 'contratoLinks';
+  async function criarLinkContrato(filaId) {
+    const token = crypto.randomBytes(24).toString('hex');
+    await store.create(token, { fila_id: filaId, criado: clock(), expires: clock() + DIA }, LINKS);
+    log({ event: 'etapa3_contrato', id: curto(filaId), passo: 'link_criado' });
+    return `${urlPublica}/contrato/${token}`;
+  }
+  class ErroContrato extends Error { constructor(m, motivo) { super(m); this.motivo = motivo; } }
+  async function baixarContrato(token, ip) {
+    if (!/^[a-f0-9]{48}$/.test(String(token ?? ''))) throw new ErroContrato('Link inválido.', 'link');
+    const link = await store.get(token, LINKS);
+    if (!link || (link.record.expires ?? 0) < clock()) throw new ErroContrato('Este link expirou. Abra o Flow de novo pelo WhatsApp para gerar outro.', 'expirado');
+    const fila = await store.get(link.record.fila_id, FILA);
+    if (!fila) throw new ErroContrato('Inscrição não encontrada. Abra o Flow de novo pelo WhatsApp.', 'fila');
+    const inicio = clock(), id = link.record.fila_id;
+    const sessao = await portalSite.entrar(fila.record.login ?? fila.record.cpf, fila.record.data_nascimento);
+    const { processo, stages } = await portalSite.inscricao(sessao);
+    const etapa = (stages ?? []).find(x => /contrato/.test(norm(x.title)));
+    const passoId = stepFromLink(etapa?.cta_link);
+    if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
+    const passo = lerPassoContrato(await portalSite.passoBruto(sessao, passoId, processo));
+    const clique = await portalSite.clicar({ sessao, passo, processo, data: dadosDoContrato(passo, ip) });
+    const destino = clique?.data ?? {};
+    if (Number(destino.place_type_id) !== 6 || !destino.place_id) throw new ErroContrato('O portal não gerou o contrato agora. Tente de novo em instantes.', 'sem_popup');
+    const pdf = pdfDoPopup(await portalSite.popup({ sessao, popupId: destino.place_id, stageId: destino.stage_id ?? passo.stage_id }));
+    log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_baixado', bytes: pdf.length, ms: clock() - inicio });
+    return pdf;
+  }
+
   async function route(req) {
     if (req?.action !== 'data_exchange' || !String(req.screen ?? '').startsWith('MATR_')) return null;
     try { return await routeTela(req); }
@@ -280,11 +359,10 @@ export function createEtapa2({
       const flow = hash(req.flow_token ?? '');
       // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
       // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
-      let resumo = '', s2 = null;
+      let s2 = null, stLido = null;
       try {
-        const st = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), Math.max(1500, esperaPortalMs - (clock() - t0))))]);
+        const st = stLido = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), Math.max(1500, esperaPortalMs - (clock() - t0))))]);
         s2 = summarizeStages(st.stages ?? []);
-        resumo = s2.resumo;
         // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
         if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
           return await entrarNaProva({ applyment_id: sessao.applyment_id, processo: st.processo_seletivo_id, login, data_nascimento: u.data_nascimento, flowToken: req.flow_token });
@@ -305,12 +383,15 @@ export function createEtapa2({
       }
       log({ event: 'etapa2_fila', id: curto(id), passo: 'login' });
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
+      const rec = (await store.get(id, FILA))?.record ?? novo;
+      if (s2) await salvarStatus(id, stLido.stages, stLido.processo_seletivo_id).catch(() => {});
+      else {
+        s2 = statusSalvo(rec);
+        // Portal lento: busca em segundo plano; o candidato toca em Atualizar (ou já usa o último status salvo).
+        try { await enqueue(id, { tipo: 'etapa2_status' }); } catch {}
+      }
       // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
-      const destino = proximaTela(s2, atual?.record.blocos ?? {}, menor);
-      // Diagnóstico sem dados pessoais: o que o portal disse e para onde o botão leva.
-      log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: destino.tela ?? 'fechar', proxima: s2?.next?.title ?? (s2 ? 'nenhuma' : 'portal_lento'),
-        etapas: (s2?.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(atual?.record.blocos ?? {}).join(',') });
-      return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: destino.tela, botao: destino.botao, resumo: resumo || 'Sua inscrição foi encontrada. Vamos seguir com a sua matrícula.' });
+      return telaPortal({ id, menor, s2, blocos: rec.blocos, rec, flowToken: req.flow_token });
     }
 
     let s;
@@ -321,6 +402,14 @@ export function createEtapa2({
     if (screen === 'MATR_PORTAL' && acao === 'continuar') {
       // Nada a continuar no Flow agora (aguardando a equipe, ou etapa ainda fora do Flow): fecha.
       if (s.destino === null) return sucesso(req.flow_token);
+      if (s.destino === 'atualizar') {
+        const rec = (await store.get(s.fila_id, FILA))?.record;
+        return telaPortal({ id: s.fila_id, menor: s.menor, s2: statusSalvo(rec), blocos: rec?.blocos, rec, flowToken: req.flow_token });
+      }
+      if (s.destino === 'CONTR_TERMOS') {
+        try { return render('CONTR_TERMOS', { link_contrato: await criarLinkContrato(s.fila_id) }); }
+        catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos preparar o contrato agora. Toque de novo em instantes.' }); }
+      }
       const destino = s.destino || (s.menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL');
       // Menor de 18 anos não pode ser o próprio responsável financeiro: grava "Outro" e vai direto à ficha do responsável.
       if (destino === 'MATR_RESP_DADOS' && s.menor) {
@@ -493,6 +582,7 @@ export function createEtapa2({
           // O portal diz qual é o próximo passo liberado (os concluídos ficam de fora).
           const p = await matricula.portal(sessao);
           sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
+          await salvar({ ultimo_status: { stages: enxugar(p.stages), processo: String(p.processo_seletivo_id ?? ''), at: clock() } });
           const next = summarizeStages(p.stages).next;
           if (!next) { await salvar({ status: 'concluida', passo: 'fim' }); return; }
           if (/document/.test(norm(next.title))) {
@@ -552,5 +642,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render };
+  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato };
 }

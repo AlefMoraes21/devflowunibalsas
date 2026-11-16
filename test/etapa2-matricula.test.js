@@ -154,7 +154,7 @@ test('Portal ao logar de novo: o botão leva à primeira subetapa que falta, com
   const rows = t => ({ next: { title: t, action: 'Verificar' }, rows: [{ title: 'Pré-matrícula', conclusive: true }] });
   assert.equal(proximaTela(rows('Documentos matrícula'), { responsavel: { responsavel: 'Eu' } }).tela, DOCS[0].tela);
   assert.equal(proximaTela(rows('Documentos matrícula'), { responsavel: { responsavel: 'Eu' }, documentos: { completo: true } }).tela, null, 'documentos já enviados: em análise');
-  assert.equal(proximaTela(rows('Contrato'), {}).tela, null, 'contrato ainda fora do Flow: só o status');
+  assert.deepEqual(proximaTela(rows('Contrato'), {}), { tela: 'CONTR_TERMOS', botao: 'Verificar' }, 'etapa 3: contrato');
   assert.equal(proximaTela(null, {}, true).tela, 'MATR_RESP_DADOS', 'portal lento: decide pelo Firestore');
   assert.equal(proximaTela(null, { responsavel: { responsavel: 'Outro' }, resp_dados: {} }).tela, 'MATR_ENDERECO');
 });
@@ -332,4 +332,89 @@ test('Passo de documentos do site: leitura da estrutura real e corpo do "Enviar"
   assert.deepEqual(itens.map(i => i.files.length), [0, 1, 1]);
   assert.equal(itens[1].CHAVERM, '1;80;27.1.9;5'); assert.equal(itens[1].title, 'HISTÓRICO ENSINO MÉDIO');
   assert.equal(JSON.parse(fd.get('data'))[0].value[2].CODIGO, '46');
+});
+
+// Rubeus com o contrato liberado (próxima etapa: Contrato, botão Verificar).
+function rubeusContrato({ lento = false } = {}) {
+  const r = rubeusFalso();
+  r.matricula.portal = async () => {
+    if (lento) await new Promise(res => setTimeout(res, 50));
+    return { token: 'tok2', processo_seletivo_id: '999', stages: [
+      { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
+      { title: 'Documentos matrícula', feedback: { complementary_text: 'Entregues', conclusive: 1 } },
+      { title: 'Contrato', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300669' }
+    ] };
+  };
+  return r;
+}
+// Portal do candidato (site) no passo do contrato, com a estrutura conferida ao vivo em 16/11/2026.
+function siteContrato() {
+  const cliques = [];
+  const passoResp = { success: true, data: { steps: { currentStep: { id: 300669, stage_id: 261004, content: [
+    { id: 3940421, type: 'container', container_content: [
+      { id: 3940422, type: 'text' },
+      { id: 3940423, type: 'container', container_content: [{ id: 3940424, type: 'button', label: 'Clique aqui para fazer o download do contrato', related_component_id: 174890 }] },
+      { id: 3940425, type: 'container', container_content: [{ id: 3127756, field_id: 38635, field_settings_id: 3127756, key: '38635', type: 'checkbox', ps_table: 1, label: 'Declaro que li e estou de acordo com o contrato apresentado.' }] },
+      { id: 3940427, type: 'container', container_content: [{ id: 3940428, type: 'button', label: 'Portal do candidato', related_component_id: 174878 }] }] },
+    { id: 3940430, type: 'container', container_content: [
+      { id: 3127757, field_id: 38636, field_settings_id: 3127757, key: '38636', type: 'text', ps_table: 1, label: 'Data de assinatura do contrato' },
+      { id: 3127758, field_id: 52136, field_settings_id: 3127758, key: '52136', type: 'text', ps_table: 1, label: 'IP de aceite' }] }
+  ] } } } };
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(200, 32)]);
+  const portalSite = {
+    async entrar(cpf) { assert.equal(cpf, '39184720514'); return { token: 't', session_id: 's', applyment_id: '555' }; },
+    async inscricao() { return { processo: '20383', stages: [{ title: 'Contrato', cta_link: 'presencial/passo/300669' }] }; },
+    async passoBruto(_s, passo, processo) { assert.equal(passo, 300669); assert.equal(processo, '20383'); return passoResp; },
+    async clicar(a) { cliques.push(a); return { success: true, data: { place_id: 765, place_type_id: 6, stage_id: 261004 } }; },
+    async popup({ popupId, stageId }) { assert.equal(popupId, 765); assert.equal(stageId, 261004); return { success: true, data: { applicantData: [{ field_id: 52138, value: pdf.toString('base64') }] } }; }
+  };
+  return { portalSite, cliques, pdf, passoResp };
+}
+
+test('Etapa 3: contrato liberado abre a tela do site com link exclusivo; o link gera o contrato no portal e devolve o PDF', async () => {
+  const store = memoria(); const fila = [];
+  const site = siteContrato();
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example' });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(portal.screen, 'MATR_PORTAL'); assert.equal(portal.data.botao, 'Verificar');
+  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  assert.equal(termos.screen, 'CONTR_TERMOS');
+  const m = termos.data.link_contrato.match(/^https:\/\/run\.example\/contrato\/([a-f0-9]{48})$/);
+  assert.ok(m, 'link exclusivo no Cloud Run');
+  const pdf = await E.baixarContrato(m[1], '200.1.2.3');
+  assert.deepEqual(pdf, site.pdf);
+  const c = site.cliques[0];
+  assert.equal(c.passo.botao, 3940424); assert.equal(c.passo.botao_relacionado, 174890); assert.equal(c.passo.stage_id, 261004);
+  assert.deepEqual(c.data.map(x => [x.field_id, x.value]), [[38635, false], [38636, ''], [52136, '200.1.2.3']], 'aceite falso, data vazia e IP de quem abriu, como o site');
+  await assert.rejects(E.baixarContrato('0'.repeat(48), '1.1.1.1'), /expirou/);
+  await assert.rejects(E.baixarContrato('xyz', '1.1.1.1'), /inválido/);
+});
+
+test('Portal lento no login: mostra "Atualizar", busca o status em segundo plano e depois leva à etapa certa', async () => {
+  const store = memoria(); const fila = [];
+  const r = rubeusContrato();
+  const lento = { ...r.matricula, portal: async () => { throw new Error('lento'); } };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: lento, validCpf, log: () => {},
+    portalSite: siteContrato().portalSite, urlPublica: 'https://run.example' });
+  const p1 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(p1.data.botao, 'Atualizar'); assert.match(p1.data.resumo, /buscando/);
+  assert.equal(fila.at(-1).tipo, 'etapa2_status');
+  const ainda = await toque(E, 'MATR_PORTAL', 'continuar', p1.data.estado);
+  assert.equal(ainda.data.botao, 'Atualizar', 'sem status ainda: continua aguardando');
+  // A tarefa em segundo plano lê o portal e guarda o status.
+  const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
+  await E2.atualizarStatus(fila.at(-1).id);
+  const p2 = await toque(E, 'MATR_PORTAL', 'continuar', ainda.data.estado);
+  assert.equal(p2.screen, 'MATR_PORTAL'); assert.equal(p2.data.botao, 'Verificar'); assert.match(p2.data.resumo, /Contrato: Pendente/);
+  const termos = await toque(E, 'MATR_PORTAL', 'continuar', p2.data.estado);
+  assert.equal(termos.screen, 'CONTR_TERMOS');
+});
+
+test('Contrato: leitura do passo e PDF do popup (portal-site)', async () => {
+  const { lerPassoContrato, dadosDoContrato, pdfDoPopup } = await import('../api/portal-site.js');
+  const passo = lerPassoContrato(siteContrato().passoResp);
+  assert.equal(passo.botao, 3940424); assert.equal(passo.passo, 300669);
+  assert.equal(dadosDoContrato(passo, '9.9.9.9').find(x => x.field_id === 52136).value, '9.9.9.9');
+  assert.throws(() => pdfDoPopup({ data: { applicantData: [{ field_id: 52138, value: Buffer.from('não é pdf').toString('base64') }] } }), /PDF/);
 });

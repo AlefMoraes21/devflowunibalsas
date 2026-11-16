@@ -43,12 +43,13 @@ const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length 
 
 export const routing = {
   MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM', 'INSC_PORTAL'],
-  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'MATR_FIM'],
+  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
   MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
   MATR_IDENTIDADE: [DOCS[0].tela, 'MATR_FIM'],
   ...docRotas,
+  CONTR_TERMOS: [],
   MATR_FIM: []
 };
 
@@ -149,6 +150,20 @@ export const screens = [
       { type: 'Footer', label: i === DOCS.length - 1 ? 'Enviar documentos' : 'Avançar', 'on-click-action': troca('enviar_documento', { arquivo: '${form.arquivo}' }) }
     ] }] }
   })),
+  {
+    // Etapa 3 — Contrato (passo 300669), com o texto do site. O link é exclusivo e vale 24 h: o Cloud Run
+    // gera o contrato no portal na hora (botão "Clique aqui para fazer o download do contrato") e abre o PDF.
+    id: 'CONTR_TERMOS', title: 'Contrato', terminal: true, success: true,
+    data: { link_contrato: str('https://example.com/contrato/abc') },
+    layout: { type: 'SingleColumnLayout', children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Termos da sua matrícula' },
+      { type: 'EmbeddedLink', text: 'Baixar o contrato (PDF)', 'on-click-action': { name: 'open_url', url: '${data.link_contrato}' } },
+      { type: 'TextCaption', text: 'O contrato é gerado na hora e pode levar alguns segundos para abrir. O link vale por 24 horas.' },
+      { type: 'TextBody', text: 'Prezado(a) candidato(a),\n\nPara dar continuidade ao processo de inscrição, solicitamos que realize o download do seu contrato e efetue a assinatura digital por meio da plataforma GOV.BR.\n\nApós a assinatura, encaminhe o contrato assinado para o seguinte endereço de e-mail:\n\nE-mail: centraldematriculaub@unibalsas.edu.br\n\nAssim que recebermos o documento devidamente assinado, daremos prosseguimento ao processo de matrícula.\n\nEm caso de dúvidas ou necessidade de auxílio, entre em contato com nossa equipe pelo WhatsApp: (99) 99131-1684' },
+      { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
+    ] }
+  },
   {
     id: 'MATR_FIM', title: 'Matrícula', terminal: true, success: true,
     data: { titulo: str('Documentos enviados ✅'), mensagem: str('') },

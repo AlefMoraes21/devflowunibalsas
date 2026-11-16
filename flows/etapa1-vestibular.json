@@ -51,6 +51,7 @@
       "MATR_ENDERECO",
       "MATR_IDENTIDADE",
       "MATR_DOC_IDENTIDADE",
+      "CONTR_TERMOS",
       "MATR_FIM"
     ],
     "MATR_RESPONSAVEL": [
@@ -97,6 +98,7 @@
     "MATR_DOC_DECLARACAO": [
       "MATR_FIM"
     ],
+    "CONTR_TERMOS": [],
     "MATR_FIM": []
   },
   "screens": [
@@ -3392,6 +3394,57 @@
                 }
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONTR_TERMOS",
+      "title": "Contrato",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "link_contrato": {
+          "type": "string",
+          "__example__": "https://example.com/contrato/abc"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Image",
+            "src": "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",
+            "height": 40,
+            "scale-type": "contain"
+          },
+          {
+            "type": "TextHeading",
+            "text": "Termos da sua matrícula"
+          },
+          {
+            "type": "EmbeddedLink",
+            "text": "Baixar o contrato (PDF)",
+            "on-click-action": {
+              "name": "open_url",
+              "url": "${data.link_contrato}"
+            }
+          },
+          {
+            "type": "TextCaption",
+            "text": "O contrato é gerado na hora e pode levar alguns segundos para abrir. O link vale por 24 horas."
+          },
+          {
+            "type": "TextBody",
+            "text": "Prezado(a) candidato(a),\n\nPara dar continuidade ao processo de inscrição, solicitamos que realize o download do seu contrato e efetue a assinatura digital por meio da plataforma GOV.BR.\n\nApós a assinatura, encaminhe o contrato assinado para o seguinte endereço de e-mail:\n\nE-mail: centraldematriculaub@unibalsas.edu.br\n\nAssim que recebermos o documento devidamente assinado, daremos prosseguimento ao processo de matrícula.\n\nEm caso de dúvidas ou necessidade de auxílio, entre em contato com nossa equipe pelo WhatsApp: (99) 99131-1684"
+          },
+          {
+            "type": "Footer",
+            "label": "Fechar",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
           }
         ]
       }

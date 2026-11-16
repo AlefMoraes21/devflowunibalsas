@@ -54,15 +54,7 @@ export function montarEnvio({ passo, sessao, processo, arquivos }) {
     files: parte.has(d.codigo) ? [{}] : [], value: parte.has(d.codigo) ? [parte.get(d.codigo)] : null
   }));
   const data = [{ field_id: passo.campo, key: passo.campo, component_id: passo.componente, type: "upload", field_settings_id: null, value: lista }];
-  const fd = new FormData();
-  const campos = {
-    formio_comp_id: "e" + crypto.randomBytes(4).toString("hex").slice(0, 6),
-    stage_id: passo.stage_id, selective_process_id: processo, domainParams: "presencial",
-    last_place_id: passo.passo, last_place_type_id: 1, button_id: passo.botao, related_component_id: passo.botao_relacionado,
-    data: JSON.stringify(data), rbParams: null, token: sessao.token, substitute_id: null, session_id: sessao.session_id ?? null,
-    hostClient: null, contact_id_crm: null
-  };
-  for (const [k, v] of Object.entries(campos)) fd.append(k, v === null ? "null" : String(v));
+  const fd = corpoClique({ sessao, passo, processo, data });
   arquivos.forEach((a, i) => fd.append("file_" + i, new Blob([a.bytes], { type: a.tipo }), a.nome));
   return { fd, data };
 }
@@ -125,5 +117,65 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
     return post("button-click", fd, { multipart: true, timeoutMs: 90000 });
   }
 
-  return { entrar, inscricao, passoDocumentos, enviarDocumentos };
+  async function passoBruto(sessao, passo, processo) {
+    return post(`getApplymentDataByStep/${Number(passo)}`, { execute_stage_query: 1, token: sessao.token, process_id: Number(processo) });
+  }
+
+  // Clique num botão do passo (multipart, igual ao site), sem arquivos.
+  async function clicar({ sessao, passo, processo, data }) {
+    return post("button-click", corpoClique({ sessao, passo, processo, data }), { multipart: true, timeoutMs: 90000 });
+  }
+
+  async function popup({ sessao, popupId, stageId }) {
+    return post("popup", { popup_id: Number(popupId), stage: { stage_id: Number(stageId) }, token: sessao.token }, { timeoutMs: 60000 });
+  }
+
+  return { entrar, inscricao, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup };
+}
+
+// Corpo multipart do button-click (campos de controle iguais ao site). data: lista de campos do passo.
+export function corpoClique({ sessao, passo, processo, data }) {
+  const fd = new FormData();
+  const campos = {
+    formio_comp_id: "e" + crypto.randomBytes(4).toString("hex").slice(0, 6),
+    stage_id: passo.stage_id, selective_process_id: processo, domainParams: "presencial",
+    last_place_id: passo.passo, last_place_type_id: 1, button_id: passo.botao, related_component_id: passo.botao_relacionado,
+    data: JSON.stringify(data), rbParams: null, token: sessao.token, substitute_id: null, session_id: sessao.session_id ?? null,
+    hostClient: null, contact_id_crm: null
+  };
+  for (const [k, v] of Object.entries(campos)) fd.append(k, v === null ? "null" : String(v));
+  return fd;
+}
+
+// Passo do contrato (300669 no Vestibular): botão "Clique aqui para fazer o download do contrato" e os campos
+// que o site envia junto (aceite 38635 = false, data de assinatura 38636 = "", IP de aceite 52136 = IP de quem clica).
+export function lerPassoContrato(resp) {
+  const cs = resp?.data?.steps?.currentStep;
+  if (!cs) throw new Error("Passo do contrato sem conteúdo.");
+  const todos = [];
+  (function achatar(lista) { for (const c of lista ?? []) { todos.push(c); achatar(c.container_content); } })(cs.content);
+  const botao = todos.find(c => c.type === "button" && /download.*contrato|contrato/i.test(str(c.label)) && !/portal/i.test(str(c.label)));
+  if (!botao) throw new Error("Passo do contrato sem o botão de download.");
+  const campos = todos.filter(c => c.field_id).map(c => ({
+    field_id: Number(c.field_id), field_settings_id: c.field_settings_id ?? null, component_id: c.id, key: str(c.key || c.field_id),
+    type: c.type, ps_table: c.ps_table ?? null, rubeus_table: c.rubeus_table ?? null, label: str(c.label)
+  }));
+  return { passo: Number(cs.id), stage_id: Number(cs.stage_id), botao: Number(botao.id), botao_relacionado: Number(botao.related_component_id), campos };
+}
+
+export function dadosDoContrato(passo, ip) {
+  return passo.campos.map(c => ({
+    field_id: c.field_id, field_settings_id: c.field_settings_id, component_id: c.component_id, key: c.key,
+    value: c.type === "checkbox" ? false : /\bip\b/i.test(c.label) ? str(ip) : "",
+    rubeus_table: c.rubeus_table, ps_table: c.ps_table, type: c.type
+  }));
+}
+
+// PDF do contrato: o site lê o base64 do campo 52138 na resposta do popup "Contrato gerado".
+export function pdfDoPopup(resp, campo = 52138) {
+  const item = (resp?.data?.applicantData ?? []).find(x => Number(x.field_id) === Number(campo));
+  const b64 = str(item?.value).replace(/^data:[^,]*,/, "");
+  const pdf = Buffer.from(b64, "base64");
+  if (pdf.length < 100 || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") throw new Error("O portal não devolveu o PDF do contrato.");
+  return pdf;
 }

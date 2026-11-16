@@ -1,3 +1,10 @@
+# Versão 2.9.0 — Etapa 3: Contrato (igual ao site) e status salvo do portal
+
+- **Contrato (passo 300669, conferido ao vivo em 16/11):** quando a próxima etapa do portal é **Contrato**, o botão do Portal (**Verificar**) abre a tela `CONTR_TERMOS` com o texto do site ("Termos da sua matrícula", download, assinatura no GOV.BR, envio para centraldematriculaub@unibalsas.edu.br, WhatsApp (99) 99131-1684) e **Fechar**.
+- **"Baixar o contrato (PDF)"** abre um link exclusivo do Cloud Run (`GET /contrato/<token>`, vale 24 h, coleção `contratoLinks`). Ao abrir, o Run faz o que o navegador faz (`api/portal-site.js`): `login-portal` → `register-portal-data` → `getApplymentDataByStep/300669` → `button-click` do botão "Clique aqui para fazer o download do contrato" (aceite 38635 = false, data 38636 = "", **IP de aceite 52136 = IP de quem abriu o link**) → `popup` 765 "Contrato gerado" → PDF em base64 no campo **52138**. O PDF é devolvido na hora e não fica guardado. Leva ~20–30 s (o portal demora no `register-portal-data`). Logs `etapa3_contrato` / `etapa3_contrato_erro`.
+- **Status salvo do portal:** o último status lido (no login ou pelo worker) fica na fila (`ultimo_status`, válido 6 h). Se o portal não responde a tempo no login, o Flow usa o status salvo; sem status, mostra "Estamos buscando a situação da sua inscrição…" com **Atualizar** e agenda a leitura em segundo plano (`tipo: etapa2_status`). O Flow não decide mais a etapa só pelo Firestore.
+- Novo JSON (tela `CONTR_TERMOS`): **colar na WABA**. 180 testes.
+
 # Versão 2.8.3 — Portal: etapa de documentos sempre leva às telas de documentos
 
 - Quando o portal aponta "Documentos matrícula" como próxima etapa e o Flow ainda não recebeu os documentos, o botão leva às telas de documentos (antes uma linha "documentos" marcada como concluída podia trocar o botão por Fechar).
