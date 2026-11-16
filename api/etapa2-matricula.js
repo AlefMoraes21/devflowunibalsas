@@ -311,6 +311,7 @@ export function createEtapa2({
   // Contrato pronto (PDF criptografado no Firestore, coleção `contratos`, 7 dias): gerado em segundo plano pelo
   // Cloud Run assim que o portal libera a etapa, para o link abrir na hora. Sem PDF pronto, gera na hora (reserva).
   const CONTRATOS = 'contratos';
+  const CALMA_CONTRATO_MS = Number(process.env.ETAPA3_CALMA_MS) || 120000;
   const CONTRATO_VALIDO_MS = 7 * DIA;
   const MAX_PDF_GUARDADO = 600 * 1024; // documento do Firestore: até 1 MiB depois de criptografado
   async function contratoPronto(filaId) {
@@ -322,13 +323,15 @@ export function createEtapa2({
   // Gera o contrato no portal como o site: abre o passo do contrato e clica em "Clique aqui para fazer o download
   // do contrato"; o PDF vem do popup "Contrato gerado" (campo 52138). Em segundo plano o IP de aceite vai vazio
   // (não há navegador do candidato; não registramos o IP do servidor como se fosse dele).
-  async function gerarContrato(filaId, rec, ip = '') {
+  async function gerarContrato(filaId, rec, ip = '', { calma = false } = {}) {
     const inicio = clock();
     const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
     const { processo, stages } = await portalSite.inscricao(sessao);
     const etapa = (stages ?? []).find(x => /contrato/.test(norm(x.title)));
     const passoId = stepFromLink(etapa?.cta_link);
     if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
+    // Calma (vigia): o portal acabou de liberar o contrato; espera o Rubeus terminar de processar antes de gerar.
+    if (calma && (!rec.contrato_liberado_em || clock() - rec.contrato_liberado_em < CALMA_CONTRATO_MS)) throw new ErroContrato('Contrato liberado agora; aguardando o Rubeus processar.', 'calma');
     const passo = lerPassoContrato(await portalSite.passoBruto(sessao, passoId, processo));
     const clique = await portalSite.clicar({ sessao, passo, processo, data: dadosDoContrato(passo, ip) });
     const destino = clique?.data ?? {};
@@ -357,19 +360,28 @@ export function createEtapa2({
 
   // Vigia da etapa 3 (Cloud Tasks): depois dos documentos entregues, confere de tempos em tempos se o portal
   // liberou o contrato (análise da equipe) e, quando liberar, gera e guarda o PDF. O aviso ao candidato vem depois.
-  const VIGIA_INTERVALO_S = Number(process.env.ETAPA3_VIGIA_INTERVALO_S) || 1800;
+  const VIGIA_INTERVALO_S = Number(process.env.ETAPA3_VIGIA_INTERVALO_S) || 600;
   const VIGIA_MAX_MS = 15 * DIA;
-  async function vigiarContrato(id) {
+  async function vigiarContrato(id, { imediato = false } = {}) {
     const f = await store.get(id, FILA);
     if (!f) return 204;
     const rec = f.record;
     if (await contratoPronto(id)) return 204;
     const ate = rec.vigia_ate ?? clock() + VIGIA_MAX_MS;
-    if (!rec.vigia_ate) { try { await store.update(id, { ...rec, vigia_ate: ate }, f.version, FILA); } catch {} }
+    const salvarFila = async patch => { for (let i = 0; i < 4; i++) { const a = await store.get(id, FILA); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, FILA)) return; } };
+    if (!rec.vigia_ate) await salvarFila({ vigia_ate: ate }).catch(() => {});
     try {
-      await gerarContrato(id, rec);
+      await gerarContrato(id, rec, '', { calma: !imediato });
       return 204;
     } catch (e) {
+      if (e?.motivo === 'calma') {
+        // Acabou de liberar: marca o momento e volta daqui a ~2 minutos para gerar.
+        const desde = rec.contrato_liberado_em ?? clock();
+        if (!rec.contrato_liberado_em) await salvarFila({ contrato_liberado_em: desde }).catch(() => {});
+        log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_liberado' });
+        try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: Math.max(5, Math.ceil((desde + CALMA_CONTRATO_MS - clock()) / 1000)) }); } catch {}
+        return 204;
+      }
       log({ event: 'etapa3_contrato', id: curto(id), passo: e?.motivo === 'nao_liberado' ? 'contrato_aguardando' : 'contrato_erro', message: String(e?.message ?? e).slice(0, 120) });
     }
     if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {} }
@@ -454,7 +466,8 @@ export function createEtapa2({
         return telaPortal({ id: s.fila_id, menor: s.menor, s2: statusSalvo(rec), blocos: rec?.blocos, rec, flowToken: req.flow_token });
       }
       if (s.destino === 'CONTR_TERMOS') {
-        if (!(await contratoPronto(s.fila_id))) { try { await enqueue(s.fila_id, { tipo: 'etapa3_vigia' }); } catch {} }
+        // O candidato já está aqui: gera agora (sem a calma do vigia).
+        if (!(await contratoPronto(s.fila_id))) { try { await enqueue(s.fila_id, { tipo: 'etapa3_gerar' }); } catch {} }
         try { return render('CONTR_TERMOS', { link_contrato: await criarLinkContrato(s.fila_id) }); }
         catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos preparar o contrato agora. Toque de novo em instantes.' }); }
       }

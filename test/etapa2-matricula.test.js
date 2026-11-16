@@ -425,16 +425,22 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
   let liberado = false;
   const inscricao = site.portalSite.inscricao;
   site.portalSite.inscricao = async (...a) => (liberado ? inscricao(...a) : { processo: '20383', stages: [{ title: 'Contrato', cta_link: null }] });
+  let agora = Date.now();
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
-    portalSite: site.portalSite, urlPublica: 'https://run.example' });
+    portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const id = openState(portal.data.estado, 'MATR_PORTAL').fila_id;
   // Ainda em análise: confere de novo mais tarde.
   await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 0);
-  assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.ok(fila.at(-1).atrasoSeg >= 60);
-  // Equipe aprovou: o vigia gera o contrato (IP vazio: não há navegador do candidato) e guarda.
+  assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600, 'confere de novo em 10 minutos');
+  // Equipe aprovou: o vigia vê a liberação, espera ~2 min (calma) e então gera o contrato
+  // (IP vazio: não há navegador do candidato) e guarda.
   liberado = true;
+  await E.vigiarContrato(id);
+  assert.equal(site.cliques.length, 0, 'acabou de liberar: espera o Rubeus processar');
+  assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.ok(fila.at(-1).atrasoSeg > 60 && fila.at(-1).atrasoSeg <= 120);
+  agora += 120001;
   const n = fila.length;
   await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 1);
