@@ -62,15 +62,30 @@ const ESCOLAS_RUBEUS = [
   { id: 'E3', title: 'Colégio Dom Bosco - Colégio Dom Bosco' }
 ];
 
+// Portal do candidato simulado (caminho do site): login, processo, passo de documentos e "Enviar".
+function siteFalso({ jaNoPortal = [] } = {}) {
+  const enviados = new Set(jaNoPortal);
+  const lotes = [];
+  const passo = () => ({ passo: 300671, stage_id: 261006, componente: 3940446, campo: 38733, botao: 3940449, botao_relacionado: 174896, max_mb: 5,
+    docs: DOCS.map(d => ({ codigo: d.id, titulo: d.titulo, obrigatorio: d.obrigatorio, chaverm: `1;79;27.1.1;${d.id}`, status: enviados.has(d.id) ? '1' : null, path: null, adicional: null, adicional2: null })) });
+  const portalSite = {
+    async entrar(cpf, nasc) { assert.equal(cpf, '39184720514'); assert.equal(nasc, NASC); return { token: 't', session_id: 's', applyment_id: '555' }; },
+    async inscricao() { return { processo: '20383', stages: [] }; },
+    async passoDocumentos(_s, id, processo) { assert.equal(processo, '20383'); return passo(); },
+    async enviarDocumentos({ processo, arquivos }) { lotes.push({ processo, codigos: arquivos.map(a => a.codigo), tipos: arquivos.map(a => a.tipo) }); for (const a of arquivos) enviados.add(a.codigo); return { success: true }; }
+  };
+  return { portalSite, lotes, baixarMidia: async m => Buffer.from('PDF ' + m.media_id) };
+}
+
 function montar(opts) {
   const store = memoria();
   const fila = [];
-  const docsEnviados = [];
+  const site = siteFalso();
   const r = rubeusFalso(opts);
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf,
     buscarCep: async () => ({ cep: '65800-000', rua: 'Rua Teste', bairro: 'Centro', cidade: 'Balsas', uf: 'MA' }), log: () => {},
-    docs: { saveDocument: async a => { docsEnviados.push(a); return { primaryKey: 'pk' }; } }, academicId: id => (String(id) === '20383' ? '223' : null), esperaDocsMs: 0 });
-  return { E, store, fila, docsEnviados, ...r };
+    portalSite: site.portalSite, baixarMidia: site.baixarMidia, esperaDocsMs: 0 });
+  return { E, store, fila, lotes: site.lotes, ...r };
 }
 // Contrato com o JSON publicado: chaves e tipos da resposta iguais aos declarados, e rota válida.
 function confere(origem, r) {
@@ -188,7 +203,7 @@ test('Escola sem cache: a busca abre a identidade no Rubeus uma vez e guarda a l
 });
 
 test('Etapa 2 completa: subetapas e documentos gravam no Firestore e avançam na hora; o worker envia ao Rubeus em ordem e os documentos por último', async () => {
-  const { E, store, fila, envios, docsEnviados } = montar();
+  const { E, store, fila, envios, lotes } = montar();
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
@@ -217,19 +232,19 @@ test('Etapa 2 completa: subetapas e documentos gravam no Firestore e avançam na
   assert.deepEqual(envios.map(e => e.tela), ['RESP_FINANCEIRO', 'ENDERECO', 'IDENTIDADE']);
   assert.equal(envios[1].dados.cidade_natal, '0907');
   assert.equal(envios[2].dados.cor_raca, '03'); assert.equal(envios[2].dados.rg, 'MA-123456');
-  assert.deepEqual(docsEnviados.map(d => d.codDocumento), [1, 5, 8, 46], 'documentos por último, na ordem do portal');
-  assert.ok(docsEnviados.every(d => d.cpf === '39184720514' && d.idps === '223'));
+  assert.deepEqual(lotes, [{ processo: '20383', codigos: ['1', '5', '8', '46'], tipos: ['application/pdf', 'application/pdf', 'application/pdf', 'application/pdf'] }],
+    'documentos por último, num único Enviar do passo do site, na ordem do portal');
   const rec = (await store.get(id, 'matriculaFila')).record;
   assert.equal(rec.status, 'concluida');
   assert.equal(rec.blocos.documentos.arquivos, undefined, 'referências dos arquivos apagadas depois do envio');
 });
 
 test('Documentos esperam a calma depois da identidade antes de ir ao sistema acadêmico', async () => {
-  const store = memoria(); const fila = []; const docsEnviados = [];
+  const store = memoria(); const fila = []; const site = siteFalso(); const docsEnviados = site.lotes;
   const r = rubeusFalso();
   let agora = Date.now();
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, clock: () => agora,
-    docs: { saveDocument: async a => { docsEnviados.push(a); return {}; } }, academicId: () => '223', esperaDocsMs: 120000 });
+    portalSite: site.portalSite, baixarMidia: site.baixarMidia, esperaDocsMs: 120000 });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
@@ -241,7 +256,7 @@ test('Documentos esperam a calma depois da identidade antes de ir ao sistema aca
   assert.ok(fila.at(-1).atrasoSeg > 0);
   agora += 120001;
   await E.worker(fila[0].id);
-  assert.equal(docsEnviados.length, 3);
+  assert.deepEqual(docsEnviados[0].codigos, ['5', '8', '46']);
 });
 
 test('Menor de 18 anos: pula a escolha e vai direto à ficha do responsável; regras de seleção', async () => {
@@ -262,16 +277,12 @@ test('Menor de 18 anos: pula a escolha e vai direto à ficha do responsável; re
   assert.equal(idade('2000-12-31', new Date('2026-12-30')), 25);
 });
 
-test('Documentos: idps fora da tabela é descoberto na API (nunca 0); fila que falhou reabre ao entrar de novo', async () => {
-  const store = memoria(); const fila = []; const docsEnviados = []; const consultas = [];
+test('Documentos pelo caminho do site: fila que falhou reabre ao entrar de novo; documento já no portal não é reenviado', async () => {
+  const store = memoria(); const fila = [];
+  const site = siteFalso({ jaNoPortal: ['5'] });
   const r = rubeusFalso();
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {},
-    docs: {
-      listProcessIds: async cpf => { assert.equal(cpf, '39184720514'); return ['999', '223']; },
-      findInscription: async (idps, cpf) => { consultas.push(String(idps)); if (String(idps) !== '223' || cpf !== '39184720514') throw new Error('400'); return {}; },
-      saveDocument: async a => { docsEnviados.push(a); return {}; }
-    },
-    academicId: () => null, idpsConhecidos: ['224', '223', '225'], esperaDocsMs: 0 });
+    portalSite: site.portalSite, baixarMidia: site.baixarMidia, esperaDocsMs: 0 });
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
   const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
@@ -279,18 +290,47 @@ test('Documentos: idps fora da tabela é descoberto na API (nunca 0); fila que f
   let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
   for (const d of DOCS) tela = await toque(E, d.tela, 'enviar_documento', tela.data.estado, { arquivo: d.obrigatorio ? MEDIA(d.id) : [] });
   const id = fila[0].id;
-  // Simula a fila que esgotou as tentativas com o idps errado.
   const f = await store.get(id, 'matriculaFila');
   await store.update(id, { ...f.record, status: 'falhou', tentativas: 6 }, f.version, 'matriculaFila');
   await E.worker(id);
-  assert.equal(docsEnviados.length, 0, 'fila que falhou não roda sozinha');
+  assert.equal(site.lotes.length, 0, 'fila que falhou não roda sozinha');
   const n = fila.length;
   await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(fila.length, n + 1, 'entrar de novo reabre e agenda o worker');
   await E.worker(id);
-  assert.deepEqual(consultas, ['223'], 'IDPS vem dos processos seletivos do CPF (fluxo da UniBalsas), conhecidos primeiro');
-  assert.equal(docsEnviados.length, 3);
-  assert.ok(docsEnviados.every(d => d.idps === '223'), 'idps descoberto, nunca 0');
+  assert.deepEqual(site.lotes.map(l => l.codigos), [['8', '46']], 'o Histórico (5) já estava em análise no portal');
   const rec = (await store.get(id, 'matriculaFila')).record;
-  assert.equal(rec.status, 'concluida'); assert.equal(rec.idps, '223');
+  assert.equal(rec.status, 'concluida');
+  assert.deepEqual(Object.keys(rec.enviados_docs).sort(), ['46', '5', '8']);
+});
+
+test('Passo de documentos do site: leitura da estrutura real e corpo do "Enviar" igual ao do site', async () => {
+  const { lerPassoDocumentos, montarEnvio } = await import('../api/portal-site.js');
+  const linha = (c, d, o) => ({ CODTIPODOCUMENTO: c, DESCRICAODOCUMENTO: d, OBRIGATORIO: o, CHAVERM: `1;80;27.1.9;${c}`, STATUS: null });
+  // Estrutura conferida ao vivo em 16/11/2026 (getApplymentDataByStep/300671), valores pessoais trocados.
+  const resp = { success: true, data: { steps: { currentStep: { id: 300671, stage_id: 261006, content: [
+    { id: 3940442, type: 'text' },
+    { id: 3940443, type: 'container', container_content: [{ id: 3940444, type: 'text' },
+      { id: 3940446, type: 'upload', field_id_related_to_component: 38733, type_file_field_id_to_save_upload: 38733, upload_max_size: 5, related_component_id: 174895,
+        upload_content: [linha('1', 'CARTEIRA DE IDENTIDADE', '0'), linha('5', 'HISTÓRICO ENSINO MÉDIO', '1'), linha('46', 'DECLARAÇÃO DE CONCLUSÃO ENSINO MÉDIO', '1')] }] },
+    { id: 3940447, type: 'container', container_content: [
+      { id: 3940448, type: 'button', label: 'Portal do candidato', store_data: 0, related_component_id: 174878 },
+      { id: 3940449, type: 'button', label: 'Enviar', store_data: 1, related_component_id: 174896 }] }
+  ] } } } };
+  const passo = lerPassoDocumentos(resp);
+  assert.equal(passo.botao, 3940449); assert.equal(passo.botao_relacionado, 174896);
+  assert.equal(passo.componente, 3940446); assert.equal(passo.campo, 38733); assert.equal(passo.stage_id, 261006);
+  assert.deepEqual(passo.docs.map(d => [d.codigo, d.obrigatorio]), [['1', false], ['5', true], ['46', true]]);
+  const { fd, data } = montarEnvio({ passo, sessao: { token: 'tk', session_id: 'sid' }, processo: '20383',
+    arquivos: [{ codigo: '5', bytes: Buffer.from('a'), nome: 'hist.pdf', tipo: 'application/pdf' }, { codigo: '46', bytes: Buffer.from('b'), nome: 'decl.png', tipo: 'image/png' }] });
+  assert.equal(fd.get('button_id'), '3940449'); assert.equal(fd.get('related_component_id'), '174896');
+  assert.equal(fd.get('last_place_id'), '300671'); assert.equal(fd.get('stage_id'), '261006'); assert.equal(fd.get('selective_process_id'), '20383');
+  assert.equal(fd.get('domainParams'), 'presencial'); assert.equal(fd.get('rbParams'), 'null'); assert.equal(fd.get('token'), 'tk');
+  assert.equal(fd.get('file_0').name, 'hist.pdf'); assert.equal(fd.get('file_1').type, 'image/png');
+  const itens = data[0].value;
+  assert.equal(data[0].field_id, 38733); assert.equal(data[0].component_id, 3940446); assert.equal(data[0].type, 'upload');
+  assert.deepEqual(itens.map(i => i.value), [null, ['file_0'], ['file_1']], 'numeração das partes na ordem da lista');
+  assert.deepEqual(itens.map(i => i.files.length), [0, 1, 1]);
+  assert.equal(itens[1].CHAVERM, '1;80;27.1.9;5'); assert.equal(itens[1].title, 'HISTÓRICO ENSINO MÉDIO');
+  assert.equal(JSON.parse(fd.get('data'))[0].value[2].CODIGO, '46');
 });

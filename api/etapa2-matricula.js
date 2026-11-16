@@ -13,6 +13,7 @@
 // escolhido para o código do formulário do Rubeus.
 import crypto from 'node:crypto';
 import { summarizeStages } from './matricula.js';
+import { jaEnviado, tipoDoArquivo } from './portal-site.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
@@ -113,7 +114,7 @@ export function proximaTela(s2, blocos = {}, menor = false) {
 export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
-  docs = null, academicId = () => null, entrarNaProva = null, idpsConhecidos = [],
+  portalSite = null, baixarMidia = null, entrarNaProva = null,
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
   esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 7500,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
@@ -449,26 +450,37 @@ export function createEtapa2({
       }
       throw new Error('Não foi possível gravar o andamento da matrícula.');
     }
-    // Processo no sistema acadêmico (idps) para a API de documentos. O id que o portal do Rubeus devolve no
-    // login do candidato nem sempre é o do processo seletivo: se não estiver na tabela, segue o fluxo da
-    // UniBalsas (processos seletivos do CPF → IDPS → inscrito) e, por garantia, os processos conhecidos
-    // (Vestibular, Portador, Transferência, ENEM). Fica com o IDPS em que a inscrição é encontrada.
-    async function descobrirIdps(processo) {
-      if (rec.idps) return rec.idps;
-      let idps = academicId(processo);
-      if (!idps) {
-        let doCpf = [];
-        try { doCpf = docs.listProcessIds ? await docs.listProcessIds(rec.login) : []; } catch {}
-        log({ event: 'etapa2_fila', id: curto(id), passo: 'idps_desconhecido', processo: String(processo ?? ''), idps_do_cpf: doCpf.join(',') });
-        const conhecidos = idpsConhecidos.map(String);
-        const ordem = [...doCpf.filter(c => conhecidos.includes(c)), ...doCpf, ...conhecidos].filter((c, i, a) => a.indexOf(c) === i);
-        for (const c of ordem) {
-          try { await docs.findInscription(c, rec.login); idps = c; break; } catch {}
-        }
+    // Documentos de matrícula pelo mesmo caminho do site (api/portal-site.js): entra no Portal do candidato,
+    // lê o passo de documentos, envia num único "Enviar" (multipart file_0…) e confere no próprio passo.
+    async function entregarDocumentos(passoId, docsB) {
+      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
+      const { processo } = await portalSite.inscricao(sessao);
+      if (!processo) throw new ErroPasso('Processo seletivo da inscrição não encontrado no portal.', { motivo: 'processo' });
+      const passo = await portalSite.passoDocumentos(sessao, passoId, processo);
+      const naLista = new Map(passo.docs.map(d => [d.codigo, d]));
+      const arquivos = [], jaNoPortal = [];
+      for (const doc of DOCS) {
+        const media = docsB.arquivos?.[doc.id];
+        if (!media?.length || rec.enviados_docs?.[doc.id]) continue;
+        const linha = naLista.get(doc.id);
+        if (!linha) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_fora_da_lista', doc: doc.id }); continue; }
+        if (jaEnviado(linha)) { jaNoPortal.push(doc.id); continue; } // já enviado (ex.: pelo site): não reenvia
+        const m = media[0];
+        const tipo = tipoDoArquivo(m.file_name) ?? 'application/pdf';
+        const bytes = await baixarMidia(m);
+        if (bytes.length > passo.max_mb * 1024 * 1024) throw new ErroPasso(`Arquivo do documento ${doc.id} acima de ${passo.max_mb} MB.`, { final: true, motivo: 'tamanho' });
+        arquivos.push({ codigo: doc.id, bytes, nome: String(m.file_name || `documento-${doc.id}.pdf`).slice(-80), tipo });
       }
-      if (!idps) throw new ErroPasso('Inscrição não localizada no sistema acadêmico em nenhum processo conhecido.', { motivo: 'idps' });
-      await salvar({ idps: String(idps) });
-      return String(idps);
+      const marcados = Object.fromEntries([...arquivos.map(a => a.codigo), ...jaNoPortal].map(c => [c, clock()]));
+      if (arquivos.length) {
+        await portalSite.enviarDocumentos({ sessao, passo, processo, arquivos });
+        // Conferência: o próprio passo passa a mostrar os documentos como enviados (em análise).
+        let conferidos = [];
+        try { const depois = await portalSite.passoDocumentos(sessao, passoId, processo); conferidos = depois.docs.filter(jaEnviado).map(d => d.codigo); } catch {}
+        for (const a of arquivos) log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_enviado', doc: a.codigo, conferido: conferidos.includes(a.codigo) });
+      }
+      for (const c of jaNoPortal) log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_ja_no_portal', doc: c });
+      await salvar({ enviados_docs: { ...rec.enviados_docs, ...marcados } });
     }
     try {
       await runCtx(async () => {
@@ -488,14 +500,7 @@ export function createEtapa2({
               await enqueue(id, { tipo: 'etapa2', atrasoSeg: Math.ceil((pronta - clock()) / 1000) });
               return;
             }
-            const idps = await descobrirIdps(sessao.processo_seletivo_id);
-            for (const doc of DOCS) {
-              const media = docsB.arquivos?.[doc.id];
-              if (!media?.length || rec.enviados_docs?.[doc.id]) continue;
-              await docs.saveDocument({ idps, cpf: rec.login, codDocumento: Number(doc.id), media });
-              await salvar({ enviados_docs: { ...rec.enviados_docs, [doc.id]: clock() } });
-              log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_enviado', doc: doc.id });
-            }
+            await entregarDocumentos(next.step, docsB);
             // Entregue: as referências dos arquivos (com as chaves de criptografia) não ficam guardadas.
             await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true });
             return;

@@ -7,7 +7,8 @@ import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
-import { listDocuments, saveDocument, readDocument, findInscription, listProcessIds } from "./documentos.js";
+import { listDocuments, saveDocument, readDocument, findInscription, downloadMedia } from "./documentos.js";
+import { createPortalSite } from "./portal-site.js";
 import { createEtapa1 } from "./etapa1-fila.js";
 import { avisarRedacaoLiberada } from "./blip.js";
 import { createEtapa2 } from "./etapa2-matricula.js";
@@ -1530,7 +1531,7 @@ const etapa1=createEtapa1({
 const etapa2=createEtapa2({
   store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
   buscarCep:d=>matricula.cep(d),
-  docs:{saveDocument,findInscription,listProcessIds},academicId,idpsConhecidos:academicIds,
+  portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),
   entrarNaProva:a=>etapa1.entrarNaProva(a),
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
@@ -1552,7 +1553,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.7.1" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.8.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

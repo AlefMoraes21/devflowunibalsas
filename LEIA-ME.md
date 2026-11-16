@@ -1,3 +1,11 @@
+# Versão 2.8.0 — Documentos de matrícula pelo mesmo caminho do site
+
+- **Por quê:** a API da UniBalsas (`/blip/inscritos`) não encontra candidatos de 2027/1 que ainda não estão no RM (404 em 223–226) e cobre os documentos de **inscrição**, não os de matrícula. O site grava os de matrícula pelo passo do Rubeus (300671 → SDOCALUNO).
+- **Como (igual ao site, `api/portal-site.js`):** `vestibular.unibalsas.edu.br/api/applyment/` → `settings` (token) → `login-portal` (CPF + nascimento DDMMAAAA, sem captcha) → `register-portal-data` (processo da inscrição; o site leva ~16 s) → `getApplymentDataByStep/{passo}` (componente de upload, botão que grava, lista com CHAVERM) → **um único `button-click` multipart** com `file_0…file_n` e, no campo 38733, a lista dos documentos (`files:[{}]`, `value:["file_k"]` nos enviados). Depois relê o passo e registra se cada documento ficou em análise (`documento_enviado`, `conferido`).
+- Documento que o portal já mostra como enviado (em análise/aceito) não é reenviado (`documento_ja_no_portal`). IDs de passo, botão e componente são lidos do passo (servem para os 4 processos).
+- `processoseletivo.azurewebsites.net` (tentado na 1.6) bloqueia acesso de fora do site; o caminho certo é o domínio do vestibular.
+- Logs `portal_site` (rota, HTTP, success, ms; sem CPF, token ou sessão). 177 testes.
+
 # Versão 2.7.1 — Documentos da etapa 2: idps correto; status do portal no login
 
 - **Correção:** os documentos iam para `/blip/inscritos/0/<cpf>` (HTTP 400): o id de processo que o portal devolve no login do candidato não está na tabela de processos. Agora, fora da tabela, o worker segue o fluxo da UniBalsas (e-mail do T.I. de 30/10, artigos 743–746): `GET /blip/processos-seletivos/{cpf}` → IDPS → `GET /blip/inscritos/{idps}/{cpf}`, tentando primeiro os IDPS do CPF que são processos conhecidos e, por garantia, 223/224/225/226, grava o encontrado na fila (`idps`) e nunca chama a API com 0 (log `idps_desconhecido` com o id real do portal).
