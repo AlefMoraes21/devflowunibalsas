@@ -235,7 +235,7 @@ test('Flow E1: JSON válido para a Meta (rotas, ações e chaves)', () => {
     if (Array.isArray(c["data-source"])) for (const o of c["data-source"]) assert.ok(o.title.length <= 30);
   }
   const texto = JSON.stringify(FLOW_E1);
-  assert.doesNotMatch(texto, /consultar_tarefa|Verificar andamento|Já sou inscrito|data_nascimento.*login/);
+  assert.doesNotMatch(texto, /consultar_tarefa|Verificar andamento/);
   for (const t of FLOW_E1.screens) {
     const usados = [...JSON.stringify(t.layout).matchAll(/\$\{data\.([a-z_]+)\}/g)].map(m => m[1]);
     for (const u of usados) assert.ok(t.data && u in t.data, `${t.id} usa data.${u} declarado`);

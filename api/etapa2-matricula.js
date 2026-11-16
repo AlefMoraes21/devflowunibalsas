@@ -1,4 +1,5 @@
-// Etapa 2 do Vestibular (pós-inscrição): matrícula pelo Flow `flows/etapa2-matricula.json` (telas MATR_*).
+// Etapa 2 do Vestibular (pós-inscrição): matrícula no MESMO Flow da etapa 1 (`flows/etapa1-vestibular.json`),
+// telas MATR_*, aberta pelo link "Já sou inscrito" da tela inicial.
 //
 // Igual à etapa 1: cada subetapa grava no Firestore e responde na hora; o worker do Cloud Run grava no
 // Rubeus em segundo plano. No site cada subetapa é um passo próprio, com o seu botão (responsável
@@ -25,6 +26,16 @@ export const norm = v => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, ''
 export const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'].map(u => ({ id: u, title: u }));
 export const RACAS = ['Branca', 'Preta', 'Parda', 'Amarela', 'Indígena', 'Não declarada'].map(t => ({ id: norm(t).replace(/\s+/g, '_'), title: t }));
 export const ESTADOS_CIVIS = ['Solteiro(a)', 'Casado(a)', 'Divorciado(a)', 'Viúvo(a)', 'Separado(a)', 'União estável'].map(t => ({ id: norm(t).replace(/[^a-z]+/g, '_').replace(/_+$/, ''), title: t }));
+// Documentos de matrícula do Vestibular (passo 300671), na ordem e com a obrigatoriedade do Portal do candidato.
+export const DOCS = [
+  { id: '1', tela: 'MATR_DOC_IDENTIDADE', titulo: 'Carteira de identidade', obrigatorio: false },
+  { id: '2', tela: 'MATR_DOC_CPF', titulo: 'CPF', obrigatorio: false },
+  { id: '5', tela: 'MATR_DOC_HISTORICO', titulo: 'Histórico do ensino médio', obrigatorio: true },
+  { id: '8', tela: 'MATR_DOC_CERTIFICADO', titulo: 'Certificado de conclusão do ensino médio', obrigatorio: true },
+  { id: '15', tela: 'MATR_DOC_RESIDENCIA', titulo: 'Comprovante de residência', obrigatorio: false },
+  { id: '16', tela: 'MATR_DOC_RESPONSAVEL', titulo: 'Documentos do responsável financeiro', obrigatorio: false },
+  { id: '46', tela: 'MATR_DOC_DECLARACAO', titulo: 'Declaração de conclusão do ensino médio', obrigatorio: true }
+];
 // Bloco do Firestore que cada tela do Rubeus consome (nome da tela em api/matricula.js).
 const BLOCO_DA_TELA = { RESP_FINANCEIRO: 'responsavel', RESP_DADOS: 'resp_dados', ENDERECO: 'endereco', IDENTIDADE: 'identidade', CUPOM: 'cupom' };
 
@@ -56,7 +67,10 @@ export function idade(nascimentoIso, hoje = new Date()) {
 
 export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
-  buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000
+  buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
+  docs = null, academicId = () => null,
+  // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
+  esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000
 }) {
   // ---------------------------------------------------------------- telas do Flow
   const valor = (...n) => n.map(x => 'valor_' + x);
@@ -68,6 +82,7 @@ export function createEtapa2({
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
     MATR_ENDERECO: ['estado', 'erro', 'tem_erro', ...valor(...END)],
     MATR_IDENTIDADE: ['estado', 'erro', 'tem_erro', ...valor('rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola')],
+    ...Object.fromEntries(DOCS.map(x => [x.tela, ['estado', 'erro', 'tem_erro']])),
     MATR_FIM: ['titulo', 'mensagem']
   };
   function render(screen, data) {
@@ -99,6 +114,25 @@ export function createEtapa2({
     throw new Error('conflito');
   }
   const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
+  // Guarda o arquivo (referência criptografada do WhatsApp) e, no último, marca os documentos como completos.
+  async function gravarDocumento(s, flowToken, docId, media, completo) {
+    for (let i = 0; i < 5; i++) {
+      const atual = await store.get(s.fila_id, FILA);
+      if (!atual) throw new Error('matrícula não encontrada');
+      if (atual.record.flow !== hash(flowToken ?? '')) throw new Error('matrícula de outra sessão');
+      const prev = atual.record.blocos?.documentos ?? {};
+      const documentos = { ...prev, arquivos: { ...prev.arquivos, ...(media.length ? { [docId]: media } : {}) }, completo: Boolean(completo || prev.completo) };
+      const rec = { ...atual.record, blocos: { ...atual.record.blocos, documentos }, status: ['concluida', 'falhou'].includes(atual.record.status) ? 'pendente' : atual.record.status };
+      if (await store.update(s.fila_id, rec, atual.version, FILA)) {
+        if (completo) {
+          log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'documentos_recebidos', quantidade: Object.keys(documentos.arquivos).length });
+          try { await enqueue(s.fila_id, { tipo: 'etapa2' }); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
+        }
+        return;
+      }
+    }
+    throw new Error('conflito');
+  }
 
   function validarEndereco(u, { responsavel = false } = {}) {
     if (responsavel) {
@@ -134,15 +168,15 @@ export function createEtapa2({
   async function routeTela(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
 
-    // Login igual ao Portal do candidato: CPF ou e-mail + data de nascimento (validado no Rubeus, ao vivo).
+    // Login igual ao Portal do candidato: CPF + data de nascimento (validado no Rubeus, ao vivo). É a única
+    // consulta em tempo real da etapa 2: a partir dela o Cloud Run sabe de quem são os dados.
     if ((screen === 'MATR_INICIO' || screen === 'MATR_LOGIN') && acao === 'entrar') {
       const u = pick(d, ['login', 'data_nascimento']);
       const volta = erro => render('MATR_LOGIN', { values: u, erro });
       const texto = String(u.login ?? '').trim();
-      const ehEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto);
-      if (!ehEmail && !validCpf(texto)) return volta('Informe o CPF (11 números) ou o e-mail usado na inscrição.');
+      if (!validCpf(texto)) return volta('Confira o CPF (11 números).');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(u.data_nascimento ?? ''))) return volta('Informe a data de nascimento.');
-      const login = ehEmail ? texto : digits(texto);
+      const login = digits(texto);
       let sessao;
       try { sessao = await matricula.login(login, u.data_nascimento); }
       catch { return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.'); }
@@ -206,9 +240,20 @@ export function createEtapa2({
         : '';
       if (erro) return render(screen, { ...s, values: u, erro });
       try { await gravarBloco(s, req.flow_token, 'identidade', u); } catch { return render(screen, { ...s, values: u, erro: ERRO_GRAVAR }); }
-      // Identidade é a última subetapa da matrícula no site (o passo de cupom existe no processo, mas a
-      // UniBalsas não usa: o worker segue sem cupom se o portal algum dia pedir).
-      return fim('Dados da matrícula recebidos ✅', 'Recebemos seus dados de matrícula e estamos registrando tudo no Portal do Candidato.\n\nPróximo passo: o envio dos documentos da matrícula. Você recebe a mensagem aqui no WhatsApp.');
+      return render(DOCS[0].tela, { ...base, erro: '' });
+    }
+
+    // Documentos de matrícula: um por tela (o WhatsApp aceita um seletor de arquivo por tela). Ficam
+    // guardados e vão ao sistema acadêmico com calma, no fim, como a redação.
+    const iDoc = DOCS.findIndex(x => x.tela === screen);
+    if (iDoc >= 0 && acao === 'enviar_documento') {
+      const doc = DOCS[iDoc];
+      const media = Array.isArray(d.arquivo) ? d.arquivo : [];
+      if (doc.obrigatorio && media.length !== 1) return render(screen, { ...s, erro: `Anexe o arquivo: ${doc.titulo}.` });
+      const ultimo = iDoc === DOCS.length - 1;
+      try { await gravarDocumento(s, req.flow_token, doc.id, media, ultimo); } catch { return render(screen, { ...s, erro: ERRO_GRAVAR }); }
+      if (!ultimo) return render(DOCS[iDoc + 1].tela, { ...base, erro: '' });
+      return fim('Documentos enviados ✅', 'Seus documentos foram recebidos e estão em análise. A análise ocorre em até 48 horas úteis.\n\nAcompanhe a situação no Portal do Candidato.');
     }
     return null;
   }
@@ -257,7 +302,8 @@ export function createEtapa2({
     async function salvar(patch) {
       for (let i = 0; i < 5; i++) {
         const atual = i === 0 ? { record: rec, version } : await store.get(id, FILA);
-        const novo = { ...atual.record, ...patch, blocos: atual.record.blocos };
+        const novo = { ...atual.record, ...patch, blocos: patch.limpar_docs ? { ...atual.record.blocos, documentos: { completo: true } } : atual.record.blocos };
+        delete novo.limpar_docs;
         if (await store.update(id, novo, atual.version, FILA)) { const l = await store.get(id, FILA); rec = l.record; version = l.version; return; }
         if (i === 0) { const l = await store.get(id, FILA); rec = l.record; version = l.version; }
       }
@@ -272,6 +318,27 @@ export function createEtapa2({
           sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
           const next = summarizeStages(p.stages).next;
           if (!next) { await salvar({ status: 'concluida', passo: 'fim' }); return; }
+          if (/document/.test(norm(next.title))) {
+            const docsB = rec.blocos?.documentos;
+            if (!docsB?.completo) { await salvar({ passo: 'aguardando_documentos' }); return; }
+            const pronta = (rec.enviados?.identidade ?? 0) + esperaDocsMs;
+            if (clock() < pronta) {
+              await salvar({ passo: 'documentos_espera' });
+              await enqueue(id, { tipo: 'etapa2', atrasoSeg: Math.ceil((pronta - clock()) / 1000) });
+              return;
+            }
+            const idps = academicId(sessao.processo_seletivo_id ?? rec.processo);
+            for (const doc of DOCS) {
+              const media = docsB.arquivos?.[doc.id];
+              if (!media?.length || rec.enviados_docs?.[doc.id]) continue;
+              await docs.saveDocument({ idps, cpf: rec.login, codDocumento: Number(doc.id), media });
+              await salvar({ enviados_docs: { ...rec.enviados_docs, [doc.id]: clock() } });
+              log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_enviado', doc: doc.id });
+            }
+            // Entregue: as referências dos arquivos (com as chaves de criptografia) não ficam guardadas.
+            await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true });
+            return;
+          }
           const tela = await matricula.open(sessao, next);
           const bloco = BLOCO_DA_TELA[tela.screen];
           if (!bloco) {

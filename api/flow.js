@@ -1528,6 +1528,7 @@ const etapa1=createEtapa1({
 const etapa2=createEtapa2({
   store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
   buscarCep:d=>matricula.cep(d),
+  docs:{saveDocument},academicId,
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
 export async function workerHandler(req,res){
@@ -1548,7 +1549,7 @@ export async function workerHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.4.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.5.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

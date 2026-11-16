@@ -1,6 +1,8 @@
 // Gera flows/etapa1-vestibular.json (Flow da etapa 1 do Vestibular: inscrição + redação).
 // Uso: node flows/gerar-etapa1.mjs
 import { writeFileSync, readFileSync } from 'node:fs';
+// Etapa 2 (login + matrícula) no mesmo Flow, aberta pelo link "Já sou inscrito" da tela inicial.
+import { screens as TELAS_ETAPA2, routing as ROTAS_ETAPA2, LOGIN_VAZIO } from './gerar-etapa2.mjs';
 
 // Logos vermelhos com fundo transparente (flows/img), embutidos em base64 como pede o Flow JSON.
 const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('base64');
@@ -32,7 +34,7 @@ const flow = {
   version: '7.3',
   data_api_version: '3.0',
   routing_model: {
-    INSC_INICIO: ['INSC_DADOS', 'INSC_FIM'],
+    INSC_INICIO: ['INSC_DADOS', 'INSC_FIM', 'MATR_LOGIN'],
     INSC_DADOS: ['INSC_CURSO', 'INSC_PRIVACIDADE', 'INSC_FIM'],
     INSC_PRIVACIDADE: [],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
@@ -43,7 +45,8 @@ const flow = {
     INSC_ORIENTACAO: ['INSC_REDACAO', 'INSC_FIM'],
     INSC_REDACAO: ['INSC_FINALIZADA', 'INSC_FIM'],
     INSC_FINALIZADA: [],
-    INSC_FIM: []
+    INSC_FIM: [],
+    ...ROTAS_ETAPA2
   },
   screens: [
     {
@@ -62,6 +65,7 @@ const flow = {
               { id: '20384', title: 'Portador de Diploma 2027/1' },
               { id: '20386', title: 'Nota do ENEM 2027/1' }
             ] },
+            { type: 'EmbeddedLink', text: 'Já sou inscrito (LOGIN)', 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'MATR_LOGIN' }, payload: LOGIN_VAZIO } },
             { type: 'Footer', label: 'Iniciar inscrição', 'on-click-action': { name: 'data_exchange', payload: { acao: 'e1_iniciar', processo_seletivo_id: '${form.processo_seletivo_id}' } } }
           ]
         }]
@@ -295,6 +299,7 @@ const flow = {
         ]
       }
     }
+    ,...TELAS_ETAPA2
   ]
 };
 

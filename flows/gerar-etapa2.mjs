@@ -1,7 +1,7 @@
-// Gera flows/etapa2-matricula.json (Flow da etapa 2: login + matrícula, telas MATR_*).
-// Uso: node flows/gerar-etapa2.mjs
-import { writeFileSync, readFileSync } from 'node:fs';
-import { UFS, RACAS, ESTADOS_CIVIS } from '../api/etapa2-matricula.js';
+// Telas da etapa 2 (login + matrícula + documentos), telas MATR_*. Entram no MESMO Flow da etapa 1
+// (flows/etapa1-vestibular.json), pelo link "Já sou inscrito" da tela inicial. Usado por gerar-etapa1.mjs.
+import { readFileSync } from 'node:fs';
+import { UFS, RACAS, ESTADOS_CIVIS, DOCS } from '../api/etapa2-matricula.js';
 
 const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('base64');
 const LOGO_PORTAL = png('logo_portal.png');
@@ -21,6 +21,9 @@ const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'e
 const RESP = ['nome', 'email', 'cpf', 'data_nascimento', 'celular'];
 const IDENT = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola'];
 
+// Dados iniciais da tela de login quando aberta pelo link da tela inicial (navigate).
+export const LOGIN_VAZIO = { erro: '', tem_erro: false, valor_login: '', valor_data_nascimento: '' };
+
 const camposEndereco = acaoCep => [
   { type: 'TextInput', name: 'cep', label: 'CEP', 'helper-text': 'Somente números', 'input-type': 'text', required: true },
   { type: 'EmbeddedLink', text: 'Buscar endereço pelo CEP', 'on-click-action': acaoCep },
@@ -33,118 +36,122 @@ const camposEndereco = acaoCep => [
   { type: 'Dropdown', name: 'estado_natal', label: 'Estado natal', required: true, 'data-source': UFS },
   { type: 'TextInput', name: 'cidade_natal', label: 'Cidade natal', 'input-type': 'text', required: true }
 ];
-const login = comErro => ({
-  type: 'SingleColumnLayout',
-  children: [{
-    type: 'Form', name: 'form_login',
-    ...(comErro ? { 'init-values': init(['login']) } : {}),
-    children: [
-      imagem(LOGO_PORTAL),
-      { type: 'TextSubheading', text: 'Já sou inscrito' },
-      { type: 'TextBody', text: 'Entre com o CPF ou e-mail e a data de nascimento usados na inscrição para continuar de onde parou.' },
-      ...(comErro ? [erroTexto] : []),
-      { type: 'TextInput', name: 'login', label: 'CPF ou e-mail', 'input-type': 'text', required: true },
-      { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
-      { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', login: '${form.login}', data_nascimento: '${form.data_nascimento}' } } }
-    ]
-  }]
-});
 
-const flow = {
-  version: '7.3',
-  data_api_version: '3.0',
-  routing_model: {
-    MATR_INICIO: ['MATR_LOGIN', 'MATR_PORTAL', 'MATR_FIM'],
-    MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM'],
-    MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_FIM'],
-    MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
-    MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
-    MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
-    MATR_IDENTIDADE: ['MATR_FIM'],
-    MATR_FIM: []
-  },
-  screens: [
-    { id: 'MATR_INICIO', title: 'Portal do candidato', layout: login(false) },
-    { id: 'MATR_LOGIN', title: 'Portal do candidato', data: { erro: str(), tem_erro: bool(), valor_login: str(), valor_data_nascimento: str() }, layout: login(true) },
-    {
-      // Igual ao status do Portal do candidato.
-      id: 'MATR_PORTAL', title: 'Portal do candidato',
-      data: { estado: str(), resumo: str('✅ Inscrição\nConcluída') },
-      layout: { type: 'SingleColumnLayout', children: [
-        imagem(LOGO_PORTAL),
-        { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
-        { type: 'TextBody', text: '${data.resumo}' },
-        { type: 'TextBody', text: 'Agora é a vez da sua matrícula. Vamos começar?' },
-        { type: 'Footer', label: 'Continuar matrícula', 'on-click-action': troca('continuar') }
-      ] }
-    },
-    {
-      id: 'MATR_RESPONSAVEL', title: 'Responsável financeiro', data: dados(['responsavel']),
-      layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_resp', 'init-values': init(['responsavel']), children: [
-        imagem(LOGO_MATRICULA),
-        { type: 'TextHeading', text: 'Responsável financeiro' },
-        erroTexto,
-        { type: 'RadioButtonsGroup', name: 'responsavel', label: 'Quem é seu responsável financeiro?', required: true, 'data-source': [{ id: 'Eu', title: 'Eu' }, { id: 'Outro', title: 'Outro' }] },
-        { type: 'TextCaption', text: 'Se escolher Outro, pediremos os dados dessa pessoa em seguida.' },
-        { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_responsavel', form(['responsavel'])) }
-      ] }] }
-    },
-    {
-      id: 'MATR_RESP_DADOS', title: 'Dados do responsável', data: dados([...RESP, ...END]),
-      layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_resp_dados', 'init-values': init(['nome', 'email', 'cpf', 'celular', ...END]), children: [
-        imagem(LOGO_MATRICULA),
-        { type: 'TextHeading', text: 'Dados do responsável' },
-        { type: 'TextBody', text: 'Informe os dados do responsável financeiro.' },
-        erroTexto,
-        { type: 'TextInput', name: 'nome', label: 'Nome completo', 'input-type': 'text', required: true },
-        { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
-        { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
-        { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
-        { type: 'TextInput', name: 'celular', label: 'Celular', 'input-type': 'phone', required: true },
-        ...camposEndereco(troca('buscar_cep', form([...RESP, ...END]))),
-        { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_endereco', form([...RESP, ...END])) }
-      ] }] }
-    },
-    {
-      id: 'MATR_ENDERECO', title: 'Endereço', data: dados(END),
-      layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_endereco', 'init-values': init(END), children: [
-        imagem(LOGO_MATRICULA),
-        { type: 'TextHeading', text: 'Seu endereço' },
-        { type: 'TextBody', text: 'Próximo passo: conhecer você melhor! Informe seu endereço e sua naturalidade.' },
-        erroTexto,
-        ...camposEndereco(troca('buscar_cep', form(END))),
-        { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_endereco', form(END)) }
-      ] }] }
-    },
-    {
-      id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT),
-      layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT), children: [
-        imagem(LOGO_MATRICULA),
-        { type: 'TextHeading', text: 'Documento e perfil' },
-        { type: 'TextBody', text: 'Precisamos de mais algumas informações suas.' },
-        erroTexto,
-        { type: 'TextInput', name: 'rg', label: 'Nº da identidade', 'input-type': 'text', required: true },
-        { type: 'TextInput', name: 'orgao_emissor', label: 'Órgão emissor', 'helper-text': 'Ex.: SSP', 'input-type': 'text', required: true },
-        { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
-        { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
-        { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
-        { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio (opcional). Ex.: 2024', 'input-type': 'text', required: false },
-        { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
-        { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
-      ] }] }
-    },
-    {
-      id: 'MATR_FIM', title: 'Matrícula', terminal: true, success: true,
-      data: { titulo: str('Dados da matrícula recebidos ✅'), mensagem: str('') },
-      layout: { type: 'SingleColumnLayout', children: [
-        imagem(LOGO_UNIBALSAS),
-        { type: 'TextSubheading', text: '${data.titulo}' },
-        { type: 'TextBody', text: '${data.mensagem}' },
-        { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
-      ] }
-    }
-  ]
+const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length - 1 ? [DOCS[i + 1].tela, 'MATR_FIM'] : ['MATR_FIM']]));
+
+export const routing = {
+  MATR_LOGIN: ['MATR_PORTAL', 'MATR_FIM'],
+  MATR_PORTAL: ['MATR_RESPONSAVEL', 'MATR_FIM'],
+  MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
+  MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
+  MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
+  MATR_IDENTIDADE: [DOCS[0].tela, 'MATR_FIM'],
+  ...docRotas,
+  MATR_FIM: []
 };
 
-writeFileSync(new URL('./etapa2-matricula.json', import.meta.url), JSON.stringify(flow, null, 2) + '\n');
-console.log('flows/etapa2-matricula.json gerado');
+export const screens = [
+  {
+    id: 'MATR_LOGIN', title: 'Portal do candidato',
+    data: { erro: str(), tem_erro: bool(), valor_login: str(), valor_data_nascimento: str() },
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_login', 'init-values': init(['login']), children: [
+      imagem(LOGO_PORTAL),
+      { type: 'TextSubheading', text: 'Já sou inscrito' },
+      { type: 'TextBody', text: 'Entre com o CPF e a data de nascimento usados na inscrição para continuar de onde parou.' },
+      erroTexto,
+      { type: 'TextInput', name: 'login', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
+      { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
+      { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', login: '${form.login}', data_nascimento: '${form.data_nascimento}' } } }
+    ] }] }
+  },
+  {
+    // Igual ao status do Portal do candidato.
+    id: 'MATR_PORTAL', title: 'Portal do candidato',
+    data: { estado: str(), resumo: str('✅ Inscrição: Concluída') },
+    layout: { type: 'SingleColumnLayout', children: [
+      imagem(LOGO_PORTAL),
+      { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
+      { type: 'TextBody', text: '${data.resumo}' },
+      { type: 'Footer', label: 'Continuar matrícula', 'on-click-action': troca('continuar') }
+    ] }
+  },
+  {
+    id: 'MATR_RESPONSAVEL', title: 'Responsável financeiro', data: dados(['responsavel']),
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_resp', 'init-values': init(['responsavel']), children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Responsável financeiro' },
+      erroTexto,
+      { type: 'RadioButtonsGroup', name: 'responsavel', label: 'Quem é seu responsável financeiro?', required: true, 'data-source': [{ id: 'Eu', title: 'Eu' }, { id: 'Outro', title: 'Outro' }] },
+      { type: 'TextCaption', text: 'Se escolher Outro, pediremos os dados dessa pessoa em seguida.' },
+      { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_responsavel', form(['responsavel'])) }
+    ] }] }
+  },
+  {
+    id: 'MATR_RESP_DADOS', title: 'Dados do responsável', data: dados([...RESP, ...END]),
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_resp_dados', 'init-values': init(['nome', 'email', 'cpf', 'celular', ...END]), children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Dados do responsável' },
+      { type: 'TextBody', text: 'Informe os dados do responsável financeiro.' },
+      erroTexto,
+      { type: 'TextInput', name: 'nome', label: 'Nome completo', 'input-type': 'text', required: true },
+      { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
+      { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
+      { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
+      { type: 'TextInput', name: 'celular', label: 'Celular', 'input-type': 'phone', required: true },
+      ...camposEndereco(troca('buscar_cep', form([...RESP, ...END]))),
+      { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_endereco', form([...RESP, ...END])) }
+    ] }] }
+  },
+  {
+    id: 'MATR_ENDERECO', title: 'Endereço', data: dados(END),
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_endereco', 'init-values': init(END), children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Seu endereço' },
+      { type: 'TextBody', text: 'Próximo passo: conhecer você melhor! Informe seu endereço e sua naturalidade.' },
+      erroTexto,
+      ...camposEndereco(troca('buscar_cep', form(END))),
+      { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_endereco', form(END)) }
+    ] }] }
+  },
+  {
+    id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT),
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT), children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Documento e perfil' },
+      { type: 'TextBody', text: 'Precisamos de mais algumas informações suas.' },
+      erroTexto,
+      { type: 'TextInput', name: 'rg', label: 'Nº da identidade', 'input-type': 'text', required: true },
+      { type: 'TextInput', name: 'orgao_emissor', label: 'Órgão emissor', 'helper-text': 'Ex.: SSP', 'input-type': 'text', required: true },
+      { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
+      { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
+      { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
+      { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio (opcional). Ex.: 2024', 'input-type': 'text', required: false },
+      { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
+      { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
+    ] }] }
+  },
+  // Documentos de matrícula: um por tela (o WhatsApp aceita um seletor de arquivo por tela).
+  ...DOCS.map((d, i) => ({
+    id: d.tela, title: 'Documentos', data: dados([]),
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_doc', children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Documentos da matrícula' },
+      ...(i === 0 ? [{ type: 'TextBody', text: 'Envie os documentos solicitados (PDF, JPG ou PNG). A análise ocorre em até 48 horas úteis.' }] : []),
+      { type: 'TextSubheading', text: `${d.titulo}${d.obrigatorio ? ' *' : ''}` },
+      { type: 'TextCaption', text: `${d.obrigatorio ? 'Obrigatório.' : 'Opcional: se não tiver agora, toque em Avançar.'} Documento ${i + 1} de ${DOCS.length}.` },
+      erroTexto,
+      { type: 'DocumentPicker', name: 'arquivo', label: 'Arquivo', description: 'PDF, JPG ou PNG de até 740 KB', 'min-uploaded-documents': d.obrigatorio ? 1 : 0, 'max-uploaded-documents': 1, 'max-file-size-kb': 740, 'allowed-mime-types': ['application/pdf', 'image/jpeg', 'image/png'] },
+      { type: 'Footer', label: i === DOCS.length - 1 ? 'Enviar documentos' : 'Avançar', 'on-click-action': troca('enviar_documento', { arquivo: '${form.arquivo}' }) }
+    ] }] }
+  })),
+  {
+    id: 'MATR_FIM', title: 'Matrícula', terminal: true, success: true,
+    data: { titulo: str('Documentos enviados ✅'), mensagem: str('') },
+    layout: { type: 'SingleColumnLayout', children: [
+      imagem(LOGO_UNIBALSAS),
+      { type: 'TextSubheading', text: '${data.titulo}' },
+      { type: 'TextBody', text: '${data.mensagem}' },
+      { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
+    ] }
+  }
+];

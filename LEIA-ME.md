@@ -1,3 +1,10 @@
+# Versão 2.5.0 — Um único Flow: inscrição (etapa 1) + matrícula e documentos (etapa 2)
+
+- `flows/etapa1-vestibular.json` agora tem as duas etapas. A etapa 1 não mudou (só a tela inicial ganhou o link **"Já sou inscrito (LOGIN)"**). O `flows/etapa2-matricula.json` separado deixou de existir.
+- **Etapa 2:** login por CPF + data de nascimento (única consulta em tempo real) → situação das etapas → responsável financeiro → dados do responsável (se "Outro" ou menor de 18) → endereço (CEP ao vivo) → identidade → documentos de matrícula (um por tela, 3 obrigatórios) → mensagem do site ("em análise… até 48 horas úteis") e o Flow fecha. Cada tela grava no Firestore (`matriculaFila`) e responde na hora.
+- **Worker:** envia cada subetapa ao Rubeus na ordem do portal; os documentos vão por último, com calma (`ETAPA2_ESPERA_DOCS_MS`, padrão 2 min depois da identidade), pela API da UniBalsas (`/blip/documents`). Depois do envio, as referências dos arquivos são apagadas.
+- Logos comprimidos (16 cores): o Flow com as duas etapas ficou com ~218 KB. 171 testes.
+
 # Versão 2.4.0 — Etapa 2 (matrícula) pelo Flow `flows/etapa2-matricula.json`
 
 - **Diagnóstico (site/mapeamento):** cada subetapa é um passo próprio no Rubeus, com o seu botão — responsável financeiro (300676), dados do responsável (300668/300675), endereço (300666), identidade (300667, gera o RA), cupom (300674) — e o Rubeus só libera um passo depois que o anterior foi gravado. Envio **incremental e em ordem**.
