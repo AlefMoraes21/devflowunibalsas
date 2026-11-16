@@ -267,6 +267,7 @@ test('Documentos: idps fora da tabela é descoberto na API (nunca 0); fila que f
   const r = rubeusFalso();
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {},
     docs: {
+      listProcessIds: async cpf => { assert.equal(cpf, '39184720514'); return ['999', '223']; },
       findInscription: async (idps, cpf) => { consultas.push(String(idps)); if (String(idps) !== '223' || cpf !== '39184720514') throw new Error('400'); return {}; },
       saveDocument: async a => { docsEnviados.push(a); return {}; }
     },
@@ -287,7 +288,7 @@ test('Documentos: idps fora da tabela é descoberto na API (nunca 0); fila que f
   await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(fila.length, n + 1, 'entrar de novo reabre e agenda o worker');
   await E.worker(id);
-  assert.deepEqual(consultas, ['224', '223']);
+  assert.deepEqual(consultas, ['223'], 'IDPS vem dos processos seletivos do CPF (fluxo da UniBalsas), conhecidos primeiro');
   assert.equal(docsEnviados.length, 3);
   assert.ok(docsEnviados.every(d => d.idps === '223'), 'idps descoberto, nunca 0');
   const rec = (await store.get(id, 'matriculaFila')).record;

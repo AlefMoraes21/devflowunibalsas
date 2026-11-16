@@ -450,14 +450,19 @@ export function createEtapa2({
       throw new Error('Não foi possível gravar o andamento da matrícula.');
     }
     // Processo no sistema acadêmico (idps) para a API de documentos. O id que o portal do Rubeus devolve no
-    // login do candidato nem sempre é o do processo seletivo: se não estiver na tabela, procura a inscrição
-    // em cada processo conhecido (Vestibular, Portador, Transferência, ENEM) e guarda o que achar.
+    // login do candidato nem sempre é o do processo seletivo: se não estiver na tabela, segue o fluxo da
+    // UniBalsas (processos seletivos do CPF → IDPS → inscrito) e, por garantia, os processos conhecidos
+    // (Vestibular, Portador, Transferência, ENEM). Fica com o IDPS em que a inscrição é encontrada.
     async function descobrirIdps(processo) {
       if (rec.idps) return rec.idps;
       let idps = academicId(processo);
       if (!idps) {
-        log({ event: 'etapa2_fila', id: curto(id), passo: 'idps_desconhecido', processo: String(processo ?? '') });
-        for (const c of idpsConhecidos) {
+        let doCpf = [];
+        try { doCpf = docs.listProcessIds ? await docs.listProcessIds(rec.login) : []; } catch {}
+        log({ event: 'etapa2_fila', id: curto(id), passo: 'idps_desconhecido', processo: String(processo ?? ''), idps_do_cpf: doCpf.join(',') });
+        const conhecidos = idpsConhecidos.map(String);
+        const ordem = [...doCpf.filter(c => conhecidos.includes(c)), ...doCpf, ...conhecidos].filter((c, i, a) => a.indexOf(c) === i);
+        for (const c of ordem) {
           try { await docs.findInscription(c, rec.login); idps = c; break; } catch {}
         }
       }

@@ -1,6 +1,6 @@
 # Versão 2.7.1 — Documentos da etapa 2: idps correto; status do portal no login
 
-- **Correção:** os documentos iam para `/blip/inscritos/0/<cpf>` (HTTP 400): o id de processo que o portal devolve no login do candidato não está na tabela de processos. Agora, fora da tabela, o worker procura a inscrição em cada idps conhecido (223, 224, 225, 226), grava o encontrado na fila (`idps`) e nunca chama a API com 0 (log `idps_desconhecido` com o id real do portal).
+- **Correção:** os documentos iam para `/blip/inscritos/0/<cpf>` (HTTP 400): o id de processo que o portal devolve no login do candidato não está na tabela de processos. Agora, fora da tabela, o worker segue o fluxo da UniBalsas (e-mail do T.I. de 30/10, artigos 743–746): `GET /blip/processos-seletivos/{cpf}` → IDPS → `GET /blip/inscritos/{idps}/{cpf}`, tentando primeiro os IDPS do CPF que são processos conhecidos e, por garantia, 223/224/225/226, grava o encontrado na fila (`idps`) e nunca chama a API com 0 (log `idps_desconhecido` com o id real do portal).
 - **Fila que falhou reabre ao entrar de novo** pelo LOGIN (zera tentativas e agenda o worker): os documentos guardados seguem sozinhos.
 - **Status no login:** espera pelo portal de até 7,5 s contando o login (`ETAPA2_ESPERA_PORTAL_MS`); antes era 4,5 s e nunca bastava.
 - 176 testes.

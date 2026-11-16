@@ -36,6 +36,14 @@ export async function listDocuments(idps, codColigada = 1, opts) {
   return (r.json?.resultado ?? []).map(d => ({ id: String(d.CODDOCUMENTO), title: String(d.DESCRICAO).slice(0, 30), descricao: String(d.DESCRICAO) }));
 }
 
+// Passo 1 do fluxo da UniBalsas (artigo 743): processos seletivos do candidato/ativos, com o IDPS de cada um.
+export async function listProcessIds(cpf, opts) {
+  const r = await ub(`/blip/processos-seletivos/${String(cpf).replace(/\D/g, "")}`, opts);
+  if (!r.ok) throw new Error("Não foi possível consultar os processos seletivos agora.");
+  const rows = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.resultado) ? r.json.resultado : r.json ? [r.json] : [];
+  return [...new Set(rows.map(x => String(x?.IDPS ?? x?.idps ?? "").trim()).filter(v => /^\d+$/.test(v) && v !== "0"))];
+}
+
 export async function findInscription(idps, cpf, opts) {
   const r = await ub(`/blip/inscritos/${Number(idps)}/${String(cpf).replace(/\D/g, "")}`, opts);
   if (r.status === 404) throw new Error("Ainda não localizamos sua inscrição no sistema acadêmico. Aguarde alguns minutos e tente novamente.");

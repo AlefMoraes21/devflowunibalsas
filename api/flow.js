@@ -7,7 +7,7 @@ import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
 import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA_FIELDS, USER_FIELDS as MATRICULA_USER_FIELDS, ACTIONS as MATRICULA_ACTIONS, validCpf } from "./matricula.js";
-import { listDocuments, saveDocument, readDocument, findInscription } from "./documentos.js";
+import { listDocuments, saveDocument, readDocument, findInscription, listProcessIds } from "./documentos.js";
 import { createEtapa1 } from "./etapa1-fila.js";
 import { avisarRedacaoLiberada } from "./blip.js";
 import { createEtapa2 } from "./etapa2-matricula.js";
@@ -1530,7 +1530,7 @@ const etapa1=createEtapa1({
 const etapa2=createEtapa2({
   store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
   buscarCep:d=>matricula.cep(d),
-  docs:{saveDocument,findInscription},academicId,idpsConhecidos:academicIds,
+  docs:{saveDocument,findInscription,listProcessIds},academicId,idpsConhecidos:academicIds,
   entrarNaProva:a=>etapa1.entrarNaProva(a),
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
