@@ -308,14 +308,23 @@ export function createEtapa2({
     return `${urlPublica}/contrato/${token}`;
   }
   class ErroContrato extends Error { constructor(m, motivo) { super(m); this.motivo = motivo; } }
-  async function baixarContrato(token, ip) {
-    if (!/^[a-f0-9]{48}$/.test(String(token ?? ''))) throw new ErroContrato('Link inválido.', 'link');
-    const link = await store.get(token, LINKS);
-    if (!link || (link.record.expires ?? 0) < clock()) throw new ErroContrato('Este link expirou. Abra o Flow de novo pelo WhatsApp para gerar outro.', 'expirado');
-    const fila = await store.get(link.record.fila_id, FILA);
-    if (!fila) throw new ErroContrato('Inscrição não encontrada. Abra o Flow de novo pelo WhatsApp.', 'fila');
-    const inicio = clock(), id = link.record.fila_id;
-    const sessao = await portalSite.entrar(fila.record.login ?? fila.record.cpf, fila.record.data_nascimento);
+  // Contrato pronto (PDF criptografado no Firestore, coleção `contratos`, 7 dias): gerado em segundo plano pelo
+  // Cloud Run assim que o portal libera a etapa, para o link abrir na hora. Sem PDF pronto, gera na hora (reserva).
+  const CONTRATOS = 'contratos';
+  const CONTRATO_VALIDO_MS = 7 * DIA;
+  const MAX_PDF_GUARDADO = 600 * 1024; // documento do Firestore: até 1 MiB depois de criptografado
+  async function contratoPronto(filaId) {
+    try {
+      const c = await store.get(filaId, CONTRATOS);
+      return c && (c.record.expires ?? 0) > clock() && c.record.pdf ? Buffer.from(c.record.pdf, 'base64') : null;
+    } catch { return null; }
+  }
+  // Gera o contrato no portal como o site: abre o passo do contrato e clica em "Clique aqui para fazer o download
+  // do contrato"; o PDF vem do popup "Contrato gerado" (campo 52138). Em segundo plano o IP de aceite vai vazio
+  // (não há navegador do candidato; não registramos o IP do servidor como se fosse dele).
+  async function gerarContrato(filaId, rec, ip = '') {
+    const inicio = clock();
+    const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
     const { processo, stages } = await portalSite.inscricao(sessao);
     const etapa = (stages ?? []).find(x => /contrato/.test(norm(x.title)));
     const passoId = stepFromLink(etapa?.cta_link);
@@ -325,8 +334,46 @@ export function createEtapa2({
     const destino = clique?.data ?? {};
     if (Number(destino.place_type_id) !== 6 || !destino.place_id) throw new ErroContrato('O portal não gerou o contrato agora. Tente de novo em instantes.', 'sem_popup');
     const pdf = pdfDoPopup(await portalSite.popup({ sessao, popupId: destino.place_id, stageId: destino.stage_id ?? passo.stage_id }));
-    log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_baixado', bytes: pdf.length, ms: clock() - inicio });
+    if (pdf.length <= MAX_PDF_GUARDADO) {
+      const novo = { pdf: pdf.toString('base64'), criado: clock(), expires: clock() + CONTRATO_VALIDO_MS };
+      try { const a = await store.get(filaId, CONTRATOS); if (a) await store.update(filaId, novo, a.version, CONTRATOS); else await store.create(filaId, novo, CONTRATOS); } catch {}
+    }
+    log({ event: 'etapa3_contrato', id: curto(filaId), passo: 'contrato_gerado', bytes: pdf.length, ms: clock() - inicio });
     return pdf;
+  }
+  async function baixarContrato(token, ip) {
+    if (!/^[a-f0-9]{48}$/.test(String(token ?? ''))) throw new ErroContrato('Link inválido.', 'link');
+    const link = await store.get(token, LINKS);
+    if (!link || (link.record.expires ?? 0) < clock()) throw new ErroContrato('Este link expirou. Abra o Flow de novo pelo WhatsApp para gerar outro.', 'expirado');
+    const id = link.record.fila_id;
+    const pronto = await contratoPronto(id);
+    if (pronto) { log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: true }); return pronto; }
+    const fila = await store.get(id, FILA);
+    if (!fila) throw new ErroContrato('Inscrição não encontrada. Abra o Flow de novo pelo WhatsApp.', 'fila');
+    const pdf = await gerarContrato(id, fila.record, ip);
+    log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_entregue', pronto: false });
+    return pdf;
+  }
+
+  // Vigia da etapa 3 (Cloud Tasks): depois dos documentos entregues, confere de tempos em tempos se o portal
+  // liberou o contrato (análise da equipe) e, quando liberar, gera e guarda o PDF. O aviso ao candidato vem depois.
+  const VIGIA_INTERVALO_S = Number(process.env.ETAPA3_VIGIA_INTERVALO_S) || 1800;
+  const VIGIA_MAX_MS = 15 * DIA;
+  async function vigiarContrato(id) {
+    const f = await store.get(id, FILA);
+    if (!f) return 204;
+    const rec = f.record;
+    if (await contratoPronto(id)) return 204;
+    const ate = rec.vigia_ate ?? clock() + VIGIA_MAX_MS;
+    if (!rec.vigia_ate) { try { await store.update(id, { ...rec, vigia_ate: ate }, f.version, FILA); } catch {} }
+    try {
+      await gerarContrato(id, rec);
+      return 204;
+    } catch (e) {
+      log({ event: 'etapa3_contrato', id: curto(id), passo: e?.motivo === 'nao_liberado' ? 'contrato_aguardando' : 'contrato_erro', message: String(e?.message ?? e).slice(0, 120) });
+    }
+    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {} }
+    return 204;
   }
 
   async function route(req) {
@@ -407,6 +454,7 @@ export function createEtapa2({
         return telaPortal({ id: s.fila_id, menor: s.menor, s2: statusSalvo(rec), blocos: rec?.blocos, rec, flowToken: req.flow_token });
       }
       if (s.destino === 'CONTR_TERMOS') {
+        if (!(await contratoPronto(s.fila_id))) { try { await enqueue(s.fila_id, { tipo: 'etapa3_vigia' }); } catch {} }
         try { return render('CONTR_TERMOS', { link_contrato: await criarLinkContrato(s.fila_id) }); }
         catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos preparar o contrato agora. Toque de novo em instantes.' }); }
       }
@@ -597,6 +645,7 @@ export function createEtapa2({
             await entregarDocumentos(next.step, docsB);
             // Entregue: as referências dos arquivos (com as chaves de criptografia) não ficam guardadas.
             await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true });
+            try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {}
             return;
           }
           const tela = await matricula.open(sessao, next);
@@ -642,5 +691,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato };
+  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato };
 }

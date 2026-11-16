@@ -418,3 +418,45 @@ test('Contrato: leitura do passo e PDF do popup (portal-site)', async () => {
   assert.equal(dadosDoContrato(passo, '9.9.9.9').find(x => x.field_id === 52136).value, '9.9.9.9');
   assert.throws(() => pdfDoPopup({ data: { applicantData: [{ field_id: 52138, value: Buffer.from('não é pdf').toString('base64') }] } }), /PDF/);
 });
+
+test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no Run e o link abre o PDF pronto, sem novo clique', async () => {
+  const store = memoria(); const fila = [];
+  const site = siteContrato();
+  let liberado = false;
+  const inscricao = site.portalSite.inscricao;
+  site.portalSite.inscricao = async (...a) => (liberado ? inscricao(...a) : { processo: '20383', stages: [{ title: 'Contrato', cta_link: null }] });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example' });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = openState(portal.data.estado, 'MATR_PORTAL').fila_id;
+  // Ainda em análise: confere de novo mais tarde.
+  await E.vigiarContrato(id);
+  assert.equal(site.cliques.length, 0);
+  assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.ok(fila.at(-1).atrasoSeg >= 60);
+  // Equipe aprovou: o vigia gera o contrato (IP vazio: não há navegador do candidato) e guarda.
+  liberado = true;
+  const n = fila.length;
+  await E.vigiarContrato(id);
+  assert.equal(site.cliques.length, 1);
+  assert.equal(site.cliques[0].data.find(x => x.field_id === 52136).value, '');
+  assert.equal(fila.length, n, 'pronto: o vigia para');
+  // O candidato entra, toca em Verificar e abre o link: PDF na hora, sem clicar de novo no portal.
+  const termos = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  assert.equal(termos.screen, 'CONTR_TERMOS');
+  const token = termos.data.link_contrato.split('/').pop();
+  const pdf = await E.baixarContrato(token, '200.1.2.3');
+  assert.deepEqual(pdf, site.pdf);
+  assert.equal(site.cliques.length, 1, 'usou o contrato já gerado');
+});
+
+test('Documentos entregues: o vigia do contrato é agendado', async () => {
+  const { E, fila } = montar();
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await toque(E, 'MATR_PORTAL', 'continuar', portal.data.estado);
+  const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
+  for (const d of DOCS) tela = await toque(E, d.tela, 'enviar_documento', tela.data.estado, { arquivo: d.obrigatorio ? MEDIA(d.id) : [] });
+  await E.worker(fila[0].id);
+  assert.ok(fila.some(f => f.tipo === 'etapa3_vigia' && f.atrasoSeg > 0));
+});
