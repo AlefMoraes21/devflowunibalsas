@@ -86,6 +86,8 @@ test('Flow da etapa 2: JSON válido para a Meta (ids, rotas, dados declarados, i
     assert.match(JSON.stringify(t.layout), /"type":"Image"/, `${t.id} tem imagem no topo`);
   }
   assert.doesNotMatch(JSON.stringify(FLOW), /Verificar andamento|consultar_tarefa/);
+  // A Meta exige init-values do mesmo tipo do campo: TextInput numérico não aceita valor inicial em texto.
+  assert.doesNotMatch(JSON.stringify(FLOW), /"input-type":"number"/);
 });
 
 test('Login: CPF + nascimento abre o portal; dados errados ou redação em correção não seguem', async () => {

@@ -67,7 +67,7 @@
                 "name": "cpf",
                 "label": "CPF",
                 "helper-text": "Somente os 11 números",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {
@@ -150,7 +150,7 @@
                 "name": "cpf",
                 "label": "CPF",
                 "helper-text": "Somente os 11 números",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {
@@ -442,7 +442,7 @@
                 "name": "cpf",
                 "label": "CPF",
                 "helper-text": "Somente os 11 números",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {
@@ -465,7 +465,7 @@
                 "name": "cep",
                 "label": "CEP",
                 "helper-text": "Somente números",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {
@@ -892,7 +892,7 @@
                 "name": "cep",
                 "label": "CEP",
                 "helper-text": "Somente números",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {
@@ -1494,7 +1494,7 @@
                 "name": "ano_conclusao",
                 "label": "Ano de conclusão",
                 "helper-text": "Ensino médio. 4 números. Ex.: 2024",
-                "input-type": "number",
+                "input-type": "text",
                 "required": true
               },
               {

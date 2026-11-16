@@ -22,7 +22,7 @@ const RESP = ['nome', 'email', 'cpf', 'data_nascimento', 'celular'];
 const IDENT = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'escola'];
 
 const camposEndereco = acaoCep => [
-  { type: 'TextInput', name: 'cep', label: 'CEP', 'helper-text': 'Somente números', 'input-type': 'number', required: true },
+  { type: 'TextInput', name: 'cep', label: 'CEP', 'helper-text': 'Somente números', 'input-type': 'text', required: true },
   { type: 'EmbeddedLink', text: 'Buscar endereço pelo CEP', 'on-click-action': acaoCep },
   { type: 'TextInput', name: 'rua', label: 'Rua', 'input-type': 'text', required: true },
   { type: 'TextInput', name: 'numero', label: 'Número', 'input-type': 'text', required: true },
@@ -43,7 +43,7 @@ const login = comErro => ({
       { type: 'TextSubheading', text: 'Já sou inscrito' },
       { type: 'TextBody', text: 'Entre com o CPF e a data de nascimento usados na inscrição para continuar de onde parou.' },
       ...(comErro ? [erroTexto] : []),
-      { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'number', required: true },
+      { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
       { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
       { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', cpf: '${form.cpf}', data_nascimento: '${form.data_nascimento}' } } }
     ]
@@ -99,7 +99,7 @@ const flow = {
         erroTexto,
         { type: 'TextInput', name: 'nome', label: 'Nome completo', 'input-type': 'text', required: true },
         { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
-        { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'number', required: true },
+        { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
         { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
         { type: 'TextInput', name: 'celular', label: 'Celular', 'input-type': 'phone', required: true },
         ...camposEndereco(troca('buscar_cep', form([...RESP, ...END]))),
@@ -129,7 +129,7 @@ const flow = {
         { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
         { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
         { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
-        { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio. 4 números. Ex.: 2024', 'input-type': 'number', required: true },
+        { type: 'TextInput', name: 'ano_conclusao', label: 'Ano de conclusão', 'helper-text': 'Ensino médio. 4 números. Ex.: 2024', 'input-type': 'text', required: true },
         { type: 'TextInput', name: 'escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional', 'input-type': 'text', required: false },
         { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_identidade', form(IDENT)) }
       ] }] }
