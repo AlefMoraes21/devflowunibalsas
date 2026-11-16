@@ -323,3 +323,37 @@ Tela: "Estamos finalizando! Para concluir a sua matrícula, realize o seu pagame
 - **Clique feito pelo usuário (Pix), 2 tentativas:** `button-click` **3940437** com `stage_id:null`, `last_place_id:null`, `last_place_type_id:null` e `data`: 38702=`P`, 38656 (IDBOLETO)=`""`, 38658 (taxa em centavos)=`""`, 38661 (valor boleto)=`""`, 53443 (valor Pix)=`""`. Resposta das duas: **`{"success":false,"data":"Não foi possível realizar o pagamento com o PIX!"}`** (HTTP 200). Nenhum popup, nenhum código Pix gerado.
 - Leitura: a tela já mostrava "Valor a pagar" vazio e os campos de valor/taxa estão vazios no envio → **o valor da taxa não foi calculado para esta inscrição**, e a geração do Pix falha. Provável configuração (taxa da oferta/RA de teste no RM ou integração de pagamento). **BLOQUEADO** até a equipe verificar; não houve nova tentativa.
 - Para o Flow: tratar `success:false` com a mensagem do servidor e **não** mostrar código Pix nem confirmar pagamento sem `success:true`.
+
+
+## 16. Contrato — captura completa do percurso no site (16/11/2026, Bárbara, applyment 14297823)
+
+Captura com gancho em XHR/fetch no navegador do app (tokens, sessão e dados pessoais não registrados). Percurso: Portal → **Verificar** (Contrato) → **Clique aqui para fazer o download do contrato** → popup "Contrato gerado" → **Fechar** → Portal.
+
+| Hora | Chamada | Tempo | Observação |
+|---|---|---|---|
+| 21:57:18 | `getApplymentDataByStep/300669` | 0,45 s | `process_id: "null"` (string) — **aceito**; resposta ~435 KB |
+| 21:57:18 | `validate-access` `{step_id: 300669}` | 0,09 s | `success:true` |
+| 21:57:18 | `settings/selective-process`, `check-login` | ~0,1 s | `check-login` devolve `external_code`, `person_id`, `applyment_id` |
+| 21:57:27 | **`button-click` 3940424** (multipart) | **14,5 s** | geração do contrato no TOTVS (é o tempo que o candidato espera) |
+| 21:57:42 | `popup` `{popup_id:765, stage:{stage_id:261004}}` | 0,75 s | PDF em base64 no campo **52138** (344.440 caracteres ≈ 252 KB) |
+| 21:57:51 | `button-click` **174980** ("Fechar" do popup) | 0,12 s | `stage_id`/`related_component_id` = `null`, `last_place_id` 300669, campo extra **`previousSubmissionDataFromPopUp`** (os dados do clique anterior); resposta `place_type_id` 6, `same_place:true` |
+| 21:57:51 | `getApplymentDataByStep/300669` | 0,48 s | o site recarrega o passo |
+| 21:57:56 | `person-applyment` `{domain}` | **0,13 s** | lista das inscrições com o **processo** (`id: 20383`, `identifier: "1-223"` = coligada-IDPS) |
+| 21:57:57 | `register-portal-data` | **14,3 s** | etapas do portal (é o "Buscando dados da inscrição") |
+
+**Corpo real do `button-click` 3940424** (`data`):
+- `{field_id:38635, key:38635, component_id:null, type:"checkbox", value:false}` (aceite; `field_settings_id` 3127756)
+- `{field_id:38636, key:38636, component_id:null, type:"textfield", value:""}` (data de assinatura)
+- `{field_id:52136, key:52136, component_id:null, type:"textfield", value:"<IP público do navegador>"}` (IP de aceite)
+- os componentes de texto do passo também vão, com `field_id:null`, `value:""`: `3940422 content-ba2e3bff (content)`, `4351983 content-99140235 (content)`, `3940431 html (htmlelement)`
+- controle: `button_id 3940424`, `related_component_id 174890`, `stage_id 261004`, `selective_process_id 20383`, `last_place_id 300669`, `last_place_type_id 1`, `domainParams presencial`, `rbParams "null"`, `formio_comp_id` aleatório; tracking: `hostClient`, `contact_id_crm` (607691), `substitute_id`, `session_id`.
+
+**Resposta:** `place_id 765`, `place_type_id 6` (popup), `stage_id 261004`, `redirect_id 54160`, `report {secret_hash, report_view_id:3, access_report (JWT de 10 min)}`.
+
+**Conclusões para o Flow:**
+1. O tempo de espera do contrato é do **TOTVS** (14,5 s no `button-click`), não do portal. Gerar em segundo plano (vigia) tira essa espera do candidato.
+2. **`person-applyment`** devolve o processo em ~0,1 s: substitui o `register-portal-data` (14 s) quando só o processo é necessário.
+3. `getApplymentDataByStep` aceita `process_id` nulo.
+4. No `button-click`, o site manda `component_id: null` nos campos, `key` numérico, `type` do Form.io (`textfield`) e inclui os componentes de texto com valor vazio.
+5. O "Fechar" do popup é um `button-click` próprio (174980) com `previousSubmissionDataFromPopUp`; parece só navegação (`same_place:true`).
+6. Cada clique em "download" gera o contrato de novo no TOTVS.
