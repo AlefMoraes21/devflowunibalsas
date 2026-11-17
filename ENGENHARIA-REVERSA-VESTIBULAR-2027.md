@@ -357,3 +357,38 @@ Captura com gancho em XHR/fetch no navegador do app (tokens, sessão e dados pes
 4. No `button-click`, o site manda `component_id: null` nos campos, `key` numérico, `type` do Form.io (`textfield`) e inclui os componentes de texto com valor vazio.
 5. O "Fechar" do popup é um `button-click` próprio (174980) com `previousSubmissionDataFromPopUp`; parece só navegação (`same_place:true`).
 6. Cada clique em "download" gera o contrato de novo no TOTVS.
+
+
+## 17. Pagamento (taxa de matrícula) e etapa final — captura completa (17/11/2026, Bárbara, applyment 14297823)
+
+Mapeamento com o Craft Anything (análise dos 34 scripts do portal, evidência `ev_181c05f678b9f67f253fb66fbdb3fbe36457427d5dbdda695c3fd7638cb843a0`) + leitura do passo/popup/página + gancho de rede no navegador do app. **Os cliques nos botões de pagamento foram feitos pelo usuário; nenhum pagamento foi efetuado.** Tokens, sessão e dados pessoais não registrados.
+
+**Como o portal trata os botões (derivado do código, chunk `4280`):** o front não tem lógica de pagamento própria. Cada `button-click` devolve `place_type_id` e o front só obedece: 1 passo · 2 feedback · 3 link externo (`window.open`, `new_tab`) · **4 página** (`/processo/{processo}/pagina/{id}` via `POST applyment/page`) · 5 portal · **6 popup** (`POST applyment/popup`) · 7 seleção de processo. As integrações (Pix TOTVS, cartão EduConnect Pay) rodam no servidor.
+
+### Etapas (register-portal-data, 12 s) depois do contrato assinado
+Inscrição Concluída · Prova online Aprovado · Resp. financeiro menor 18 Concluído · Pré-matrícula Concluída · Documentos matrícula **Entregues** · Contrato **Assinado** (`Verificar` → 300669) · **Pagamento Pendente (`Verificar` → passo 300670, stage 261005)** · Matriculado "Existem pendências" (sem passo nem botão).
+
+### Passo 300670 "Taxa de matrícula" (`getApplymentDataByStep`, 1,4 s)
+- Título: "Estamos finalizando! Para concluir a sua matrícula, realize o seu pagamento". Texto "Valor a pagar #{@38661@}".
+- Campos ocultos vindos do TOTVS (`FLANMATRICULA`): **38656** IDBOLETO (`544149`), **53443** valor com desconto Pix (`390.00`), **38661** valor formatado (`R$ 390,00`), **38658** taxa em centavos (`39000`). (Na Helena, em 12/11, vieram vazios e o Pix falhou.)
+- Rádio **38702** "Meio de pagamento": `C` Cartão de crédito (padrão) · `P` Pix.
+- Botões (exibidos por lógica conforme 38702): **3940437** "Realizar pagamento" (Pix, `P`, related 226402, grava) · **3940438** "Realizar pagamento" (cartão, `C`, related 226386) · 3940439 "Gerar boleto" (`B` — opção inexistente, nunca aparece; popup 764 "Boleto gerado"). Popup 577 não existe mais.
+
+### Pix
+| Chamada | Tempo | Detalhe |
+|---|---|---|
+| `button-click` 3940437 | **4,9 s** | `data`: 38656, 38658, 38661, 38702=`P`, 53443 (`textfield`/`radio`, `component_id:null`, key numérica) + textos 3940432 e 3940434 (`content`); `stage_id:"null"`, `last_place_id 300670` |
+| resposta | — | `place_type_id 6`, `place_id 1016`, `stage_id 261005`, `redirect_id 76128` |
+| `popup` 1016 | 0,4 s | "**Totvs Pagamento Instântaneo**": título "Realize o pagamento!", **QR Code** (campo **50900**, `data:image/png;base64`, ~1,7 KB) e "**PIX - Copia e cola**" (campo **50901**, BR Code EMV de 171 caracteres `000201…6304xxxx`, com opção copiar) + botão Portal do candidato. `allow_close_popup:1` |
+
+### Cartão de crédito
+| Chamada | Tempo | Detalhe |
+|---|---|---|
+| `button-click` 3940438 | 0,5 s | mesmo `data`, 38702=`C` |
+| resposta | — | `place_type_id 4`, `place_id 577` → página `/presencial/processo/20383/pagina/577` |
+| `page` `{page_id:577, process_id:20383}` | 4,6 s | "**Pagamento da matrícula - Cartão de crédito (EduConnect Pay)**": "{nome}, preencha os dados do seu cartão:", valor; campos 50893 nome impresso, 50894 número, 50898 bandeira, 50899 CVV, 50895 mês (lista TOTVS MES), 50896 ano, 50897 país, 61956 parcelas (consulta RB.PS.IM.030); botões Portal do candidato e **353178 "Realizar pagamento" (EduConnect Pay)** |
+
+### Para o Flow (etapa 4)
+- **Pix cabe inteiro no Flow:** o Run faz o `button-click` 3940437 (P) e lê o popup 1016; o Flow mostra o QR (imagem base64) e o copia e cola com o valor. O pagamento é feito pelo candidato no app do banco.
+- **Cartão não deve ser coletado no WhatsApp:** a política do WhatsApp Business proíbe pedir número completo de cartão. No Flow: oferecer o Pix e, para cartão, o link do Portal do candidato.
+- **Matriculado:** muda depois da confirmação do pagamento pelo TOTVS (assíncrono, sem tela). Não mapeado além do status — exige um pagamento real.
