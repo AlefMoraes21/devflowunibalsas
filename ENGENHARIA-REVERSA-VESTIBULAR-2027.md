@@ -392,3 +392,9 @@ Inscrição Concluída · Prova online Aprovado · Resp. financeiro menor 18 Con
 - **Pix cabe inteiro no Flow:** o Run faz o `button-click` 3940437 (P) e lê o popup 1016; o Flow mostra o QR (imagem base64) e o copia e cola com o valor. O pagamento é feito pelo candidato no app do banco.
 - **Cartão não deve ser coletado no WhatsApp:** a política do WhatsApp Business proíbe pedir número completo de cartão. No Flow: oferecer o Pix e, para cartão, o link do Portal do candidato.
 - **Matriculado:** muda depois da confirmação do pagamento pelo TOTVS (assíncrono, sem tela). Não mapeado além do status — exige um pagamento real.
+
+### Cartão — envio real com cartão fictício (17/11/2026, 01:48, digitado pelo usuário; dados do cartão não registrados)
+- `button-click` **353178** ("Pagamento com cartão - EduConnect Pay - Matrícula"), `related_component_id` 226365, `last_place_id 300670`, `stage_id:"null"`: **8,0 s**.
+- `data`: 50893 nome (`textfield`), 50894 número (`textfield`), 50895 mês (`select`), 50896 ano (`select`), 50897 país (`select`, `BRA`), 50898 bandeira (`textfield`), 50899 CVV (`textfield`), **61956 parcelas (`select`, `1`)** + textos 226387, 226388 (`content`) e 231789 (`htmlelement`).
+- Resposta (HTTP 200): **`{"success":false,"data":"Não foi possível concluir o pagamento!"}`** — recusa genérica (sem código da operadora). O site continua na mesma página; nenhum popup.
+- Para o Flow: o cartão é processado no servidor do Rubeus/TOTVS a partir do número digitado; não coletar no WhatsApp (política). Aprovação, prazo de confirmação e a passagem para "Matriculado" seguem sem mapeamento (exigem pagamento real).
