@@ -566,3 +566,139 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(st.screen, 'MATR_STATUS');
 });
+
+test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o Pix e manda a cobrança; matrícula concluída avisa', async () => {
+  const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
+  const store = memoria(); const fila = [];
+  let agora = Date.UTC(2026, 10, 16, 12);
+  const enviados = [];
+  const avisos = {
+    configurado: { atualizacao: () => true, cobranca: () => true },
+    async atualizacao(d) { enviados.push({ tipo: 'atualizacao', ...d }); return true; },
+    async cobranca(d) { enviados.push({ tipo: 'cobranca', ...d }); return true; }
+  };
+  const site = siteContrato();
+  site.passoResp.data.steps.currentStep.applicantData = [{ field_id: 38544, value: 'MARIA DA SILVA' }, { field_id: 38546, value: '99988880001' }];
+  let fase = 'contrato';
+  const etapas = () => [
+    { title: 'Contrato', feedback: fase === 'contrato' ? { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' } : { complementary_text: 'Assinado', conclusive: 1, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300669' },
+    fase === 'pago' ? { title: 'Pagamento', feedback: { complementary_text: 'Recebido', conclusive: 1, cta_text: 'null' }, cta_link: 'presencial/passo/300670' }
+      : { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: fase === 'contrato' ? 'null' : 'Verificar' }, cta_link: 'presencial/passo/300670' },
+    { title: 'Matriculado', feedback: fase === 'pago' ? { complementary_text: 'Parabéns!', conclusive: 1 } : { complementary_text: 'Existem pendências', conclusive: 0 } }
+  ];
+  const cliquesPix = [];
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: etapas() });
+  site.portalSite.passoBruto = async (_s, passo) => (passo === 300670 ? passoPagamento() : site.passoResp);
+  const clicarContrato = site.portalSite.clicar, popupContrato = site.portalSite.popup;
+  site.portalSite.clicar = async a => (a.passo.passo === 300670 ? (cliquesPix.push(a), { success: true, data: { place_id: 1016, place_type_id: 6, stage_id: 261005 } }) : clicarContrato(a));
+  site.portalSite.popup = async a => (a.popupId === 1016 ? { success: true, data: { applicantData: [{ field_id: 50901, value: PIX }] } } : popupContrato(a));
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora, avisos });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+
+  // Contrato liberado: calma de ~2 min, gera e avisa (documentos aprovados → baixar o contrato).
+  await E.vigiarContrato(id);
+  assert.equal(enviados.length, 0, 'na calma ainda não avisa');
+  agora += 3 * 60000;
+  await E.vigiarContrato(id);
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].tipo, 'atualizacao'); assert.equal(enviados[0].celular, '99988880001'); assert.match(enviados[0].situacao, /documentos .* aprovados/);
+  await E.vigiarContrato(id);
+  assert.equal(enviados.length, 1, 'aviso do contrato sai uma vez só');
+
+  // Contrato assinado e Pagamento com "Verificar": gera o Pix como o site e manda a cobrança.
+  fase = 'pagamento';
+  await E.vigiarFinal(id);
+  assert.equal(cliquesPix.length, 1);
+  assert.equal(cliquesPix[0].passo.botao, 3940437);
+  assert.equal(cliquesPix[0].data.find(x => x.field_id === 38702).value, 'P');
+  const cob = enviados.at(-1);
+  assert.equal(cob.tipo, 'cobranca'); assert.equal(cob.codigoPix, PIX); assert.equal(cob.centavos, 39000); assert.equal(cob.referencia, 'mat-544149'); assert.equal(cob.recebedor, 'UNIBALSAS');
+  let rec = (await store.get(id, 'matriculaFila')).record;
+  assert.ok(rec.pagamento_liberado_em && rec.cobranca_enviada_em);
+  await E.vigiarFinal(id);
+  assert.equal(enviados.filter(e => e.tipo === 'cobranca').length, 1, 'cobrança sai uma vez só');
+  assert.equal(cliquesPix.length, 1, 'não gera outro Pix');
+
+  // Pago: matrícula concluída → aviso final, e o vigia para.
+  fase = 'pago';
+  const n = fila.length;
+  await E.vigiarFinal(id);
+  assert.match(enviados.at(-1).situacao, /matrícula está concluída/);
+  assert.equal(fila.length, n, 'concluída: o vigia para');
+  await E.vigiarFinal(id);
+  assert.equal(enviados.filter(e => /concluída/.test(e.situacao ?? '')).length, 1);
+});
+
+test('Avisos (Blip): cobrança que falha tenta de novo em 10 min, reaproveitando o mesmo Pix', async () => {
+  const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
+  const store = memoria(); const fila = [];
+  let falhar = true; const enviados = [];
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao() { return true; },
+    async cobranca(d) { enviados.push(d); return !falhar; } };
+  const site = siteContrato();
+  let pix = 0;
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1 }, cta_link: 'presencial/passo/300669' },
+    { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300670' }] });
+  site.portalSite.passoBruto = async () => passoPagamento();
+  site.portalSite.clicar = async () => { pix++; return { success: true, data: { place_id: 1016, place_type_id: 6, stage_id: 261005 } }; };
+  site.portalSite.popup = async () => ({ success: true, data: { applicantData: [{ field_id: 50901, value: PIX }] } });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  await E.vigiarFinal(id);
+  assert.equal(fila.at(-1).atrasoSeg, 600);
+  falhar = false;
+  await E.vigiarFinal(id);
+  assert.equal(enviados.length, 2); assert.equal(pix, 1, 'mesmo Pix na nova tentativa');
+  assert.equal(fila.at(-1).atrasoSeg, 3600);
+});
+
+test('Vigia da redação: aguarda a correção e avisa "aprovada, matrícula liberada" uma vez só', async () => {
+  const store = memoria(); const fila = []; const enviados = [];
+  let fase = 'enviada';
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao(d) { enviados.push(d); return true; }, async cobranca() { return true; } };
+  const stages = () => [
+    { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
+    fase === 'aprovada' ? { title: 'Prova online', feedback: { complementary_text: 'Aprovado', conclusive: 1 } }
+      : { title: 'Prova online', feedback: { complementary_text: fase === 'enviada' ? 'Pendente' : 'Aguardando correção', conclusive: 0, cta_text: fase === 'enviada' ? 'Realizar prova' : 'null' }, cta_link: 'presencial/passo/300663' },
+    { title: 'Resp. financeiro menor 18', feedback: fase === 'aprovada' ? { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' } : { complementary_text: 'Pendente', conclusive: 0, cta_text: 'null' }, cta_link: 'presencial/passo/300676' }
+  ];
+  const portalSite = { async entrar() { return { token: 't' }; }, async inscricao() { return { processo: '20383', stages: stages() }; } };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {}, portalSite, avisos });
+  assert.equal(await E.iniciarVigiaRedacao({ login: '391.847.205-14', data_nascimento: NASC, celular: '(99) 98888-0001', nome: 'Maria' }), true);
+  const id = fila.at(-1).id;
+  assert.equal(fila.at(-1).tipo, 'redacao_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600);
+  // Logo após o envio o portal ainda pode mostrar a prova pendente com o botão: não é reprovação.
+  await E.vigiarRedacao(id);
+  assert.equal(enviados.length, 0);
+  fase = 'correcao';
+  await E.vigiarRedacao(id);
+  assert.equal(enviados.length, 0);
+  fase = 'aprovada';
+  await E.vigiarRedacao(id);
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].celular, '99988880001'); assert.match(enviados[0].situacao, /aprovado/); assert.match(enviados[0].proximo, /responsável financeiro/);
+  const n = fila.length;
+  await E.vigiarRedacao(id);
+  assert.equal(enviados.length, 1, 'aviso sai uma vez'); assert.equal(fila.length, n, 'vigia para');
+});
+
+test('Vigia da redação: reprovada (sai da correção sem concluir e volta o botão) avisa que pode refazer', async () => {
+  const store = memoria(); const fila = []; const enviados = [];
+  let fase = 'correcao';
+  const avisos = { configurado: { atualizacao: () => true }, async atualizacao(d) { enviados.push(d); return true; } };
+  const portalSite = { async entrar() { return { token: 't' }; }, async inscricao() { return { processo: '20383', stages: [
+    { title: 'Prova online', feedback: fase === 'correcao' ? { complementary_text: 'Aguardando correção', conclusive: 0, cta_text: 'null' } : { complementary_text: 'Reprovado', conclusive: 0, cta_text: 'Realizar prova' }, cta_link: 'presencial/passo/300663' }] }; },
+    async pagina() { return { data: { page: { applicantData: [{ field_id: 38544, value: 'JOÃO' }, { field_id: 38546, value: '99988880002' }] } } }; } };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {}, portalSite, avisos });
+  // Entrou pelo login (sem celular guardado): o celular vem da página "Meus dados".
+  await E.iniciarVigiaRedacao({ login: '39184720514', data_nascimento: NASC });
+  const id = fila.at(-1).id;
+  await E.vigiarRedacao(id);
+  fase = 'reprovada';
+  await E.vigiarRedacao(id);
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].celular, '99988880002'); assert.match(enviados[0].situacao, /não atingiu/);
+});

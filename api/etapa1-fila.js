@@ -29,6 +29,8 @@ export function createEtapa1({
   // Candidato que entrou pelo LOGIN com a prova ainda por fazer: o worker entra no Rubeus por ele.
   loginRubeus = null, prepararProva = null,
   ehEnem = () => false, validateEnem = () => {}, anosEnem = [], avisar = async () => false,
+  // Redação confirmada no portal: agenda o vigia da correção (etapa 2). Não muda nada da etapa 1.
+  aoConfirmarRedacao = async () => {},
   validateBasic, validateFinal, origens, hoje, requiresEssay, academicId, userFields,
   jaInscritoNoRm = async () => false,
   clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
@@ -496,6 +498,14 @@ export function createEtapa1({
     return salvar({ token_redacao: hash(token), aviso_redacao: enviado ? 'enviado' : 'nao_enviado', aviso_em: clock() });
   }
 
+  async function redacaoConfirmada(rec, salvar) {
+    const r = await salvar({ passo: 'fim', status: 'concluida' });
+    const R = rec.respostas ?? {};
+    try { await aoConfirmarRedacao({ login: rec.via_login?.login ?? R.cpf, data_nascimento: rec.via_login?.data_nascimento ?? R.data_nascimento, celular: R.celular, nome: R.nome }); }
+    catch (e) { log({ event: 'etapa1_fila_erro', passo: 'vigia_redacao', message: String(e?.message ?? e).slice(0, 120) }); }
+    return r;
+  }
+
   async function executarPasso(rec, salvar) {
     const R = rec.respostas;
     switch (rec.passo) {
@@ -613,7 +623,7 @@ export function createEtapa1({
         if (!rec.redacao) return salvar({ parar: true });
         await salvar({ passo: 'redacao_enviando' });
         const r = await step(rec.ck.screen, rec.ck.estado, 'enviar_redacao', { texto_redacao: rec.redacao }, rec.id);
-        if (r?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
+        if (r?.screen === 'CONFIRMACAO') return redacaoConfirmada(rec, salvar);
         try { abrir(r, 'TELA_REDACAO'); }
         catch (e) {
           // Erro antes do envio (a tela de redação volta com erro e sem recibo): pode tentar de novo.
@@ -626,13 +636,13 @@ export function createEtapa1({
       case 'entrega': {
         for (let i = 0; i < 4; i++) {
           const r = await step(rec.ck.screen, rec.ck.estado, 'verificar_entrega', {}, rec.id);
-          if (r?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
+          if (r?.screen === 'CONFIRMACAO') return redacaoConfirmada(rec, salvar);
           await sleep(intervaloEntregaMs);
         }
         // A inscrição passou a apontar outra execução depois do envio: o mesmo texto vai para a
         // prova atual, com calma (até 2 vezes); depois disso, a equipe confere.
         const ult = await step(rec.ck.screen, rec.ck.estado, 'verificar_entrega', {}, rec.id);
-        if (ult?.screen === 'CONFIRMACAO') return salvar({ passo: 'fim', status: 'concluida' });
+        if (ult?.screen === 'CONFIRMACAO') return redacaoConfirmada(rec, salvar);
         let stU = {}; try { stU = openState(ult.data.estado, ult.screen); } catch {}
         if (/outra execu/i.test(stU.erro ?? '')) {
           if ((rec.reenvios ?? 0) >= 2) throw new ErroPasso('A inscrição mudou de execução de prova após o envio.', { final: true, motivo: 'execucao_trocada' });

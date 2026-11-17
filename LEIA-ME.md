@@ -1,3 +1,16 @@
+# Versão 2.12.0 — Avisos pelo WhatsApp (Blip) e cobrança da taxa de matrícula com Pix
+
+- **Avisos automáticos** (template `unibalsas_atualizacao_processo`): quando o vigia confirma no portal que a etapa anterior foi concluída e a próxima abriu.
+  - **Documentos aprovados / contrato liberado:** sai depois que o contrato já foi gerado (não avisa quem abriu o contrato pelo Flow).
+  - **Matrícula concluída:** Pagamento "Recebido" / Matriculado "Parabéns!" (só para quem o vigia viu com o pagamento pendente).
+- **Vigia da redação (novo):** quando a etapa 1 confirma a redação no portal, agenda o vigia (`redacao_vigia`, coleção `redacaoVigia`; único ajuste na etapa 1: o gancho `aoConfirmarRedacao`, sem mudar o que ela faz). Aviso **aprovada** (Prova concluída e a etapa seguinte aberta com o botão do site) ou **não aprovada** (saiu de "Aguardando correção" sem concluir e voltou o botão). Celular da inscrição; quem entrou pelo login usa a página "Meus dados". 10 min nas 2 primeiras horas, depois de hora em hora, até 15 dias.
+- **Cobrança** (template `unibalsas_cobranca_matricula`): com o contrato assinado e o Pagamento com "Verificar", o Run faz o que o botão "Realizar pagamento" (Pix) do site faz (`button-click` do botão com lógica "P" → popup 1016) e manda o **Pix copia e cola** (order_details `pix_dynamic_code`) e o **link do portal** para cartão. Valor: campo 53443 (ou 38658). Referência: `mat-{IDBOLETO}`.
+- **Nome e celular** vêm do próprio portal (`applicantData` dos passos do contrato/pagamento, campos 38544/38546; reserva: página 432 "Meus dados") e ficam na fila criptografada. Celular nunca no log.
+- **Uma vez só, com novas tentativas:** cada aviso grava `avisos.{chave}`; falhou, tenta de novo (até 5 vezes; a cobrança a cada 10 min, reaproveitando o mesmo Pix por 12 h).
+- **Variáveis no Cloud Run:** `BLIP_API_URL` (`https://unibalsasnovonegocio.http.msging.net`), `BLIP_BOT_KEY`, `PIX_CHAVE` (CNPJ `07344774000189`). Opcionais: `BLIP_TEMPLATE_ATUALIZACAO`, `BLIP_TEMPLATE_COBRANCA`, `PIX_RECEBEDOR`, `PAGAMENTO_LINK`, `BLIP_FLOW_ID`/`BLIP_STATE_ID`/`BLIP_MASTERSTATE`, `AVISOS_DESLIGADOS=1` (desliga tudo). Sem as chaves, nada é enviado (só log `nao_configurado`).
+- Logs: `etapa_aviso`, `blip_aviso` (tipo, enviado, http, motivo), `etapa_final` (`cobranca_enviada`/`cobranca_falhou`, `pix_erro`).
+- 194 testes. O JSON do Flow não mudou.
+
 # Versão 2.11.0 — Etapa final (Pagamento → Matriculado) e vigias mais econômicos
 
 - **Etapa final, igual para todos os processos:** Pagamento "Pendente/Verificar" → "Recebido" e Matriculado "Existem pendências" → "Parabéns!". O pagamento é feito fora do Flow (no Flow, "Verificar" no Pagamento mostra o texto do site: Pix ou Cartão de crédito pelo Portal do candidato). Novo **vigia final** (`tipo: etapa4_vigia`, de hora em hora por até 30 dias): registra `pagamento_liberado_em` (momento da mensagem de pagamento) e `matricula_concluida_em` (fim da jornada; momento do aviso final). Log `etapa_final`.

@@ -417,3 +417,9 @@ Inscrição Concluída · Prova online Aprovado · Resp. financeiro menor 18 Con
 - **Fim da jornada = status "Pagamento: Recebido" + "Matriculado: Parabéns!"**, todas as etapas com `conclusive 1`. Não há tela final própria no site.
 - Antes da confirmação (Bárbara, Pix gerado e não pago): "Pagamento: Pendente / Verificar" e "Matriculado: Existem pendências"; o passo guarda o Pix gerado (`38702 = P`, QR 50900 e copia e cola 50901), lido de novo sem gerar outra cobrança.
 - **Para o Flow:** o vigia detecta "Pagamento: Recebido"/"Matriculado: Parabéns!" e encerra a jornada (aviso final ao candidato quando o aviso existir). Tempo entre pagar e "Recebido" ainda não medido.
+
+### 17.1 Conferência ao vivo (16/11/2026, passo 300701 da Transferência; só estrutura, sem dados pessoais)
+- `getApplymentDataByStep` do pagamento devolve `currentStep.applicantData` com os dados do candidato (inclui **38544 nome** e **38546 celular**), os valores do TOTVS (53443, 38661, 38658, 38702) e o **último Pix gerado** (50900 QR, 50901 copia e cola). 38656 (IDBOLETO) vem no `value_now` do componente.
+- Botões identificados pela lógica do rádio 38702 (`logics[].fixed_value`): `P` "Realizar pagamento" (store_data 1, related 226402), `C` "Realizar pagamento" (related 226386), `B` "Gerar boleto" (related 174893). Na Transferência os ids são 3940710/3940711/3940712; no Vestibular 3940437/3940438/3940439.
+- `page` 432 ("Meus dados", `{page_id, process_id, stage_id:null, token}`) devolve `data.page.applicantData` com o celular (38546) — reserva para os avisos.
+- Usado pela versão 2.12.0: cobrança com o Pix (order_details) e avisos pelo Blip.

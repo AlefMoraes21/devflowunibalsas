@@ -10,7 +10,7 @@ import { createMatricula, SCREENS as MATRICULA_SCREENS, FORM_FIELDS as MATRICULA
 import { listDocuments, saveDocument, readDocument, findInscription, downloadMedia } from "./documentos.js";
 import { createPortalSite } from "./portal-site.js";
 import { createEtapa1 } from "./etapa1-fila.js";
-import { avisarRedacaoLiberada } from "./blip.js";
+import { avisarRedacaoLiberada, createAvisosBlip } from "./blip.js";
 import { createEtapa2 } from "./etapa2-matricula.js";
 import { createStore, enqueueJob, validWorkerSignature } from "./cloud-store.js";
 import crypto from "crypto";
@@ -1523,6 +1523,7 @@ const etapa1=createEtapa1({
   ehEnem:isNotaEnemProcess,anosEnem:ANOS_ENEM,
   validateEnem:d=>{normalizeEnemRegistration(d.numero_inscricao_enem);if(!ANOS_ENEM.some(y=>y.id===String(d.ano_enem)))throw new Error("Selecione o ano do ENEM.");enemAverage(d,{checkTyped:false})},
   avisar:dados=>avisarRedacaoLiberada(dados),
+  aoConfirmarRedacao:dados=>etapa2.iniciarVigiaRedacao(dados),
   loginRubeus:(login,nasc)=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+60000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>matricula.login(login,nasc)),
   prepararProva:data=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>proofRouter.prepare(data)),
   jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
@@ -1531,7 +1532,7 @@ const etapa1=createEtapa1({
 const etapa2=createEtapa2({
   store:createStore(),enqueue:enqueueJob,sealState,openState,matricula,validCpf,
   buscarCep:d=>matricula.cep(d),
-  portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),
+  portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),avisos:createAvisosBlip(),
   entrarNaProva:a=>etapa1.entrarNaProva(a),
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
@@ -1540,6 +1541,11 @@ export async function workerHandler(req,res){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
     try{return res.status(await etapa2.atualizarStatus(req.body.id)).send("")}
     catch(error){console.error(JSON.stringify({event:"etapa2_status_error",message:String(error?.message??error).slice(0,160)}));return res.status(204).send("")}
+  }
+  if(req.body?.tipo==="redacao_vigia"){
+    if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
+    try{return res.status(await etapa2.vigiarRedacao(req.body.id)).send("")}
+    catch(error){console.error(JSON.stringify({event:"redacao_vigia_error",message:String(error?.message??error).slice(0,160)}));return res.status(204).send("")}
   }
   if(req.body?.tipo==="etapa4_vigia"){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
@@ -1589,7 +1595,7 @@ export async function contratoHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.11.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.12.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

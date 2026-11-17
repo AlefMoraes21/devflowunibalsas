@@ -13,7 +13,7 @@
 // escolhido para o código do formulário do Rubeus.
 import crypto from 'node:crypto';
 import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js';
-import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup } from './portal-site.js';
+import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
@@ -117,6 +117,8 @@ export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
   portalSite = null, baixarMidia = null, entrarNaProva = null,
+  // Avisos pelo Blip (api/blip.js createAvisosBlip): { atualizacao, cobranca, configurado }. Sem ele, nada é enviado.
+  avisos = null,
   // Endereço público do Cloud Run (links do contrato).
   urlPublica = String(process.env.FLOW_WORKER_ORIGIN ?? '').replace(/\/+$/, ''),
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
@@ -393,7 +395,9 @@ export function createEtapa2({
     if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
     // Calma (vigia): o portal acabou de liberar o contrato; espera o Rubeus terminar de processar antes de gerar.
     if (calma && (!rec.contrato_liberado_em || clock() - rec.contrato_liberado_em < CALMA_CONTRATO_MS)) throw new ErroContrato('Contrato liberado agora; aguardando o Rubeus processar.', 'calma');
-    const passo = lerPassoContrato(await portalSite.passoBruto(sessao, passoId, processo));
+    const bruto = await portalSite.passoBruto(sessao, passoId, processo);
+    await guardarContato(filaId, rec, contatoDaResposta(bruto));
+    const passo = lerPassoContrato(bruto);
     const clique = await portalSite.clicar({ sessao, passo, processo, data: dadosDoContrato(passo, ip) });
     const destino = clique?.data ?? {};
     if (Number(destino.place_type_id) !== 6 || !destino.place_id) throw new ErroContrato('O portal não gerou o contrato agora. Tente de novo em instantes.', 'sem_popup');
@@ -451,6 +455,9 @@ export function createEtapa2({
     try {
       await gerarContrato(id, rec, '', { calma: !imediato });
       await salvarFila({ final_vigiando: clock() }).catch(() => {});
+      // Documentos aprovados e contrato liberado (e já gerado): avisa o candidato. Se ele mesmo abriu o
+      // contrato no Flow (imediato), já sabe — não avisa.
+      if (!imediato) await avisar(id, 'contrato_liberado').catch(() => {});
       try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {}
       return 204;
     } catch (e) {
@@ -480,36 +487,192 @@ export function createEtapa2({
   // mensagem de pagamento do WhatsApp). O vigia registra quando o pagamento libera e quando a matrícula
   // conclui — são os momentos dos avisos ao candidato.
   const FINAL_MAX_MS = 30 * DIA;
+  const MAX_TENTATIVAS_AVISO = 5;
   async function vigiarFinal(id) {
     const f = await store.get(id, FILA);
     if (!f) return 204;
     const rec = f.record;
-    if (rec.matricula_concluida_em) return 204;
     const salvarFila = salvarFilaDe(id);
+    if (rec.matricula_concluida_em) {
+      // Concluída: só falta o aviso, se a última tentativa falhou.
+      if (rec.pagamento_liberado_em && avisoPendente(rec, 'matricula_concluida') && !(await avisar(id, 'matricula_concluida').catch(() => false)) && avisoPendente((await store.get(id, FILA))?.record, 'matricula_concluida')) {
+        try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {}
+      }
+      return 204;
+    }
     const ate = rec.final_ate ?? clock() + FINAL_MAX_MS;
     if (!rec.final_ate) await salvarFila({ final_ate: ate }).catch(() => {});
+    let proximoEm = VIGIA_LONGO_S;
     try {
       const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
-      const { stages } = await portalSite.inscricao(sessao);
-      await salvarStatus(id, stages, rec.ultimo_status?.processo).catch(() => {});
+      const { stages, processo } = await portalSite.inscricao(sessao);
+      await salvarStatus(id, stages, processo || rec.ultimo_status?.processo).catch(() => {});
       const st = summarizeStages(stages ?? []);
       const linha = re => st.rows.find(r => re.test(norm(r.title)));
-      const pagamento = linha(/pagamento|taxa/), matriculado = linha(/matriculad/);
+      const contrato = linha(/contrato/), pagamento = linha(/pagamento|taxa/), matriculado = linha(/matriculad/);
       if (matriculado?.conclusive || (pagamento?.conclusive && !matriculado)) {
         await salvarFila({ matricula_concluida_em: clock() });
         log({ event: 'etapa_final', id: curto(id), passo: 'matricula_concluida', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
+        // Avisa só quem a gente viu com o pagamento pendente (não manda para matrícula antiga).
+        if (rec.pagamento_liberado_em && !(await avisar(id, 'matricula_concluida', { sessao, processo }).catch(() => false))) {
+          if (avisoPendente((await store.get(id, FILA))?.record, 'matricula_concluida')) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {} }
+        }
         return 204;
       }
-      if (pagamento && !pagamento.conclusive && pagamento.step && pagamento.action && !rec.pagamento_liberado_em) {
-        await salvarFila({ pagamento_liberado_em: clock() });
-        log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_liberado' });
+      // Aviso do contrato que falhou antes: tenta de novo enquanto o contrato não foi assinado.
+      if (contrato && !contrato.conclusive && avisoPendente(rec, 'contrato_liberado') && (rec.avisos_tentativas?.contrato_liberado ?? 0) > 0) {
+        await avisar(id, 'contrato_liberado', { sessao, processo }).catch(() => {});
+      }
+      // Pagamento liberado = contrato concluído (ou sem etapa de contrato) e o Pagamento com o botão do site.
+      const pagamentoAberto = pagamento && !pagamento.conclusive && pagamento.step && pagamento.action && (!contrato || contrato.conclusive);
+      if (pagamentoAberto) {
+        if (!rec.pagamento_liberado_em) {
+          await salvarFila({ pagamento_liberado_em: clock() });
+          log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_liberado' });
+        }
+        if (!rec.cobranca_enviada_em && avisos?.configurado?.cobranca?.() && (rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
+          const ok = await enviarCobranca(id, rec, sessao, processo, pagamento.step);
+          if (!ok) proximoEm = VIGIA_INTERVALO_S; // tenta de novo em 10 min
+        }
       } else {
         log({ event: 'etapa_final', id: curto(id), passo: 'aguardando', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
       }
     } catch (e) {
       log({ event: 'etapa_final', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
     }
-    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {} }
+    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: proximoEm }); } catch {} }
+    return 204;
+  }
+
+  // ---------------------------------------------------------------- avisos (Blip)
+  // Cada aviso sai uma vez só (fila.avisos[chave]); falhou, tenta de novo até 5 vezes. Nome e celular vêm do
+  // próprio portal (applicantData dos passos do contrato/pagamento ou "Meus dados", página 432) e ficam na fila
+  // (criptografada). Nada de celular nos logs.
+  const AVISOS = {
+    contrato_liberado: { processo: 'matrícula', situacao: 'Seus documentos de matrícula foram analisados e aprovados.', proximo: 'acesse a sua inscrição pelo botão abaixo e baixe o contrato da sua matrícula.' },
+    matricula_concluida: { processo: 'matrícula', situacao: 'Pagamento recebido. Sua matrícula está concluída! 🎉', proximo: 'acompanhe as orientações da UniBalsas para o início das aulas.' }
+  };
+  const avisoPendente = (rec, chave) => Boolean(avisos?.configurado?.atualizacao?.()) && Boolean(rec) && !rec.avisos?.[chave] && (rec.avisos_tentativas?.[chave] ?? 0) < MAX_TENTATIVAS_AVISO;
+  async function guardarContato(id, rec, contato) {
+    if (!contato?.celular || (rec?.contato?.celular === contato.celular && rec?.contato?.nome === contato.nome)) return;
+    await salvarFilaDe(id)({ contato }).catch(() => {});
+  }
+  async function avisar(id, chave, { sessao = null, processo = '' } = {}) {
+    if (!avisos?.configurado?.atualizacao?.()) return false;
+    const rec = (await store.get(id, FILA))?.record;
+    if (!avisoPendente(rec, chave)) return Boolean(rec?.avisos?.[chave]);
+    let contato = rec.contato;
+    if (!contato?.celular && sessao && portalSite?.pagina) {
+      try { contato = contatoDaResposta(await portalSite.pagina(sessao, 432, processo || rec.ultimo_status?.processo)); await guardarContato(id, rec, contato); } catch {}
+    }
+    const ok = contato?.celular ? await avisos.atualizacao({ celular: contato.celular, nome: contato.nome, ...AVISOS[chave] }).catch(() => false) : false;
+    const atual = (await store.get(id, FILA))?.record ?? rec;
+    await salvarFilaDe(id)(ok
+      ? { avisos: { ...(atual.avisos ?? {}), [chave]: clock() } }
+      : { avisos_tentativas: { ...(atual.avisos_tentativas ?? {}), [chave]: (atual.avisos_tentativas?.[chave] ?? 0) + 1 } }).catch(() => {});
+    log({ event: 'etapa_aviso', id: curto(id), aviso: chave, enviado: ok, motivo: ok ? undefined : contato?.celular ? 'blip' : 'sem_celular' });
+    return ok;
+  }
+
+  // Cobrança da taxa (template de pagamento): gera o Pix como o botão "Realizar pagamento" do site (Pix) e manda o
+  // copia e cola + link do portal (cartão). O Pix gerado fica na fila (12 h) para as novas tentativas não gerarem outro.
+  const PIX_VALIDO_MS = 12 * 3600000;
+  async function enviarCobranca(id, rec, sessao, processo, passoId) {
+    const salvar = salvarFilaDe(id);
+    const tentativa = (rec.cobranca_tentativas ?? 0) + 1;
+    let ok = false, motivo = '';
+    try {
+      const bruto = await portalSite.passoBruto(sessao, passoId, processo);
+      const passo = lerPassoPagamento(bruto);
+      const contato = contatoDaResposta(bruto)?.celular ? contatoDaResposta(bruto) : rec.contato;
+      await guardarContato(id, rec, contato);
+      const centavos = centavosDoPagamento(passo);
+      let codigo = rec.cobranca_pix && clock() - (rec.cobranca_pix_em ?? 0) < PIX_VALIDO_MS ? pixValido(rec.cobranca_pix) : '';
+      if (!codigo) {
+        try {
+          const clique = await portalSite.clicar({ sessao, passo, processo, data: dadosDoPix(passo) });
+          const d = clique?.data ?? {};
+          if (Number(d.place_type_id) === 6 && d.place_id) codigo = pixDoPopup(await portalSite.popup({ sessao, popupId: d.place_id, stageId: d.stage_id ?? passo.stage_id }));
+        } catch (e) { log({ event: 'etapa_final', id: curto(id), passo: 'pix_erro', message: String(e?.message ?? e).slice(0, 120) }); }
+        // Reserva: o último Pix que o portal guardou (campo 50901).
+        if (!codigo) codigo = pixValido(passo.valores[CAMPOS_PAGAMENTO.pixCodigo]);
+        if (codigo) await salvar({ cobranca_pix: codigo, cobranca_pix_em: clock() }).catch(() => {});
+      }
+      if (!codigo) motivo = 'sem_pix';
+      else if (!contato?.celular) motivo = 'sem_celular';
+      else if (!centavos) motivo = 'sem_valor';
+      else {
+        ok = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
+          referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) });
+        if (!ok) motivo = 'blip';
+      }
+    } catch (e) { motivo = String(e?.message ?? e).slice(0, 120); }
+    await salvar(ok ? { cobranca_enviada_em: clock() } : { cobranca_tentativas: tentativa }).catch(() => {});
+    log({ event: 'etapa_final', id: curto(id), passo: ok ? 'cobranca_enviada' : 'cobranca_falhou', tentativa, motivo: motivo || undefined });
+    return ok;
+  }
+
+  // ---------------------------------------------------------------- vigia da redação
+  // Depois que a etapa 1 confirma a redação no portal, confere a correção (Prova online "Aguardando correção"):
+  //  - aprovada: a prova fica concluída E a etapa seguinte abre com o botão do site → aviso "matrícula liberada";
+  //  - não aprovada: a prova sai da correção sem concluir e volta a ter o botão → aviso "pode refazer"
+  //    (só depois de ver "Aguardando correção", para não confundir com o status antes da sincronização).
+  // Ritmo dos outros vigias (10 min nas 2 primeiras horas, depois de hora em hora), por até 15 dias.
+  const REDACAO = 'redacaoVigia';
+  const AVISOS_REDACAO = {
+    aprovada: { processo: 'inscrição no Vestibular 2027/1', situacao: 'Sua redação foi corrigida e você foi aprovado(a)! 🎉', proximo: 'informe o responsável financeiro, seus dados e envie os documentos da matrícula pelo botão abaixo.' },
+    reprovada: { processo: 'inscrição no Vestibular 2027/1', situacao: 'Sua redação foi corrigida e não atingiu a nota necessária.', proximo: 'você pode realizar a avaliação mais uma vez pelo botão abaixo.' }
+  };
+  async function iniciarVigiaRedacao({ login, data_nascimento, celular, nome }) {
+    const cpf = digits(login);
+    if (cpf.length !== 11 || !data_nascimento) return false;
+    const id = hash('redacao:' + cpf);
+    const novo = { id, login: cpf, data_nascimento, contato: digits(celular) ? { nome: String(nome ?? ''), celular: digits(celular) } : null, desde: clock(), ate: clock() + VIGIA_MAX_MS, expires: clock() + 20 * DIA };
+    const atual = await store.get(id, REDACAO);
+    // Nova redação (ex.: refez a avaliação): recomeça o vigia.
+    if (atual) await store.update(id, novo, atual.version, REDACAO); else await store.create(id, novo, REDACAO);
+    log({ event: 'redacao_vigia', id: curto(id), passo: 'iniciado' });
+    await enqueue(id, { tipo: 'redacao_vigia', atrasoSeg: VIGIA_INTERVALO_S });
+    return true;
+  }
+  async function salvarRedacao(id, patch) {
+    for (let i = 0; i < 4; i++) { const a = await store.get(id, REDACAO); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, REDACAO)) return; }
+  }
+  async function vigiarRedacao(id) {
+    const f = await store.get(id, REDACAO);
+    if (!f || f.record.fim) return 204;
+    const rec = f.record;
+    let proximoEm = intervaloVigia(rec.desde);
+    try {
+      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento);
+      const { stages, processo } = await portalSite.inscricao(sessao);
+      const st = summarizeStages(stages ?? []);
+      const prova = st.rows.find(r => /prova|avaliacao|redacao/.test(norm(r.title)));
+      let resultado = null;
+      if (!prova) resultado = null;
+      else if (emCorrecao(prova)) { if (!rec.viu_correcao) await salvarRedacao(id, { viu_correcao: clock() }); }
+      else if (prova.conclusive) { if (st.next && st.next !== prova) resultado = 'aprovada'; }
+      else if (rec.viu_correcao && prova.step && prova.action) resultado = 'reprovada';
+      log({ event: 'redacao_vigia', id: curto(id), passo: resultado ?? 'aguardando', prova: prova?.status ?? '' });
+      if (resultado) {
+        let contato = rec.contato;
+        if (!contato?.celular && portalSite.pagina) { try { contato = contatoDaResposta(await portalSite.pagina(sessao, 432, processo)); } catch {} }
+        const ok = avisos?.configurado?.atualizacao?.() && contato?.celular
+          ? await avisos.atualizacao({ celular: contato.celular, nome: contato.nome, ...AVISOS_REDACAO[resultado] }).catch(() => false) : false;
+        const tentativas = (rec.tentativas ?? 0) + 1;
+        log({ event: 'etapa_aviso', id: curto(id), aviso: 'redacao_' + resultado, enviado: Boolean(ok), motivo: ok ? undefined : contato?.celular ? 'blip' : 'sem_celular' });
+        if (ok || tentativas >= MAX_TENTATIVAS_AVISO || !avisos?.configurado?.atualizacao?.()) {
+          await salvarRedacao(id, { fim: clock(), resultado, aviso_enviado: Boolean(ok), ...(contato?.celular ? { contato } : {}) });
+          return 204;
+        }
+        await salvarRedacao(id, { tentativas, ...(contato?.celular ? { contato } : {}) });
+        proximoEm = VIGIA_INTERVALO_S;
+      }
+    } catch (e) {
+      log({ event: 'redacao_vigia', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
+    }
+    if (clock() < (rec.ate ?? 0)) { try { await enqueue(id, { tipo: 'redacao_vigia', atrasoSeg: proximoEm }); } catch {} }
+    else await salvarRedacao(id, { fim: clock(), resultado: 'sem_correcao' });
     return 204;
   }
 
@@ -842,5 +1005,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal };
+  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao };
 }

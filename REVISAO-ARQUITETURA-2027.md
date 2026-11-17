@@ -116,4 +116,47 @@ Toque no botão abaixo para continuar pelo WhatsApp. Se tiver dúvidas, é só r
 
 **Mensagem de pagamento** (template separado, tipo **Detalhes do pedido / order_details**, enviado pela API de mensagens ativas do Blip): "Taxa de matrícula — R$ {valor}", com Pix (código copia e cola gerado no TOTVS) e link do Portal do candidato para cartão. Ver a seção 17 da engenharia reversa.
 
+### 4.1 Template de pagamento — `unibalsas_taxa_matricula`
+
+> **Versão submetida (16/11):** editor "Pedir pagamento" da Meta, com os botões **Copiar código Pix** e **Abrir link de pagamento**. {{1}} = primeiro nome, {{2}} = valor **sem "R$"** (ex.: `380,00`). O texto usa "ingresso em 2027/1", que vale para os quatro processos. No envio, o Run passa o copia e cola do popup 1016 (campo 50901) e o link do portal. Chave Pix (CNPJ) em `PIX_CHAVE`. A versão abaixo foi o rascunho.
+
+- **Categoria:** Utilidade · **Tipo:** Detalhes do pedido (order details) · **Idioma:** Português (BR) · variáveis do tipo Número
+- **Cabeçalho (texto):** `Taxa de matrícula UniBalsas`
+- **Corpo** (exemplos: {{1}} `Maria`, {{2}} `390,00`):
+```
+Olá, {{1}}! 🎓
+
+Estamos finalizando! Para concluir a sua matrícula no Vestibular 2027/1, realize o pagamento da taxa de matrícula no valor de R$ {{2}}.
+
+Toque em Ver e pagar para copiar o código Pix. Se preferir cartão de crédito, use o link do Portal do candidato que aparece no pedido.
+
+Assim que o pagamento for confirmado, avisaremos você por aqui.
+```
+- **Rodapé:** `UniBalsas - Centro Universitário`
+- **Botão:** Detalhes do pedido (`ORDER_DETAILS`), texto `Ver e pagar`.
+
+Criação pela API, se o tipo "Detalhes do pedido" não aparecer no Gerenciador (`POST /{WABA_ID}/message_templates`):
+```json
+{"name":"unibalsas_taxa_matricula","language":"pt_BR","category":"UTILITY",
+ "components":[
+  {"type":"HEADER","format":"TEXT","text":"Taxa de matrícula UniBalsas"},
+  {"type":"BODY","text":"<corpo acima>","example":{"body_text":[["Maria","390,00"]]}},
+  {"type":"FOOTER","text":"UniBalsas - Centro Universitário"},
+  {"type":"BUTTONS","buttons":[{"type":"ORDER_DETAILS","text":"Ver e pagar"}]}]}
+```
+
+**Disparo pelo Run** (quando o vigia final grava `pagamento_liberado_em`): login no site → `button-click` 3940437 com 38702=`P` → popup 1016 → campo 50901 (copia e cola) e 38658 (centavos), 38656 (IDBOLETO). Componentes do template:
+```json
+[{"type":"body","parameters":[{"type":"text","text":"Maria"},{"type":"text","text":"390,00"}]},
+ {"type":"button","sub_type":"order_details","index":0,"parameters":[{"type":"action","action":{"order_details":{
+   "reference_id":"mat-<IDBOLETO>","type":"digital-goods","payment_type":"br","currency":"BRL",
+   "total_amount":{"value":39000,"offset":100},
+   "payment_settings":[
+     {"type":"pix_dynamic_code","pix_dynamic_code":{"code":"<50901>","merchant_name":"<RECEBEDOR>","key":"<CHAVE_PIX>","key_type":"CNPJ"}},
+     {"type":"payment_link","payment_link":{"uri":"https://vestibular.unibalsas.edu.br/presencial"}}],
+   "order":{"status":"pending","subtotal":{"value":39000,"offset":100},
+     "items":[{"retailer_id":"taxa-matricula-2027-1","name":"Taxa de matrícula 2027/1","amount":{"value":39000,"offset":100},"quantity":1}]}}}}]}]
+```
+O WhatsApp não atualiza sozinho o status de um Pix de provedor próprio: quem confirma é o vigia final ("Pagamento Recebido"), que então manda o aviso "Matrícula concluída" pelo template `unibalsas_atualizacao_processo`.
+
 **O que o Run precisa para disparar:** `BLIP_API_URL` e `BLIP_BOT_KEY` (chave do bot roteador) no Cloud Run, os nomes dos templates aprovados e, para o pagamento, nome do recebedor + chave Pix (CNPJ) da conta que recebe o Pix do TOTVS.

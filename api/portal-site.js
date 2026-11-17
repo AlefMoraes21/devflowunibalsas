@@ -137,7 +137,101 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
     return post("popup", { popup_id: Number(popupId), stage: { stage_id: Number(stageId) }, token: sessao.token }, { timeoutMs: 60000 });
   }
 
-  return { entrar, inscricao, processo, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup };
+  // Página do portal (place_type_id 4). 432 = "Meus dados" (nome, celular…), conferida em 16/11/2026.
+  async function pagina(sessao, pageId, processo) {
+    return post("page", { page_id: String(pageId), process_id: String(processo), stage_id: null, token: sessao.token }, { timeoutMs: 30000 });
+  }
+
+  return { entrar, inscricao, processo, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup, pagina };
+}
+
+// Valores do candidato que o portal devolve junto com o passo ou a página (applicantData: field_id → value).
+// Nos passos, campo oculto sem applicantData pode vir só em value_now do componente.
+function dadosDoCandidato(resp) {
+  const base = resp?.data?.steps?.currentStep ?? resp?.data?.page ?? resp?.data ?? {};
+  const mapa = new Map();
+  for (const x of base.applicantData ?? []) if (x?.field_id != null && x.value !== null && x.value !== undefined && x.value !== "") mapa.set(Number(x.field_id), x.value);
+  return { base, mapa };
+}
+export const CAMPOS_CONTATO = { nome: 38544, celular: 38546 };
+// Nome e celular do candidato (campos 38544 e 38546, os mesmos do passo de dados básicos).
+export function contatoDaResposta(resp) {
+  const { mapa } = dadosDoCandidato(resp);
+  const nome = str(mapa.get(CAMPOS_CONTATO.nome)).trim(), celular = str(mapa.get(CAMPOS_CONTATO.celular)).replace(/\D/g, "");
+  return nome || celular ? { nome, celular } : null;
+}
+
+// Passo do pagamento (300670 no Vestibular, 300701 na Transferência; conferido ao vivo em 16/11/2026).
+// Botões com lógica pelo meio de pagamento (rádio 38702): "P" Pix (grava, popup 1016), "C" cartão, "B" boleto.
+// Campos ocultos do TOTVS: 38656 IDBOLETO, 53443 valor Pix, 38661 valor formatado, 38658 taxa em centavos.
+export const CAMPOS_PAGAMENTO = { idBoleto: 38656, valorPix: 53443, valorFormatado: 38661, centavos: 38658, meio: 38702, pixQr: 50900, pixCodigo: 50901 };
+export function lerPassoPagamento(resp) {
+  const cs = resp?.data?.steps?.currentStep;
+  if (!cs) throw new Error("Passo do pagamento sem conteúdo.");
+  const todos = [];
+  (function achatar(lista) { for (const c of lista ?? []) { todos.push(c); achatar(c.container_content); } })(cs.content);
+  const { mapa } = dadosDoCandidato(resp);
+  const valores = {};
+  for (const c of todos) if (c.field_id) {
+    const v = mapa.has(Number(c.field_id)) ? mapa.get(Number(c.field_id)) : c.value_now ?? c.data_value ?? "";
+    valores[Number(c.field_id)] = str(v);
+  }
+  for (const [k, v] of mapa) if (!(k in valores)) valores[k] = str(v);
+  const botaoDe = letra => todos.find(c => c.type === "button" && (c.logics ?? []).some(l => str(l?.fixed_value) === letra));
+  const pix = botaoDe("P");
+  if (!pix) throw new Error("Passo do pagamento sem o botão do Pix.");
+  const campos = todos.filter(c => c.field_id).map(c => ({ field_id: Number(c.field_id), field_settings_id: c.field_settings_id ?? null, type: c.type, ps_table: c.ps_table ?? null, rubeus_table: c.rubeus_table ?? null }));
+  const conteudos = todos.filter(c => !c.field_id && (c.type === "text" || c.type === "html") && Number(c.logic_enabled) !== 1)
+    .map(c => ({ component_id: c.id, key: str(c.key), type: c.type === "html" ? "htmlelement" : "content" }));
+  return { passo: Number(cs.id), stage_id: Number(cs.stage_id), botao: Number(pix.id), botao_relacionado: Number(pix.related_component_id), campos, conteudos, valores };
+}
+
+// Valor da taxa em centavos: o do Pix (53443, "390.00") quando houver; senão a taxa em centavos (38658).
+export function centavosDoPagamento(passo) {
+  const v = passo?.valores ?? {};
+  const pix = str(v[CAMPOS_PAGAMENTO.valorPix]).replace(/[^\d.,]/g, "");
+  if (pix) {
+    const n = Number(pix.includes(",") ? pix.replace(/\./g, "").replace(",", ".") : pix);
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100);
+  }
+  const c = Number(str(v[CAMPOS_PAGAMENTO.centavos]).replace(/\D/g, ""));
+  return c > 0 ? c : 0;
+}
+
+// Igual ao site no "Realizar pagamento" do Pix: campos com component_id nulo, key numérica, o rádio com "P"
+// e os textos visíveis do passo com valor vazio.
+export function dadosDoPix(passo) {
+  const campos = passo.campos.map(c => ({
+    field_id: c.field_id, field_settings_id: c.field_settings_id, component_id: null, key: c.field_id,
+    value: c.field_id === CAMPOS_PAGAMENTO.meio ? "P" : str(passo.valores?.[c.field_id]),
+    rubeus_table: c.rubeus_table, ps_table: c.ps_table, type: c.type === "radio" ? "radio" : "textfield"
+  })).filter(c => ![CAMPOS_PAGAMENTO.pixQr, CAMPOS_PAGAMENTO.pixCodigo].includes(c.field_id));
+  const conteudos = (passo.conteudos ?? []).map(c => ({ field_id: null, field_settings_id: null, component_id: c.component_id, key: c.key, value: "", type: c.type }));
+  return [...campos, ...conteudos];
+}
+
+// BR Code do Pix (copia e cola): começa com 000201 e termina no CRC (6304 + 4 hexadecimais).
+export function pixValido(codigo) {
+  const c = str(codigo).trim();
+  return /^000201[\x20-\x7e]{20,}6304[0-9A-Fa-f]{4}$/.test(c) ? c : "";
+}
+// Copia e cola do popup "Totvs Pagamento Instântaneo" (1016): campo 50901.
+export function pixDoPopup(resp) {
+  const item = (resp?.data?.applicantData ?? []).find(x => Number(x.field_id) === CAMPOS_PAGAMENTO.pixCodigo);
+  const c = pixValido(item?.value);
+  if (!c) throw new Error("O portal não devolveu o código Pix.");
+  return c;
+}
+// Nome do recebedor dentro do BR Code (campo 59).
+export function recebedorDoPix(codigo) {
+  const c = str(codigo);
+  for (let i = 0; i + 4 <= c.length;) {
+    const tag = c.slice(i, i + 2), n = Number(c.slice(i + 2, i + 4));
+    if (!Number.isFinite(n)) break;
+    if (tag === "59") return c.slice(i + 4, i + 4 + n).trim();
+    i += 4 + n;
+  }
+  return "";
 }
 
 // Corpo multipart do button-click (campos de controle iguais ao site). data: lista de campos do passo.

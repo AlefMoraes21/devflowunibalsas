@@ -53,7 +53,7 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
 
 function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) {
   const fila = [];
-  const avisos = [];
+  const avisos = [], redacoes = [];
   const e1 = createEtapa1({
     ativo: () => true, store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
     runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
@@ -64,9 +64,10 @@ function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) 
     jaInscritoNoRm: async () => rm, sleep: async () => {}, log: () => {}, esperaProvaMs: 0, estabilidadeMs: 0,
     ehEnem: id => String(id) === '20386', anosEnem: [{ id: '2025', title: '2025' }],
     validateEnem: d => { if (!/^\d{12,15}$/.test(String(d.numero_inscricao_enem ?? ''))) throw new Error('A inscrição do ENEM deve ter de 12 a 15 números.'); },
-    avisar: async dados => { avisos.push(dados); return true; }
+    avisar: async dados => { avisos.push(dados); return true; },
+    aoConfirmarRedacao: async dados => { redacoes.push(dados); }
   });
-  return { e1, store, fila, rubeus, avisos };
+  return { e1, store, fila, rubeus, avisos, redacoes };
 }
 const cacheCompleto = store => store.create('etapa1-20383', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
 
@@ -97,7 +98,7 @@ test('cache incompleto: segue o caminho síncrono de sempre', async () => {
 });
 
 test('jornada instantânea sem Rubeus; o worker repete os passos e conclui', async () => {
-  const { e1, store, fila, rubeus } = montar();
+  const { e1, store, fila, rubeus, redacoes } = montar();
   await cacheCompleto(store);
   const quase = await ateRedacao(e1);
   assert.equal(rubeus.chamadas.length, 0, 'nenhuma tela chamou o Rubeus');
@@ -126,6 +127,8 @@ test('jornada instantânea sem Rubeus; o worker repete os passos e conclui', asy
   rec = (await store.get(id, 'inscricoesFila')).record;
   assert.equal(rec.status, 'concluida');
   assert.equal(rec.respostas, null, 'dados pessoais apagados depois da entrega');
+  assert.equal(redacoes.length, 1, 'redação confirmada agenda o vigia da correção');
+  assert.ok(redacoes[0].login && redacoes[0].data_nascimento && redacoes[0].celular);
   assert.equal(rec.redacao, null);
   assert.deepEqual(rubeus.chamadas.slice(5), ['conferir_prova_existente', 'conferir_prova_existente', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
 });
