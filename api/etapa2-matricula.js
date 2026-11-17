@@ -122,7 +122,7 @@ export function createEtapa2({
   // Endereço público do Cloud Run (links do contrato).
   urlPublica = String(process.env.FLOW_WORKER_ORIGIN ?? '').replace(/\/+$/, ''),
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
-  esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 7500,
+  esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 6500,
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
   esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000,
   // Link do contrato aberto durante uma geração em andamento: espera o PDF ficar pronto (até ~40 s).
@@ -167,7 +167,7 @@ export function createEtapa2({
       const rec = { ...atual.record, blocos: { ...atual.record.blocos, [bloco]: { ...dados, recebido_em: clock() } }, status: ['concluida', 'falhou'].includes(atual.record.status) ? 'pendente' : atual.record.status };
       if (await store.update(s.fila_id, rec, atual.version, FILA)) {
         log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'bloco_recebido', bloco });
-        try { await enqueue(s.fila_id, { tipo: 'etapa2' }); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
+        try { await enqueue(s.fila_id, { tipo: 'etapa2' }).catch(() => enqueue(s.fila_id, { tipo: 'etapa2' })); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
         return;
       }
     }
@@ -230,7 +230,7 @@ export function createEtapa2({
       if (await store.update(s.fila_id, rec, atual.version, FILA)) {
         if (completo) {
           log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'documentos_recebidos', quantidade: Object.keys(documentos.arquivos).length });
-          try { await enqueue(s.fila_id, { tipo: 'etapa2' }); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
+          try { await enqueue(s.fila_id, { tipo: 'etapa2' }).catch(() => enqueue(s.fila_id, { tipo: 'etapa2' })); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
         }
         return;
       }
@@ -285,6 +285,7 @@ export function createEtapa2({
       const sessao = await matricula.login(f.record.login ?? f.record.cpf, f.record.data_nascimento);
       const p = await matricula.portal(sessao);
       await salvarStatus(id, p.stages, p.processo_seletivo_id);
+      await religarVigias(id, summarizeStages(p.stages ?? []));
       log({ event: 'etapa2_fila', id: curto(id), passo: 'status_salvo' });
     });
     return 204;
@@ -442,6 +443,81 @@ export function createEtapa2({
   const intervaloVigia = desde => (clock() - (desde ?? clock()) < 2 * 3600000 ? VIGIA_INTERVALO_S : VIGIA_LONGO_S);
   const salvarFilaDe = id => async patch => { for (let i = 0; i < 4; i++) { const a = await store.get(id, FILA); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, FILA)) return; } };
 
+  // Uma corrente por vigia. Cada agendamento guarda o horário da próxima conferência (vigia_proxima[tipo]);
+  // tarefa que chega antes desse horário é de uma corrente antiga e sai sem reagendar. O prazo do registro
+  // acompanha o vigia (não expira no meio). Se o Cloud Tasks não aceitar, lança erro: o worker devolve 500 e
+  // a tarefa é repetida.
+  const FOLGA_VIGIA_MS = 30000;
+  const VIGIA_PARADA_MS = 2 * 3600000;
+  const correnteAntiga = (rec, tipo) => clock() < (rec?.vigia_proxima?.[tipo] ?? 0) - FOLGA_VIGIA_MS;
+  const vigiaParada = (rec, tipo) => (rec?.vigia_proxima?.[tipo] ?? 0) + VIGIA_PARADA_MS < clock();
+  async function agendarVigia(id, tipo, atrasoSeg, colecao = FILA) {
+    const quando = clock() + atrasoSeg * 1000;
+    try { await enqueue(id, { tipo, atrasoSeg }); }
+    catch {
+      try { await enqueue(id, { tipo, atrasoSeg }); }
+      catch (e) {
+        console.error(JSON.stringify({ event: 'vigia_atencao', id: curto(id), tipo, motivo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }));
+        throw Object.assign(new Error('Não foi possível agendar o vigia.'), { agendar: true });
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, colecao).catch(() => null);
+      if (!a) return;
+      const novo = { ...a.record, vigia_proxima: { ...(a.record.vigia_proxima ?? {}), [tipo]: quando }, expires: Math.max(a.record.expires ?? 0, quando + 7 * DIA) };
+      if (await store.update(id, novo, a.version, colecao).catch(() => false)) return;
+    }
+  }
+  // Começa um vigia só se não houver corrente viva (nunca agendado, ou a próxima conferência atrasou mais de 2 h).
+  async function garantirVigia(id, tipo, atrasoSeg, extra = null) {
+    const rec = (await store.get(id, FILA))?.record;
+    if (!rec || !vigiaParada(rec, tipo)) return false;
+    if (extra) await salvarFilaDe(id)(extra).catch(() => {});
+    await agendarVigia(id, tipo, atrasoSeg);
+    return true;
+  }
+  // Uma execução por vez de cada vigia. Devolve false se outra execução está em andamento.
+  async function travarVigia(id, campo, colecao = FILA) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, colecao);
+      if (!a) return false;
+      if ((a.record[campo] ?? 0) > clock()) return false;
+      if (await store.update(id, { ...a.record, [campo]: clock() + 170000 }, a.version, colecao)) return true;
+    }
+    return false;
+  }
+  async function destravarVigia(id, campo, colecao = FILA) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, colecao).catch(() => null);
+      if (!a) return;
+      if (await store.update(id, { ...a.record, [campo]: 0 }, a.version, colecao).catch(() => false)) return;
+    }
+  }
+  // Login ou status atualizado: liga (ou religa) o vigia que a situação do portal pede, mesmo para quem enviou
+  // os documentos pelo site. Não lança erro: o próximo login tenta de novo.
+  async function religarVigias(id, s2) {
+    try {
+      const rec = (await store.get(id, FILA))?.record;
+      if (!rec || !s2?.rows?.length || rec.matricula_concluida_em) return;
+      const linha = re => s2.rows.find(r => re.test(norm(r.title)));
+      const docs = s2.rows.find(r => /document/.test(norm(r.title)) && /matric/.test(norm(r.title))) ?? linha(/document/);
+      const contrato = linha(/contrato/), pagamento = linha(/pagamento|taxa/), matriculado = linha(/matriculad/);
+      if (matriculado?.conclusive) return;
+      const antes = docs ? s2.rows.slice(0, s2.rows.indexOf(docs)) : [];
+      const emAnalise = docs && !docs.conclusive && !aberta(docs) && antes.every(r => r.conclusive);
+      const docsOk = docs ? Boolean(docs.conclusive) : true;
+      const contratoPendente = Boolean(contrato) && !contrato.conclusive && docsOk;
+      const pagamentoPendente = Boolean(pagamento) && !pagamento.conclusive && docsOk && (!contrato || contrato.conclusive);
+      if (pagamentoPendente || rec.final_vigiando) {
+        if (await garantirVigia(id, 'etapa4_vigia', 60, rec.final_vigiando ? null : { final_vigiando: clock() })) log({ event: 'etapa_final', id: curto(id), passo: 'vigia_ligado' });
+      } else if (emAnalise || contratoPendente) {
+        // Contrato já aberto na tela de status: o candidato está vendo agora, não precisa do aviso.
+        const extra = contratoPendente && aberta(contrato) && !rec.avisos?.contrato_liberado ? { avisos: { ...(rec.avisos ?? {}), contrato_liberado: clock() } } : null;
+        if (await garantirVigia(id, 'etapa3_vigia', emAnalise ? VIGIA_INTERVALO_S : 5, extra)) log({ event: 'etapa3_contrato', id: curto(id), passo: 'vigia_ligado' });
+      }
+    } catch (e) { log({ event: 'etapa2_fila_erro', id: curto(id), passo: 'religar_vigias', message: String(e?.message ?? e).slice(0, 120) }); }
+  }
+
   // Etapa 3: depois dos documentos entregues, espera a liberação do contrato (análise da equipe) e, quando
   // liberar, gera e guarda o PDF. Contrato pronto ou já assinado: passa a vigiar o pagamento e a matrícula.
   async function vigiarContrato(id, { imediato = false } = {}) {
@@ -449,23 +525,30 @@ export function createEtapa2({
     if (!f) return 204;
     const rec = f.record;
     const salvarFila = salvarFilaDe(id);
-    if (await contratoPronto(id)) { if (!rec.final_vigiando) { await salvarFila({ final_vigiando: clock() }).catch(() => {}); try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {} } return 204; }
+    // Tarefa de uma corrente antiga (outra conferência já está agendada): sai sem reagendar.
+    if (!imediato && correnteAntiga(rec, 'etapa3_vigia')) return 204;
+    // Passa a vigiar o pagamento e a matrícula (uma corrente só).
+    const iniciarFinal = atrasoSeg => garantirVigia(id, 'etapa4_vigia', atrasoSeg, { final_vigiando: clock() });
+    if (await contratoPronto(id)) { await iniciarFinal(VIGIA_LONGO_S); return 204; }
     const ate = rec.vigia_ate ?? clock() + VIGIA_MAX_MS;
     if (!rec.vigia_ate) await salvarFila({ vigia_ate: ate, vigia_desde: clock() }).catch(() => {});
     try {
       await gerarContrato(id, rec, '', { calma: !imediato });
-      await salvarFila({ final_vigiando: clock() }).catch(() => {});
       // Documentos aprovados e contrato liberado (e já gerado): avisa o candidato. Se ele mesmo abriu o
       // contrato no Flow (imediato), já sabe — não avisa.
       if (!imediato) await avisar(id, 'contrato_liberado').catch(() => {});
-      try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {}
+      await iniciarFinal(VIGIA_LONGO_S);
       return 204;
     } catch (e) {
-      if (e?.motivo === 'gerando') return 204; // outra geração em andamento
+      if (e?.agendar) throw e;
+      if (e?.motivo === 'gerando') {
+        // Outra geração em andamento: o vigia volta em 2 minutos (não perde a corrente).
+        if (!imediato) await agendarVigia(id, 'etapa3_vigia', 120);
+        return 204;
+      }
       if (e?.motivo === 'concluido') {
         log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_ja_assinado' });
-        await salvarFila({ final_vigiando: clock() }).catch(() => {});
-        try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: 60 }); } catch {}
+        await iniciarFinal(60);
         return 204;
       }
       if (e?.motivo === 'calma') {
@@ -473,12 +556,13 @@ export function createEtapa2({
         const desde = rec.contrato_liberado_em ?? clock();
         if (!rec.contrato_liberado_em) await salvarFila({ contrato_liberado_em: desde }).catch(() => {});
         log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_liberado' });
-        try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: Math.max(5, Math.ceil((desde + CALMA_CONTRATO_MS - clock()) / 1000)) }); } catch {}
+        await agendarVigia(id, 'etapa3_vigia', Math.max(5, Math.ceil((desde + CALMA_CONTRATO_MS - clock()) / 1000)));
         return 204;
       }
       log({ event: 'etapa3_contrato', id: curto(id), passo: e?.motivo === 'nao_liberado' ? 'contrato_aguardando' : 'contrato_erro', message: String(e?.message ?? e).slice(0, 120) });
     }
-    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: intervaloVigia(rec.vigia_desde) }); } catch {} }
+    // Pedido do candidato (imediato) não cria corrente: quem reagenda é só o vigia.
+    if (!imediato && clock() < ate) await agendarVigia(id, 'etapa3_vigia', intervaloVigia(rec.vigia_desde));
     return 204;
   }
 
@@ -489,6 +573,15 @@ export function createEtapa2({
   const FINAL_MAX_MS = 30 * DIA;
   const MAX_TENTATIVAS_AVISO = 5;
   async function vigiarFinal(id) {
+    const antes = await store.get(id, FILA);
+    if (!antes) return 204;
+    if (correnteAntiga(antes.record, 'etapa4_vigia')) return 204;
+    // Outra conferência em andamento: 503 para o Cloud Tasks repetir depois (não roda em paralelo).
+    if (!(await travarVigia(id, 'final_rodando_ate'))) return 503;
+    try { return await conferirFinal(id); }
+    finally { await destravarVigia(id, 'final_rodando_ate'); }
+  }
+  async function conferirFinal(id) {
     const f = await store.get(id, FILA);
     if (!f) return 204;
     const rec = f.record;
@@ -496,7 +589,7 @@ export function createEtapa2({
     if (rec.matricula_concluida_em) {
       // Concluída: só falta o aviso, se a última tentativa falhou.
       if (rec.pagamento_liberado_em && avisoPendente(rec, 'matricula_concluida') && !(await avisar(id, 'matricula_concluida').catch(() => false)) && avisoPendente((await store.get(id, FILA))?.record, 'matricula_concluida')) {
-        try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {}
+        await agendarVigia(id, 'etapa4_vigia', VIGIA_INTERVALO_S);
       }
       return 204;
     }
@@ -515,7 +608,7 @@ export function createEtapa2({
         log({ event: 'etapa_final', id: curto(id), passo: 'matricula_concluida', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
         // Avisa só quem a gente viu com o pagamento pendente (não manda para matrícula antiga).
         if (rec.pagamento_liberado_em && !(await avisar(id, 'matricula_concluida', { sessao, processo }).catch(() => false))) {
-          if (avisoPendente((await store.get(id, FILA))?.record, 'matricula_concluida')) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {} }
+          if (avisoPendente((await store.get(id, FILA))?.record, 'matricula_concluida')) await agendarVigia(id, 'etapa4_vigia', VIGIA_INTERVALO_S);
         }
         return 204;
       }
@@ -538,9 +631,10 @@ export function createEtapa2({
         log({ event: 'etapa_final', id: curto(id), passo: 'aguardando', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
       }
     } catch (e) {
+      if (e?.agendar) throw e;
       log({ event: 'etapa_final', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
     }
-    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: proximoEm }); } catch {} }
+    if (clock() < ate) await agendarVigia(id, 'etapa4_vigia', proximoEm);
     return 204;
   }
 
@@ -570,6 +664,7 @@ export function createEtapa2({
     await salvarFilaDe(id)(ok
       ? { avisos: { ...(atual.avisos ?? {}), [chave]: clock() } }
       : { avisos_tentativas: { ...(atual.avisos_tentativas ?? {}), [chave]: (atual.avisos_tentativas?.[chave] ?? 0) + 1 } }).catch(() => {});
+    if (!ok && (atual.avisos_tentativas?.[chave] ?? 0) + 1 >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: chave, motivo: contato?.celular ? 'blip' : 'sem_celular' }));
     log({ event: 'etapa_aviso', id: curto(id), aviso: chave, enviado: ok, motivo: ok ? undefined : contato?.celular ? 'blip' : 'sem_celular' });
     return ok;
   }
@@ -601,13 +696,16 @@ export function createEtapa2({
       if (!codigo) motivo = 'sem_pix';
       else if (!contato?.celular) motivo = 'sem_celular';
       else if (!centavos) motivo = 'sem_valor';
+      else if ((await store.get(id, FILA))?.record?.cobranca_enviada_em) { ok = true; motivo = 'ja_enviada'; }
       else {
         ok = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
           referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) });
         if (!ok) motivo = 'blip';
       }
     } catch (e) { motivo = String(e?.message ?? e).slice(0, 120); }
+    if (motivo === 'ja_enviada') return true;
     await salvar(ok ? { cobranca_enviada_em: clock() } : { cobranca_tentativas: tentativa }).catch(() => {});
+    if (!ok && tentativa >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: motivo }));
     log({ event: 'etapa_final', id: curto(id), passo: ok ? 'cobranca_enviada' : 'cobranca_falhou', tentativa, motivo: motivo || undefined });
     return ok;
   }
@@ -632,13 +730,21 @@ export function createEtapa2({
     // Nova redação (ex.: refez a avaliação): recomeça o vigia.
     if (atual) await store.update(id, novo, atual.version, REDACAO); else await store.create(id, novo, REDACAO);
     log({ event: 'redacao_vigia', id: curto(id), passo: 'iniciado' });
-    await enqueue(id, { tipo: 'redacao_vigia', atrasoSeg: VIGIA_INTERVALO_S });
+    await agendarVigia(id, 'redacao_vigia', VIGIA_INTERVALO_S, REDACAO);
     return true;
   }
   async function salvarRedacao(id, patch) {
     for (let i = 0; i < 4; i++) { const a = await store.get(id, REDACAO); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, REDACAO)) return; }
   }
   async function vigiarRedacao(id) {
+    const antes = await store.get(id, REDACAO);
+    if (!antes || antes.record.fim) return 204;
+    if (correnteAntiga(antes.record, 'redacao_vigia')) return 204;
+    if (!(await travarVigia(id, 'rodando_ate', REDACAO))) return 503;
+    try { return await conferirRedacao(id); }
+    finally { await destravarVigia(id, 'rodando_ate', REDACAO); }
+  }
+  async function conferirRedacao(id) {
     const f = await store.get(id, REDACAO);
     if (!f || f.record.fim) return 204;
     const rec = f.record;
@@ -661,6 +767,7 @@ export function createEtapa2({
           ? await avisos.atualizacao({ celular: contato.celular, nome: contato.nome, ...AVISOS_REDACAO[resultado] }).catch(() => false) : false;
         const tentativas = (rec.tentativas ?? 0) + 1;
         log({ event: 'etapa_aviso', id: curto(id), aviso: 'redacao_' + resultado, enviado: Boolean(ok), motivo: ok ? undefined : contato?.celular ? 'blip' : 'sem_celular' });
+        if (!ok && tentativas >= MAX_TENTATIVAS_AVISO && avisos?.configurado?.atualizacao?.()) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'redacao_' + resultado, motivo: contato?.celular ? 'blip' : 'sem_celular' }));
         if (ok || tentativas >= MAX_TENTATIVAS_AVISO || !avisos?.configurado?.atualizacao?.()) {
           await salvarRedacao(id, { fim: clock(), resultado, aviso_enviado: Boolean(ok), ...(contato?.celular ? { contato } : {}) });
           return 204;
@@ -671,7 +778,7 @@ export function createEtapa2({
     } catch (e) {
       log({ event: 'redacao_vigia', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
     }
-    if (clock() < (rec.ate ?? 0)) { try { await enqueue(id, { tipo: 'redacao_vigia', atrasoSeg: proximoEm }); } catch {} }
+    if (clock() < (rec.ate ?? 0)) await agendarVigia(id, 'redacao_vigia', proximoEm, REDACAO);
     else await salvarRedacao(id, { fim: clock(), resultado: 'sem_correcao' });
     return 204;
   }
@@ -700,7 +807,13 @@ export function createEtapa2({
       const t0 = clock();
       let sessao;
       try { sessao = await matricula.login(login, u.data_nascimento); }
-      catch { return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.'); }
+      catch (e) {
+        // Rede, tempo esgotado, resposta não JSON ou HTTP 5xx = sistema fora; qualquer outra recusa = dados não conferem.
+        const m = String(e?.message ?? e);
+        if (!/HTTP 5\d\d|demorou|abort|fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|network|RUBEUS_RESPOSTA/i.test(m)) return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.');
+        log({ event: 'etapa2_fila', passo: 'login_indisponivel', message: m.slice(0, 80), ms: clock() - t0 });
+        return volta('O sistema da UniBalsas está indisponível no momento. Tente de novo em alguns minutos.');
+      }
       if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esses dados.');
       const id = hash('matr:' + sessao.applyment_id);
       const flow = hash(req.flow_token ?? '');
@@ -717,26 +830,32 @@ export function createEtapa2({
       } catch (e) { log({ event: 'etapa2_fila', passo: 'portal_lento', message: String(e?.message ?? e).slice(0, 60) }); }
       // Inscrição da matrícula no Firestore (login e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
       const novo = { id, applyment_id: sessao.applyment_id, flow, login, data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
-      const atual = await store.get(id, FILA);
-      if (!atual) await store.create(id, novo, FILA);
-      else {
+      const ultimo = s2 ? { ultimo_status: { stages: enxugar(stLido.stages), processo: String(stLido.processo_seletivo_id ?? ''), at: clock() } } : {};
+      // Uma escrita só: fila + último status (sem reler depois).
+      let rec = null, agendar = false;
+      for (let i = 0; i < 3 && !rec; i++) {
+        const atual = await store.get(id, FILA);
+        if (!atual) { const r = { ...novo, ...ultimo }; if (await store.create(id, r, FILA).then(() => true, () => false)) rec = r; continue; }
+        const a = atual.record;
         // Fila que falhou (ex.: sistema acadêmico fora do ar): entrar de novo reabre e retoma o envio do que já foi gravado.
-        const reabrir = atual.record.status === 'falhou';
-        await store.update(id, { ...atual.record, flow, login, data_nascimento: novo.data_nascimento, ...(reabrir ? { status: 'pendente', tentativas: 0, rodando_ate: 0 } : {}) }, atual.version, FILA);
-        if (reabrir) {
-          log({ event: 'etapa2_fila', id: curto(id), passo: 'reaberta' });
-          try { await enqueue(id, { tipo: 'etapa2' }); } catch {}
-        }
+        const reabrir = a.status === 'falhou';
+        // Dado gravado sem worker rodando (agendamento perdido): agenda o envio de novo.
+        const parado = a.status === 'pendente' && (a.rodando_ate ?? 0) <= clock() && (
+          Object.keys(a.blocos ?? {}).some(b => b !== 'documentos' && !a.enviados?.[b]) ||
+          (a.blocos?.documentos?.completo && Object.keys(a.blocos.documentos.arquivos ?? {}).some(k => !a.enviados_docs?.[k])));
+        const r = { ...a, flow, login, data_nascimento: novo.data_nascimento, ...ultimo, ...(reabrir ? { status: 'pendente', tentativas: 0, rodando_ate: 0 } : {}) };
+        if (await store.update(id, r, atual.version, FILA)) { rec = r; agendar = reabrir || parado; if (agendar) log({ event: 'etapa2_fila', id: curto(id), passo: reabrir ? 'reaberta' : 'retomada' }); }
       }
-      log({ event: 'etapa2_fila', id: curto(id), passo: 'login' });
+      if (!rec) rec = (await store.get(id, FILA))?.record ?? novo;
+      if (agendar) { try { await enqueue(id, { tipo: 'etapa2' }); } catch {} }
       const menor = (idade(u.data_nascimento) ?? 18) < 18;
-      const rec = (await store.get(id, FILA))?.record ?? novo;
-      if (s2) await salvarStatus(id, stLido.stages, stLido.processo_seletivo_id).catch(() => {});
+      if (s2) await religarVigias(id, s2);
       else {
         s2 = statusSalvo(rec);
         // Portal lento: busca em segundo plano; o candidato toca em Atualizar (ou já usa o último status salvo).
         try { await enqueue(id, { tipo: 'etapa2_status' }); } catch {}
       }
+      log({ event: 'etapa2_fila', id: curto(id), passo: 'login', ms: clock() - t0 });
       // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
       return telaPortal({ id, menor, s2, blocos: rec.blocos, rec, flowToken: req.flow_token });
     }
@@ -889,7 +1008,8 @@ export function createEtapa2({
   async function worker(id) {
     const inicio = clock();
     let f = await store.get(id, FILA);
-    if (!f || FINAIS.has(f.record.status) || (f.record.rodando_ate ?? 0) > clock()) return 204;
+    if (!f || FINAIS.has(f.record.status)) return 204;
+    if ((f.record.rodando_ate ?? 0) > clock()) { await enqueue(id, { tipo: 'etapa2', atrasoSeg: 30 }).catch(() => {}); return 204; }
     if (!await store.update(id, { ...f.record, rodando_ate: clock() + 170000 }, f.version, FILA)) return 204;
     f = await store.get(id, FILA);
     let rec = f.record, version = f.version;
@@ -959,7 +1079,7 @@ export function createEtapa2({
             await entregarDocumentos(next.step, docsB);
             // Entregue: as referências dos arquivos (com as chaves de criptografia) não ficam guardadas.
             await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true });
-            try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {}
+            try { await agendarVigia(id, 'etapa3_vigia', VIGIA_INTERVALO_S); } catch {}
             return;
           }
           const tela = await matricula.open(sessao, next);

@@ -20,7 +20,9 @@ function memoria() {
   return {
     async get(id, c = 'x') { const x = db.get(k(c, id)); return x ? { record: structuredClone(x.record), version: x.version } : null; },
     async create(id, record, c = 'x') { if (db.has(k(c, id))) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; },
-    async update(id, record, version, c = 'x') { const x = db.get(k(c, id)); if (!x || x.version !== version) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; }
+    async update(id, record, version, c = 'x') { const x = db.get(k(c, id)); if (!x || x.version !== version) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; },
+    // Chegou a hora da tarefa agendada (o Cloud Tasks só entrega no horário marcado).
+    naHora(t = Date.now()) { for (const x of db.values()) for (const tipo of Object.keys(x.record.vigia_proxima ?? {})) x.record.vigia_proxima[tipo] = Math.min(x.record.vigia_proxima[tipo], t); }
   };
 }
 
@@ -443,18 +445,18 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const id = filaDe(portal);
   // Ainda em análise: confere de novo mais tarde.
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 0);
   assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600, 'confere de novo em 10 minutos');
   // Equipe aprovou: o vigia vê a liberação, espera ~2 min (calma) e então gera o contrato
   // (IP vazio: não há navegador do candidato) e guarda.
   liberado = true;
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 0, 'acabou de liberar: espera o Rubeus processar');
   assert.equal(fila.at(-1).tipo, 'etapa3_vigia'); assert.ok(fila.at(-1).atrasoSeg > 60 && fila.at(-1).atrasoSeg <= 120);
   agora += 120001;
   const n = fila.length;
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 1);
   assert.equal(site.cliques[0].data.find(x => x.field_id === 52136).value, '');
   assert.deepEqual(fila.slice(n).map(f => f.tipo), ['etapa4_vigia'], 'pronto: o vigia do contrato para e passa a vigiar o pagamento/matrícula');
@@ -505,7 +507,7 @@ test('Link aberto enquanto o Run gera o contrato: espera o PDF pronto, sem gerar
   const g = await store.get(id, 'matriculaFila');
   await store.update(id, { ...g.record, contrato_gerando_ate: Date.now() + 60000 }, g.version, 'matriculaFila');
   await store.update(id, { pdf: '', expires: 0 }, (await store.get(id, 'contratos')).version, 'contratos');
-  await E.vigiarContrato(id, { imediato: true });
+  store.naHora(); await E.vigiarContrato(id, { imediato: true });
   assert.equal(site.cliques.length, 0);
 });
 
@@ -547,10 +549,10 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const id = filaDe(portal);
   // Contrato já assinado no portal: o vigia do contrato não gera de novo e passa para o vigia final.
-  await E.vigiarContrato(id);
+  store.naHora(); await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 0, 'contrato assinado não é gerado de novo');
   assert.equal(fila.at(-1).tipo, 'etapa4_vigia');
-  await E.vigiarFinal(id);
+  store.naHora(); await E.vigiarFinal(id);
   let rec = (await store.get(id, 'matriculaFila')).record;
   assert.ok(rec.pagamento_liberado_em, 'pagamento liberado registrado (momento da mensagem de pagamento)');
   assert.ok(!rec.matricula_concluida_em);
@@ -558,7 +560,7 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   // Pago: Pagamento Recebido e Matriculado Parabéns! — a jornada termina.
   fase = 'pago';
   const n = fila.length;
-  await E.vigiarFinal(id);
+  store.naHora(); await E.vigiarFinal(id);
   rec = (await store.get(id, 'matriculaFila')).record;
   assert.ok(rec.matricula_concluida_em, 'matrícula concluída registrada');
   assert.equal(fila.length, n, 'concluída: o vigia para');
@@ -595,20 +597,22 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora, avisos });
   const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  // Aqui o vigia começou com os documentos ainda em análise (quem já vê o contrato aberto no login não recebe o aviso).
+  { const a = await store.get(id, 'matriculaFila'); assert.ok(a.record.avisos.contrato_liberado); delete a.record.avisos; await store.update(id, a.record, a.version, 'matriculaFila'); }
 
   // Contrato liberado: calma de ~2 min, gera e avisa (documentos aprovados → baixar o contrato).
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(enviados.length, 0, 'na calma ainda não avisa');
   agora += 3 * 60000;
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(enviados.length, 1);
   assert.equal(enviados[0].tipo, 'atualizacao'); assert.equal(enviados[0].celular, '99988880001'); assert.match(enviados[0].situacao, /documentos .* aprovados/);
-  await E.vigiarContrato(id);
+  store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(enviados.length, 1, 'aviso do contrato sai uma vez só');
 
   // Contrato assinado e Pagamento com "Verificar": gera o Pix como o site e manda a cobrança.
   fase = 'pagamento';
-  await E.vigiarFinal(id);
+  store.naHora(agora); await E.vigiarFinal(id);
   assert.equal(cliquesPix.length, 1);
   assert.equal(cliquesPix[0].passo.botao, 3940437);
   assert.equal(cliquesPix[0].data.find(x => x.field_id === 38702).value, 'P');
@@ -616,17 +620,17 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   assert.equal(cob.tipo, 'cobranca'); assert.equal(cob.codigoPix, PIX); assert.equal(cob.centavos, 39000); assert.equal(cob.referencia, 'mat-544149'); assert.equal(cob.recebedor, 'UNIBALSAS');
   let rec = (await store.get(id, 'matriculaFila')).record;
   assert.ok(rec.pagamento_liberado_em && rec.cobranca_enviada_em);
-  await E.vigiarFinal(id);
+  store.naHora(agora); await E.vigiarFinal(id);
   assert.equal(enviados.filter(e => e.tipo === 'cobranca').length, 1, 'cobrança sai uma vez só');
   assert.equal(cliquesPix.length, 1, 'não gera outro Pix');
 
   // Pago: matrícula concluída → aviso final, e o vigia para.
   fase = 'pago';
   const n = fila.length;
-  await E.vigiarFinal(id);
+  store.naHora(agora); await E.vigiarFinal(id);
   assert.match(enviados.at(-1).situacao, /matrícula está concluída/);
   assert.equal(fila.length, n, 'concluída: o vigia para');
-  await E.vigiarFinal(id);
+  store.naHora(agora); await E.vigiarFinal(id);
   assert.equal(enviados.filter(e => /concluída/.test(e.situacao ?? '')).length, 1);
 });
 
@@ -647,10 +651,10 @@ test('Avisos (Blip): cobrança que falha tenta de novo em 10 min, reaproveitando
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
   const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
-  await E.vigiarFinal(id);
+  store.naHora(); await E.vigiarFinal(id);
   assert.equal(fila.at(-1).atrasoSeg, 600);
   falhar = false;
-  await E.vigiarFinal(id);
+  store.naHora(); await E.vigiarFinal(id);
   assert.equal(enviados.length, 2); assert.equal(pix, 1, 'mesmo Pix na nova tentativa');
   assert.equal(fila.at(-1).atrasoSeg, 3600);
 });
@@ -671,17 +675,17 @@ test('Vigia da redação: aguarda a correção e avisa "aprovada, matrícula lib
   const id = fila.at(-1).id;
   assert.equal(fila.at(-1).tipo, 'redacao_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600);
   // Logo após o envio o portal ainda pode mostrar a prova pendente com o botão: não é reprovação.
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 0);
   fase = 'correcao';
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 0);
   fase = 'aprovada';
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 1);
   assert.equal(enviados[0].celular, '99988880001'); assert.match(enviados[0].situacao, /aprovado/); assert.match(enviados[0].proximo, /responsável financeiro/);
   const n = fila.length;
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 1, 'aviso sai uma vez'); assert.equal(fila.length, n, 'vigia para');
 });
 
@@ -696,9 +700,191 @@ test('Vigia da redação: reprovada (sai da correção sem concluir e volta o bo
   // Entrou pelo login (sem celular guardado): o celular vem da página "Meus dados".
   await E.iniciarVigiaRedacao({ login: '39184720514', data_nascimento: NASC });
   const id = fila.at(-1).id;
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   fase = 'reprovada';
-  await E.vigiarRedacao(id);
+  store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 1);
   assert.equal(enviados[0].celular, '99988880002'); assert.match(enviados[0].situacao, /não atingiu/);
+});
+
+// ------------------------------------------------------------------ vigias: uma corrente, sem perda, para todos (2.12.1)
+test('Vigias: abrir o contrato várias vezes não multiplica correntes; tarefa de corrente antiga sai sem reagendar; execução em paralelo é adiada', async () => {
+  const store = memoria(); const fila = [];
+  const site = siteContrato();
+  let agora = Date.UTC(2026, 10, 17, 12);
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  const conta = tipo => fila.filter(f => f.tipo === tipo).length;
+  assert.equal(conta('etapa3_vigia'), 1, 'o login liga o vigia do contrato uma vez');
+  // O candidato abre o contrato 3 vezes e o PDF guardado some (vencido): gera de novo, mas a corrente final é uma só.
+  for (let i = 0; i < 3; i++) {
+    await E.vigiarContrato(id, { imediato: true });
+    const c = await store.get(id, 'contratos');
+    await store.update(id, { ...c.record, expires: 0 }, c.version, 'contratos');
+    agora += 60000;
+  }
+  assert.equal(site.cliques.length, 3);
+  assert.equal(conta('etapa4_vigia'), 1, 'uma corrente do vigia final');
+  assert.equal(conta('etapa3_vigia'), 1, 'pedido do candidato não cria corrente do contrato');
+  // Tarefa que chega antes do horário agendado é de corrente antiga: não confere nem reagenda.
+  const n = fila.length;
+  assert.equal(await E.vigiarFinal(id), 204);
+  assert.equal(fila.length, n);
+  // Outra conferência em andamento: 503 (o Cloud Tasks entrega de novo depois), sem rodar em paralelo.
+  store.naHora(agora);
+  const a = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...a.record, final_rodando_ate: agora + 60000 }, a.version, 'matriculaFila');
+  assert.equal(await E.vigiarFinal(id), 503);
+  assert.equal(fila.length, n);
+  // Trava vencida: confere e segue a corrente.
+  agora += 61000;
+  assert.equal(await E.vigiarFinal(id), 204);
+  assert.equal(fila.length, n + 1); assert.equal(fila.at(-1).tipo, 'etapa4_vigia');
+  assert.equal((await store.get(id, 'matriculaFila')).record.final_rodando_ate, 0, 'trava liberada no fim');
+});
+
+test('Vigias: falha passageira do Cloud Tasks não encerra a corrente; falha repetida pede nova entrega; o registro não expira no meio', async () => {
+  const store = memoria(); const fila = []; let falhas = 0;
+  const site = siteContrato();
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: [{ title: 'Contrato', cta_link: null }] }); // ainda em análise
+  let agora = Date.UTC(2026, 10, 17, 12);
+  const erros = []; const erroOriginal = console.error; console.error = m => erros.push(m);
+  try {
+    const E = createEtapa2({ store, enqueue: async (id, o) => { if (falhas > 0) { falhas--; throw new Error('tasks fora'); } fila.push({ id, ...o }); }, sealState, openState,
+      matricula: rubeusContrato().matricula, validCpf, log: () => {}, portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora });
+    const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+    // Uma falha: tenta de novo na hora e a corrente segue.
+    falhas = 1; let n = fila.length;
+    store.naHora(agora); assert.equal(await E.vigiarContrato(id), 204);
+    assert.equal(fila.length, n + 1); assert.equal(fila.at(-1).tipo, 'etapa3_vigia');
+    // Duas falhas seguidas: erro de agendamento (o worker devolve 500 e o Cloud Tasks repete a tarefa).
+    agora += 600000; falhas = 2; n = fila.length;
+    await assert.rejects(() => E.vigiarContrato(id), e => e.agendar === true);
+    assert.equal(fila.length, n);
+    assert.match(erros.join('\n'), /vigia_atencao/);
+    assert.ok(!erros.join('\n').includes('39184720514'), 'sem CPF no alerta');
+    // A repetição da mesma tarefa passa e reagenda.
+    assert.equal(await E.vigiarContrato(id), 204);
+    assert.equal(fila.length, n + 1);
+    const rec = (await store.get(id, 'matriculaFila')).record;
+    assert.ok(rec.expires >= rec.vigia_proxima.etapa3_vigia + 7 * 86400000, 'prazo do registro acompanha o vigia');
+  } finally { console.error = erroOriginal; }
+});
+
+test('Login liga o vigia certo também para quem não entregou os documentos pelo Flow, sem duplicar', async () => {
+  const montar = stages => {
+    const store = memoria(); const fila = [];
+    const r = rubeusFalso();
+    r.matricula.portal = async () => ({ token: 'tok2', processo_seletivo_id: '20383', stages });
+    const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {},
+      portalSite: siteContrato().portalSite, urlPublica: 'https://run.example' });
+    const entrar = () => toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+    return { store, fila, entrar };
+  };
+  const ok = (title, texto = 'Concluída') => ({ title, feedback: { complementary_text: texto, conclusive: 1 } });
+  const parada = (title, texto) => ({ title, feedback: { complementary_text: texto, conclusive: 0 } });
+  const abertaEm = (title, passo) => ({ title, feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/' + passo });
+
+  // Documentos em análise (enviados pelo site): vigia do contrato, uma vez.
+  let c = montar([ok('Inscrição'), ok('Pré-matrícula'), parada('Documentos matrícula', 'Em análise'), parada('Contrato', 'Aguardando documentação')]);
+  let id = filaDe(await c.entrar());
+  await c.entrar();
+  assert.deepEqual(c.fila.map(f => [f.tipo, f.atrasoSeg]), [['etapa3_vigia', 600]]);
+  assert.ok(!(await c.store.get(id, 'matriculaFila')).record.avisos?.contrato_liberado, 'vai avisar quando os documentos forem aprovados');
+
+  // Contrato assinado e pagamento pendente: vigia final (cobrança), uma vez.
+  c = montar([ok('Inscrição'), ok('Documentos matrícula', 'Aprovados'), ok('Contrato', 'Assinado'), abertaEm('Pagamento', 300670), parada('Matriculado', 'Existem pendências')]);
+  id = filaDe(await c.entrar());
+  await c.entrar();
+  assert.deepEqual(c.fila.map(f => f.tipo), ['etapa4_vigia']);
+  assert.ok((await c.store.get(id, 'matriculaFila')).record.final_vigiando);
+
+  // Ainda preenchendo a matrícula: nenhum vigia.
+  c = montar([ok('Inscrição'), abertaEm('Pré-matrícula', 300676), parada('Documentos matrícula', 'Pendente'), parada('Contrato', 'Aguardando documentação')]);
+  await c.entrar();
+  assert.deepEqual(c.fila.filter(f => /vigia/.test(f.tipo)), []);
+
+  // Matrícula concluída: nenhum vigia.
+  c = montar([ok('Inscrição'), ok('Documentos matrícula'), ok('Contrato'), ok('Pagamento', 'Recebido'), ok('Matriculado', 'Parabéns!')]);
+  await c.entrar();
+  assert.deepEqual(c.fila.filter(f => /vigia/.test(f.tipo)), []);
+});
+
+// ------------------------------------------------------------------ 2.12.2: C9, C4, C5
+test('C9: worker ocupado reagenda em 30 s; login retoma bloco gravado sem worker', async () => {
+  const { E, store, fila } = montar();
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await continuar(E, portal);
+  await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const id = fila.find(f => f.tipo === 'etapa2').id;
+  // Trava ativa: a tarefa não some, volta em 30 s.
+  let a = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...a.record, rodando_ate: Date.now() + 60000 }, a.version, 'matriculaFila');
+  let n = fila.length;
+  assert.equal(await E.worker(id), 204);
+  assert.deepEqual(fila.slice(n).map(f => [f.tipo, f.atrasoSeg]), [['etapa2', 30]]);
+  // Agendamento perdido (trava vencida, bloco sem envio): entrar de novo agenda o envio.
+  a = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...a.record, rodando_ate: 0 }, a.version, 'matriculaFila');
+  n = fila.length;
+  await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.ok(fila.slice(n).some(f => f.tipo === 'etapa2'), 'login retoma o envio');
+  // Tudo enviado: login não agenda de novo.
+  await E.worker(id);
+  n = fila.length;
+  await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.ok(!fila.slice(n).some(f => f.tipo === 'etapa2'), 'sem envio repetido');
+});
+
+test('C4: Rubeus fora do ar mostra "indisponível"; dados errados continuam "não encontramos"; uma escrita no login', async () => {
+  for (const [erro, esperado] of [
+    [new Error('fetch failed'), /indisponível/],
+    [new Error('A consulta demorou.'), /indisponível/],
+    [new Error('[RUBEUS_ERRO] /login não confirmou a operação (HTTP 502). '), /indisponível/],
+    [new Error('[RUBEUS_ERRO] /login não confirmou a operação (HTTP 401). '), /Não encontramos/],
+    [new Error('Não encontramos uma inscrição com esses dados.'), /Não encontramos/]
+  ]) {
+    const store = memoria();
+    const E = createEtapa2({ store, enqueue: async () => {}, sealState, openState, validCpf, log: () => {},
+      matricula: { ...rubeusFalso().matricula, login: async () => { throw erro; } } });
+    const t = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+    assert.equal(t.screen, 'MATR_LOGIN'); assert.match(t.data.erro, esperado, erro.message);
+  }
+  // Login com portal em dia: fila + último status gravados juntos (uma escrita).
+  const store = memoria(); let escritas = 0;
+  const create = store.create.bind(store), update = store.update.bind(store);
+  store.create = (...a) => { escritas++; return create(...a); };
+  store.update = (...a) => { escritas++; return update(...a); };
+  const E = createEtapa2({ store, enqueue: async () => {}, sealState, openState, validCpf, log: () => {}, matricula: rubeusFalso().matricula });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  assert.equal(escritas, 1);
+  assert.ok((await store.get(id, 'matriculaFila')).record.ultimo_status?.stages?.length);
+});
+
+test('C5: aviso ou cobrança que esgota as tentativas gera alerta etapa_aviso_atencao, sem CPF nem celular', async () => {
+  const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
+  const store = memoria(); const fila = [];
+  let agora = Date.UTC(2026, 10, 16, 12);
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, atualizacao: async () => false, cobranca: async () => false };
+  const site = siteContrato();
+  site.passoResp.data.steps.currentStep.applicantData = [{ field_id: 38544, value: 'MARIA DA SILVA' }, { field_id: 38546, value: '99988880001' }];
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300669' },
+    { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300670' },
+    { title: 'Matriculado', feedback: { complementary_text: 'Existem pendências', conclusive: 0 } }] });
+  site.portalSite.passoBruto = async (_s, passo) => (passo === 300670 ? passoPagamento() : site.passoResp);
+  site.portalSite.clicar = async () => ({ success: true, data: { place_id: 1016, place_type_id: 6, stage_id: 261005 } });
+  site.portalSite.popup = async () => ({ success: true, data: { applicantData: [{ field_id: 50901, value: PIX }] } });
+  const erros = []; const erroOriginal = console.error; console.error = m => erros.push(String(m));
+  try {
+    const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+      portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora, avisos });
+    const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+    for (let i = 0; i < 6; i++) { store.naHora(agora); await E.vigiarFinal(id); agora += 3600000; }
+    const alertas = erros.filter(e => e.includes('etapa_aviso_atencao'));
+    assert.equal(alertas.length, 1, 'um alerta, na 5ª falha');
+    assert.match(alertas[0], /cobranca/);
+    assert.ok(!alertas[0].includes('39184720514') && !alertas[0].includes('99988880001'));
+  } finally { console.error = erroOriginal; }
 });

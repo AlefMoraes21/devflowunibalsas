@@ -1,3 +1,21 @@
+# Versão 2.12.2 — login mais rápido e claro, envio que não se perde, alerta de avisos
+
+Correções C9, C4 e C5 de `REVISAO-CHECK-2.12.0.md`. Só servidor (`api/etapa2-matricula.js`, `api/flow.js`); o Flow da WABA não muda.
+
+- **Envio que não se perde (C9):** worker ocupado reagenda a tarefa em 30 s em vez de descartá-la; gravar bloco ou documento tenta agendar duas vezes; o login retoma o envio quando há bloco gravado sem worker rodando.
+- **Login (C4):** Rubeus fora do ar, lento ou com HTTP 5xx mostra "O sistema da UniBalsas está indisponível no momento. Tente de novo em alguns minutos." (antes dizia "Não encontramos uma inscrição"). Espera do portal: 6,5 s. Fila e último status gravados numa escrita só. O log `etapa2_fila` do login traz o tempo total (`ms`).
+- **Alerta (C5):** na 5ª falha de aviso, cobrança ou aviso da redação, `console.error` com `event: 'etapa_aviso_atencao'` (sem CPF e sem celular).
+- 200 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.12.2`.
+
+# Versão 2.12.1 — vigias: uma corrente, sem perda, para todos
+
+Correções C1, C2 e C3 de `REVISAO-CHECK-2.12.0.md`. Só servidor (`api/etapa2-matricula.js`, `api/flow.js`); o Flow da WABA não muda.
+
+- **Uma corrente por vigia (C1):** cada agendamento guarda o horário da próxima conferência (`vigia_proxima`); tarefa de corrente antiga sai sem reagendar. Abrir o contrato pelo Flow não cria corrente. Uma execução por vez (`final_rodando_ate`, `rodando_ate`): a repetida recebe 503 e o Cloud Tasks entrega depois. A cobrança confere de novo se já foi enviada antes de enviar.
+- **Sem perda silenciosa (C2):** o agendamento tenta duas vezes; se falhar, registra `vigia_atencao` (erro) e o worker devolve 500 para o Cloud Tasks repetir. O prazo do registro no Firestore acompanha o vigia (próxima conferência + 7 dias).
+- **Vigia para todos (C3):** o login (e a atualização de status em segundo plano) liga ou religa o vigia que o portal pede: documentos em análise ou contrato pendente → vigia do contrato; pagamento pendente → vigia final. Quem já vê o contrato aberto no login não recebe o aviso de "documentos aprovados".
+- 197 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.12.1`.
+
 # Versão 2.12.0 — Avisos pelo WhatsApp (Blip) e cobrança da taxa de matrícula com Pix
 
 - **Avisos automáticos** (template `unibalsas_atualizacao_processo`): quando o vigia confirma no portal que a etapa anterior foi concluída e a próxima abriu.
