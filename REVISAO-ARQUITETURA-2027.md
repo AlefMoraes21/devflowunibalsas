@@ -1,4 +1,4 @@
-# Revisão da arquitetura — Flow UniBalsas 2027/1 (versão 2.11.0, 17/11/2026)
+# Revisão da arquitetura — Flow UniBalsas 2027/1 (versão 2.12.0, 16/11/2026)
 
 Documento para quem continuar o projeto (pessoa ou IA). Explica como o sistema funciona, o que é feito ao vivo e o que é feito em segundo plano, onde há redundância e onde ainda há risco.
 
@@ -8,8 +8,9 @@ Documento para quem continuar o projeto (pessoa ou IA). Explica como o sistema f
 |---|---|
 | **WhatsApp Flow** (JSON único `flows/etapa1-vestibular.json`, colado na WABA) | Só telas. Listas fixas (UF, cor/raça, estado civil, documentos) vêm prontas no JSON; listas que mudam (cursos/turnos, escolas) vêm do cache do Run. Cada tela manda os dados ao Run (`data_exchange`). |
 | **Google Cloud Run** (`/api/flow`, mínimo de 0 instâncias) | Recebe cada tela, valida, **grava no Firestore e responde na hora**. Desliga sozinho quando ninguém usa (escala para zero); acorda com a próxima requisição. |
-| **Firestore** (`inscricoesFila`, `matriculaFila`, `flowCache`, `contratoLinks`, `contratos`…) | Fila durável. Tudo o que o candidato preencheu fica guardado (criptografado) até chegar ao Rubeus. |
+| **Firestore** (`inscricoesFila`, `matriculaFila`, `redacaoVigia`, `flowCache`, `contratoLinks`, `contratos`…) | Fila durável. Tudo o que o candidato preencheu fica guardado (criptografado) até chegar ao Rubeus. |
 | **Cloud Tasks** (fila `unibalsas-flow`) | Agenda o **worker** do Run (`/internal/flow-worker`, assinado por HMAC) — envio ao Rubeus, novas tentativas, vigias. Acorda o Run mesmo com zero instâncias. |
+| **Blip** (API Active Campaign, `POST {BLIP_API_URL}/commands`, `uri /campaign/full`) | Envia as mensagens ativas do WhatsApp disparadas pelo Run: avisos de etapa e cobrança com Pix (templates aprovados na Meta). O Run só chama o Blip; o Blip não chama o Run. |
 | **Rubeus** (API oficial `admin.portal.apprbs.com.br` + API do site `vestibular.unibalsas.edu.br/api/applyment/*`) | Sistema de inscrição/matrícula da UniBalsas (e TOTVS por trás). O Run conversa com ele igual ao navegador (engenharia reversa em `ENGENHARIA-REVERSA-VESTIBULAR-2027.md`). |
 
 ## 2. Respostas às perguntas da revisão
@@ -42,7 +43,10 @@ Fora do Flow (no navegador, não sujeito aos 10 s): o link do contrato. Normalme
 ### 5. "O Rubeus se comunica com o Run, que depois se comunica com o Flow?"
 **Não diretamente — o Rubeus não avisa ninguém** (não há webhook configurado). Quem pergunta é o Run:
 - no **login** (status ao vivo ou salvo);
-- pelos **vigias** (Cloud Tasks), que conferem o portal: contrato (a cada 10 min nas 2 primeiras horas, depois de hora em hora, por até 15 dias) e etapa final (de hora em hora, por até 30 dias). Quando algo muda, o Run guarda o novo status e o momento (é aí que entram os avisos pelo WhatsApp).
+- pelos **vigias** (Cloud Tasks), que conferem o portal e, quando algo muda, guardam o novo status e **mandam o aviso pelo WhatsApp** (seção 4):
+  - **redação** (começa quando a etapa 1 confirma a entrega): 10 min nas 2 primeiras horas, depois de hora em hora, até 15 dias;
+  - **contrato** (começa depois dos documentos entregues): mesmo ritmo, até 15 dias;
+  - **etapa final** (pagamento → matriculado): de hora em hora (10 min enquanto uma cobrança está para ser reenviada), até 30 dias.
 - O Rubeus tem webhooks (Configurações → Integrações → Webhooks), mas sem lista pública de gatilhos; se a UniBalsas cadastrar um gatilho de mudança de status apontando para o Run, os vigias viram só reserva.
 
 ### 6. "O Run não fica 100% ativo?"
@@ -58,7 +62,7 @@ Fora do Flow (no navegador, não sujeito aos 10 s): o link do contrato. Normalme
   3. o Firestore e o Cloud Tasks são serviços gerenciados do Google (redundantes por natureza); os dados ficam criptografados com prazo de expiração.
 
 ### 8. "Alguma etapa em que o Flow ainda espera o Rubeus mais de 10 s?"
-**Não.** O maior caso é o login (login + status com teto de 7,5 s somados). Tudo o que demora — gravar passos (até 15 s por passo), gerar o contrato no TOTVS (~14,5 s), gerar o Pix (~5 s), ler as etapas do portal (~12–16 s) — roda no worker/vigias ou no navegador. Atenção só ao **primeiro acesso depois de parado** (Cloud Run acordando, +1–3 s) somado a um login lento.
+**Não.** O maior caso é o login (login + status com teto de 7,5 s somados). Tudo o que demora — gravar passos (até 15 s por passo), gerar o contrato no TOTVS (~14,5 s), gerar o Pix (~5 s), ler as etapas do portal (~12–16 s), enviar mensagens pelo Blip — roda no worker/vigias ou no navegador. Atenção só ao **primeiro acesso depois de parado** (Cloud Run acordando, +1–3 s) somado a um login lento.
 
 ### 9. "Ao logar, a primeira tela é sempre o Status, com o botão da próxima etapa disponível?"
 **Sim (versão 2.10.0+).** Login → tela de status igual ao Portal do candidato (lista: ✅ concluída / ❗ pendente, com o status do site e o botão "Verificar" nas etapas abertas). Tocar numa etapa aberta leva à sua tela. Exceções intencionais:
@@ -71,92 +75,69 @@ Fora do Flow (no navegador, não sujeito aos 10 s): o link do contrato. Normalme
 |---|---|---|---|
 | Inscrição | candidato | telas de inscrição | grava no Rubeus |
 | Prova online | candidato | redação | espera 10 min, confere a prova 2× e envia |
-| — correção da redação | **equipe** | status "Aguardando correção" | — |
+| — correção da redação | **equipe** | status "Aguardando correção" | vigia da redação → aviso **aprovada** ou **não aprovada** |
 | Resp. financeiro / Pré-matrícula | candidato | telas da matrícula | grava passo a passo |
 | Documentos matrícula | candidato | 7 telas (3 obrigatórios) | envia pelo passo do site (multipart) e confere "Em análise" |
-| — análise dos documentos | **equipe** (até 48 h úteis) | status "Em análise" | vigia do contrato |
+| — análise dos documentos | **equipe** (até 48 h úteis) | status "Em análise" | vigia do contrato → gera o PDF → aviso **documentos aprovados** |
 | Contrato | candidato (baixa, assina no GOV.BR e envia por e-mail) | tela do site + link exclusivo do PDF | gera e guarda o PDF ao liberar |
 | — conferência do contrato assinado | **equipe** | status | vigia final |
-| Pagamento | candidato (Pix ou cartão) | orientação do site (fora do Flow) | registra "pagamento liberado" |
-| — confirmação do pagamento | TOTVS | status | registra "matrícula concluída" |
+| Pagamento | candidato (Pix ou cartão) | orientação do site (fora do Flow) | gera o Pix como o site → **cobrança pelo WhatsApp** (Pix + link do portal) |
+| — confirmação do pagamento | TOTVS | status | aviso **matrícula concluída** |
 | Matriculado ("Parabéns!") | — | status ✅ | fim da jornada |
 
-## 4. Modelo de mensagem (template) para aprovar na Meta — avisos de etapa
+## 4. Avisos pelo WhatsApp e cobrança (versão 2.12.0)
 
-Um único template de **Utilidade** cobre todos os momentos que dependem da equipe. As variáveis recebem frases curtas (a Meta não aceita quebra de linha, tabulação nem mais de 4 espaços seguidos dentro de uma variável; o texto não pode começar nem terminar com variável).
+O Run manda mensagens ativas pelo Blip quando um vigia **confirma no portal** que a etapa anterior foi concluída e a próxima abriu. Nada é enviado com base em suposição.
 
-- **Nome:** `unibalsas_atualizacao_processo` · **Categoria:** Utilidade · **Idioma:** Português (BR)
-- **Cabeçalho (texto):** `UNIBALSAS Informa`
-- **Corpo:**
-```
-Olá, {{1}}! 👋
+### 4.1 Templates aprovados na Meta (16/11/2026, Utilidade, pt_BR)
 
-Temos uma atualização no seu processo de {{2}}:
+| Template | ID | Variáveis | Botões |
+|---|---|---|---|
+| `unibalsas_atualizacao_processo` | 1817217749539469 | {{1}} primeiro nome · {{2}} processo · {{3}} o que aconteceu · {{4}} próximo passo | Flow `Acessar minha inscrição` (navigate → `INSC_INICIO`) |
+| `unibalsas_cobranca_matricula` | 4602120220057390 | {{1}} primeiro nome · {{2}} valor **sem "R$"** (ex.: `390,00`) | Copiar código Pix · Abrir link de pagamento ("Pedir pagamento") |
 
-✅ {{3}}
+Regras da Meta nas variáveis: sem quebra de linha, tabulação ou mais de 4 espaços seguidos; o Run limpa isso antes de enviar. Rodapé dos dois: `UniBalsas - Centro Universitário de Balsas`.
 
-Próximo passo: {{4}}
+### 4.2 Quando cada mensagem sai
 
-Toque no botão abaixo para continuar pelo WhatsApp. Se tiver dúvidas, é só responder esta mensagem.
-```
-- **Rodapé:** `UniBalsas - Centro Universitário`
-- **Botão:** tipo **Flow** — texto `Acessar minha inscrição`, Flow `etapa1-vestibular`, ação `navigate`, tela `INSC_INICIO`.
-
-**Exemplos de preenchimento** (exigidos na aprovação; a Meta pede um exemplo por variável):
-
-| Momento | {{1}} | {{2}} | {{3}} | {{4}} |
+| Momento | Quem detecta | Condição conferida no portal | Template | {{3}} / {{4}} |
 |---|---|---|---|---|
-| Prova liberada | Maria | inscrição no Vestibular 2027/1 | Sua inscrição foi concluída e a avaliação online já está disponível. | faça a sua redação pelo botão abaixo. |
-| Redação aprovada | Maria | inscrição no Vestibular 2027/1 | Sua redação foi corrigida e você foi aprovada! 🎉 | informe o responsável financeiro, seus dados e envie os documentos da matrícula. |
-| Redação não aprovada | Maria | inscrição no Vestibular 2027/1 | Sua redação foi corrigida e não atingiu a nota necessária. | você pode realizar a avaliação mais uma vez. |
-| Documentos aprovados | Maria | matrícula | Seus documentos de matrícula foram analisados e aprovados. | baixe o seu contrato, assine pelo GOV.BR e envie para a central de matrícula. |
-| Documento recusado | Maria | matrícula | Um ou mais documentos da sua matrícula precisam ser reenviados. | veja o motivo e envie o documento novamente. |
-| Contrato recebido | Maria | matrícula | Recebemos o seu contrato assinado. | realize o pagamento da taxa de matrícula. |
-| Matrícula concluída | Maria | matrícula | Pagamento recebido. Sua matrícula está concluída! 🎉 | acompanhe as orientações da UniBalsas para o início das aulas. |
+| Redação aprovada | vigia da redação | Prova online concluída **e** a etapa seguinte aberta com o botão do site | atualização | "Sua redação foi corrigida e você foi aprovado(a)! 🎉" / "informe o responsável financeiro, seus dados e envie os documentos da matrícula pelo botão abaixo." |
+| Redação não aprovada | vigia da redação | a prova saiu de "Aguardando correção" sem concluir e voltou o botão (só depois de ter visto "Aguardando correção") | atualização | "Sua redação foi corrigida e não atingiu a nota necessária." / "você pode realizar a avaliação mais uma vez pelo botão abaixo." |
+| Documentos aprovados | vigia do contrato | contrato liberado **e** PDF já gerado pelo Run (não avisa quem abriu o contrato pelo Flow) | atualização | "Seus documentos de matrícula foram analisados e aprovados." / "acesse a sua inscrição pelo botão abaixo e baixe o contrato da sua matrícula." |
+| Pagamento liberado | vigia final | Contrato concluído **e** Pagamento com "Verificar" | **cobrança** | — (nome e valor) |
+| Matrícula concluída | vigia final | Matriculado "Parabéns!" (ou Pagamento "Recebido"), só para quem o vigia viu com o pagamento pendente | atualização | "Pagamento recebido. Sua matrícula está concluída! 🎉" / "acompanhe as orientações da UniBalsas para o início das aulas." |
 
-**Mensagem de pagamento** (template separado, tipo **Detalhes do pedido / order_details**, enviado pela API de mensagens ativas do Blip): "Taxa de matrícula — R$ {valor}", com Pix (código copia e cola gerado no TOTVS) e link do Portal do candidato para cartão. Ver a seção 17 da engenharia reversa.
+**Uma vez só, com novas tentativas:** cada aviso grava o momento do envio na fila; se o Blip recusar, tenta de novo (até 5 vezes; a cobrança a cada 10 min). Sem as variáveis do Blip nada é enviado (log `nao_configurado`) e os vigias seguem normalmente.
 
-### 4.1 Template de pagamento — `unibalsas_taxa_matricula`
+### 4.3 Cobrança com Pix
 
-> **Versão submetida (16/11):** editor "Pedir pagamento" da Meta, com os botões **Copiar código Pix** e **Abrir link de pagamento**. {{1}} = primeiro nome, {{2}} = valor **sem "R$"** (ex.: `380,00`). O texto usa "ingresso em 2027/1", que vale para os quatro processos. No envio, o Run passa o copia e cola do popup 1016 (campo 50901) e o link do portal. Chave Pix (CNPJ) em `PIX_CHAVE`. A versão abaixo foi o rascunho.
+1. O vigia entra no portal como o candidato e abre o passo do pagamento (300670 no Vestibular, 300701 na Transferência).
+2. Faz o que o botão "Realizar pagamento" do Pix faz no site: `button-click` do botão com lógica `P` (rádio 38702) → popup 1016 → **copia e cola** no campo 50901. Reserva: o último Pix que o portal guardou.
+3. O Pix gerado fica na fila por 12 h: novas tentativas reaproveitam o mesmo código (não geram outro).
+4. Envia o template de cobrança com o `order_details` em `audience.messageParams["#payment#"]`: `pix_dynamic_code` (código do TOTVS, recebedor lido do próprio código, chave `PIX_CHAVE` = CNPJ) + `payment_link` (Portal do candidato, para cartão). Valor: campo 53443 (Pix) ou 38658 (centavos). Referência `mat-{IDBOLETO}`.
+5. O WhatsApp não confirma sozinho um Pix gerado por outro sistema: quem confirma é o vigia final ("Pagamento Recebido"), que manda o aviso de matrícula concluída.
 
-- **Categoria:** Utilidade · **Tipo:** Detalhes do pedido (order details) · **Idioma:** Português (BR) · variáveis do tipo Número
-- **Cabeçalho (texto):** `Taxa de matrícula UniBalsas`
-- **Corpo** (exemplos: {{1}} `Maria`, {{2}} `390,00`):
-```
-Olá, {{1}}! 🎓
+Cartão nunca é digitado no WhatsApp (política da Meta): o botão "Abrir link de pagamento" leva ao portal.
 
-Estamos finalizando! Para concluir a sua matrícula no Vestibular 2027/1, realize o pagamento da taxa de matrícula no valor de R$ {{2}}.
+### 4.4 Nome e celular
 
-Toque em Ver e pagar para copiar o código Pix. Se preferir cartão de crédito, use o link do Portal do candidato que aparece no pedido.
+Vêm do próprio portal: `applicantData` dos passos do contrato e do pagamento (campos 38544 nome, 38546 celular) ou, na falta, a página 432 "Meus dados". Na redação, o celular informado na inscrição pelo Flow. Ficam na fila criptografada; **o celular nunca vai para os logs**.
 
-Assim que o pagamento for confirmado, avisaremos você por aqui.
-```
-- **Rodapé:** `UniBalsas - Centro Universitário`
-- **Botão:** Detalhes do pedido (`ORDER_DETAILS`), texto `Ver e pagar`.
+### 4.5 Configuração no Cloud Run
 
-Criação pela API, se o tipo "Detalhes do pedido" não aparecer no Gerenciador (`POST /{WABA_ID}/message_templates`):
-```json
-{"name":"unibalsas_taxa_matricula","language":"pt_BR","category":"UTILITY",
- "components":[
-  {"type":"HEADER","format":"TEXT","text":"Taxa de matrícula UniBalsas"},
-  {"type":"BODY","text":"<corpo acima>","example":{"body_text":[["Maria","390,00"]]}},
-  {"type":"FOOTER","text":"UniBalsas - Centro Universitário"},
-  {"type":"BUTTONS","buttons":[{"type":"ORDER_DETAILS","text":"Ver e pagar"}]}]}
-```
+| Variável | Valor |
+|---|---|
+| `BLIP_API_URL` | `https://unibalsasnovonegocio.http.msging.net` |
+| `BLIP_BOT_KEY` | chave do bot (só no Cloud Run; nunca no repositório) |
+| `PIX_CHAVE` | `07344774000189` |
+| opcionais | `BLIP_TEMPLATE_ATUALIZACAO`, `BLIP_TEMPLATE_COBRANCA`, `PIX_RECEBEDOR`, `PAGAMENTO_LINK`, `BLIP_FLOW_ID` / `BLIP_STATE_ID` / `BLIP_MASTERSTATE`, `AVISOS_DESLIGADOS=1` (desliga tudo) |
 
-**Disparo pelo Run** (quando o vigia final grava `pagamento_liberado_em`): login no site → `button-click` 3940437 com 38702=`P` → popup 1016 → campo 50901 (copia e cola) e 38658 (centavos), 38656 (IDBOLETO). Componentes do template:
-```json
-[{"type":"body","parameters":[{"type":"text","text":"Maria"},{"type":"text","text":"390,00"}]},
- {"type":"button","sub_type":"order_details","index":0,"parameters":[{"type":"action","action":{"order_details":{
-   "reference_id":"mat-<IDBOLETO>","type":"digital-goods","payment_type":"br","currency":"BRL",
-   "total_amount":{"value":39000,"offset":100},
-   "payment_settings":[
-     {"type":"pix_dynamic_code","pix_dynamic_code":{"code":"<50901>","merchant_name":"<RECEBEDOR>","key":"<CHAVE_PIX>","key_type":"CNPJ"}},
-     {"type":"payment_link","payment_link":{"uri":"https://vestibular.unibalsas.edu.br/presencial"}}],
-   "order":{"status":"pending","subtotal":{"value":39000,"offset":100},
-     "items":[{"retailer_id":"taxa-matricula-2027-1","name":"Taxa de matrícula 2027/1","amount":{"value":39000,"offset":100},"quantity":1}]}}}}]}]
-```
-O WhatsApp não atualiza sozinho o status de um Pix de provedor próprio: quem confirma é o vigia final ("Pagamento Recebido"), que então manda o aviso "Matrícula concluída" pelo template `unibalsas_atualizacao_processo`.
+Logs para acompanhar: `blip_aviso` (tipo, enviado, http, motivo), `etapa_aviso`, `redacao_vigia`, `etapa_final` (`cobranca_enviada`, `cobranca_falhou`, `pix_erro`).
 
-**O que o Run precisa para disparar:** `BLIP_API_URL` e `BLIP_BOT_KEY` (chave do bot roteador) no Cloud Run, os nomes dos templates aprovados e, para o pagamento, nome do recebedor + chave Pix (CNPJ) da conta que recebe o Pix do TOTVS.
+### 4.6 Pontos em aberto
+
+- **Nenhum envio real testado ainda.** No primeiro, conferir o `motivo` do `blip_aviso`. Suspeito principal: o link de pagamento (a Meta usa `payment_link.uri`; o artigo do Blip mostra `link`; o Run usa `uri`).
+- O botão do Flow do template de atualização vai sem parâmetros.
+- O texto de "Reprovado" da prova ainda não foi visto no portal: a reprovação é reconhecida pelo comportamento da etapa.
+- Ainda **sem aviso automático**: prova liberada logo após a inscrição (a etapa 1 usa `BLIP_TEMPLATE_REDACAO`, não configurado), documento recusado e contrato recebido. O template de atualização já serve para eles.
