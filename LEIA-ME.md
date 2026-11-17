@@ -1,3 +1,10 @@
+# Versão 2.12.3 — toque em "Pagamento" fala do Pix por mensagem
+
+Correção C10 de `REVISAO-CHECK-2.12.0.md`. Só servidor; o Flow da WABA não muda.
+
+- Com a cobrança configurada: se o Pix já foi enviado, a tela diz "Enviamos o Pix da taxa de matrícula por mensagem aqui no WhatsApp. Para pagar com cartão, acesse o Portal do candidato."; se ainda não, agenda o vigia final em 5 s e diz que o Pix chega em instantes. Sem cobrança configurada (ou tentativas esgotadas), segue a orientação do site.
+- 201 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.12.3`.
+
 # Versão 2.12.2 — login mais rápido e claro, envio que não se perde, alerta de avisos
 
 Correções C9, C4 e C5 de `REVISAO-CHECK-2.12.0.md`. Só servidor (`api/etapa2-matricula.js`, `api/flow.js`); o Flow da WABA não muda.

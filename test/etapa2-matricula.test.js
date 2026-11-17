@@ -888,3 +888,26 @@ test('C5: aviso ou cobrança que esgota as tentativas gera alerta etapa_aviso_at
     assert.ok(!alertas[0].includes('39184720514') && !alertas[0].includes('99988880001'));
   } finally { console.error = erroOriginal; }
 });
+
+test('C10: toque em "Pagamento" com a cobrança pelo WhatsApp: agenda o Pix em 5 s; depois de enviado, avisa que foi por mensagem', async () => {
+  const store = memoria(); const fila = [];
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Concluído', conclusive: 1 } },
+    { title: 'Pagamento - Taxa de matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Pagar' }, cta_link: 'presencial/passo/300670' },
+    { title: 'Matriculado', feedback: { complementary_text: 'Existem pendências', conclusive: 0 } }
+  ] });
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, atualizacao: async () => true, cobranca: async () => true };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, avisos });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = filaDe(st);
+  const n = fila.length;
+  const pag = await continuar(E, st);
+  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Pix .*em instantes/);
+  assert.deepEqual(fila.slice(n).map(f => [f.tipo, f.atrasoSeg]), [['etapa4_vigia', 5]]);
+  const a = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...a.record, cobranca_enviada_em: Date.now() }, a.version, 'matriculaFila');
+  const depois = await continuar(E, st);
+  assert.match(depois.data.mensagem, /Enviamos o Pix .*por mensagem/);
+  assert.equal(fila.length, n + 1, 'não agenda de novo');
+});

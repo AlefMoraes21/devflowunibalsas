@@ -893,6 +893,17 @@ export function createEtapa2({
         try { return await abrirDestino(destino, s, base, req.flow_token); } catch { return voltar(); }
       }
       if (/resp|pre.?matric|document/.test(t)) return fim(e.title, 'Recebemos tudo desta etapa. A equipe vai conferir; acompanhe a situação por aqui.');
+      // Pagamento: a cobrança Pix vai por mensagem no WhatsApp (o Pix leva ~20 s para sair, não é gerado na tela).
+      if (/pagamento|taxa/.test(t) && rec && avisos?.configurado?.cobranca?.()) {
+        if (rec.cobranca_enviada_em) return fim('Pagamento', 'Enviamos o Pix da taxa de matrícula por mensagem aqui no WhatsApp. Para pagar com cartão, acesse o Portal do candidato.');
+        if ((rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
+          try {
+            if (!rec.final_vigiando) await salvarFilaDe(s.fila_id)({ final_vigiando: clock() }).catch(() => {});
+            await agendarVigia(s.fila_id, 'etapa4_vigia', 5);
+            return fim('Pagamento', 'Você vai receber o Pix da taxa de matrícula por mensagem em instantes. Para pagar com cartão, acesse o Portal do candidato.');
+          } catch {}
+        }
+      }
       // Etapa ainda fora do Flow (ex.: pagamento): orientação do site.
       const info = portalScreenData(e.title);
       return fim(info.titulo, String(info.mensagem).split('\n\nEntre com')[0]);

@@ -85,13 +85,13 @@ Não pode atrasar a resposta do login: agendar sem `await` longo (uma chamada, e
 3. Em `gravarBloco`/`gravarDocumento`, tentar o `enqueue` duas vezes antes de desistir.
 4. Testes: tarefa que encontra a trava reagenda; login com bloco parado reagenda.
 
-### C10 (baixa) — Toque em "Pagamento" na lista de status
+### C10 (baixa) — FEITO na 2.12.3 — Toque em "Pagamento" na lista de status
 Hoje mostra só a orientação do site (`portalScreenData`, linha 778). Com a cobrança pelo WhatsApp: se `cobranca_enviada_em` existe, trocar a mensagem para "Enviamos o Pix da taxa de matrícula por mensagem aqui no WhatsApp. Para pagar com cartão, acesse o Portal do candidato."; se não existe e a cobrança está configurada, agendar `etapa4_vigia` em 5 s (via `agendarVigia` do C1) e mostrar "Você vai receber o Pix por mensagem em instantes." Não gerar o Pix dentro da tela (leva ~20 s).
 
-### C6 (decisão do usuário) — Cobrança sai uma vez só
+### C6 (decisão do usuário) — MANTIDO como está (17/11) — Cobrança sai uma vez só
 A cobrança é enviada uma vez (`cobranca_enviada_em`). A validade do Pix do TOTVS não foi medida; se o candidato tentar pagar depois que o código vencer, só resta o link do portal. Perguntar ao usuário antes de implementar: reenviar a cobrança com Pix novo depois de N horas com o pagamento ainda pendente (no máximo 2 vezes)? Para medir a validade: gerar um Pix de teste e conferir no portal quando o campo 50901 muda.
 
-### C7 (decisão do usuário) — Botão do aviso abre a tela de inscrição
+### C7 (decisão do usuário) — MANTIDO como está (17/11) — Botão do aviso abre a tela de inscrição
 O botão "Acessar minha inscrição" do template `unibalsas_atualizacao_processo` abre em `INSC_INICIO`; quem recebe "documentos aprovados" precisa achar o link "Já sou inscrito (LOGIN)". Mais fluido: o botão abrir direto em `MATR_LOGIN` (dados iniciais `erro: ""`, `tem_erro: false`, `valor_login: ""`, `valor_data_nascimento: ""`). Isso exige editar o template na Meta (nova aprovação): só fazer se o usuário pedir.
 
 ### C8 (baixa) — Documentação e limpeza

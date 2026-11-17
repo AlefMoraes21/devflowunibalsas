@@ -1595,7 +1595,7 @@ export async function contratoHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.12.2" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.12.3" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
