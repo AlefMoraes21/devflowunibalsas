@@ -9,6 +9,8 @@ const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('
 const LOGO_UNIBALSAS = png('logo_unibalsas.png');
 const LOGO_PORTAL = png('logo_portal.png');
 const LOGO_INSCRICAO = png('logo_inscricao.png');
+const LOGO_DOCUMENTOS = png('logo_documentos.png');
+const LOGO_ENEM = png('logo_enem.png');
 const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'contain' });
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
@@ -21,7 +23,13 @@ const init = names => Object.fromEntries(names.map(n => [n, '${data.valor_' + n 
 
 const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade'];
 const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
-const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM];
+// As notas do ENEM ficam na tela do curso, como no site (passo 300708); a "Estamos quase lá" é igual nos 4 processos.
+const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
+const CURSO_ENEM = ['curso_id', 'turno_id', ...ENEM];
+// Documentos de inscrição (Transferência, Portador e ENEM): uma tela por posição, para o seletor de arquivo vir
+// vazio em cada documento. A 1ª é sempre o documento obrigatório. Id de tela só com letras (regra da Meta).
+const DOCS_INSC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
+const notaEnem = (name, label) => ({ type: 'TextInput', name, label, 'helper-text': 'Use ponto (.) para decimais. Máximo 1000.', 'input-type': 'text', required: true });
 
 const DADOS_DATA = {
   estado: str(), erro: str(), tem_erro: bool(), data_maxima_nascimento: str('2026-11-15'),
@@ -35,11 +43,17 @@ const flow = {
   data_api_version: '3.0',
   routing_model: {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM', 'MATR_LOGIN'],
-    INSC_DADOS: ['INSC_CURSO', 'INSC_PRIVACIDADE', 'INSC_FIM'],
+    INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_PRIVACIDADE', 'INSC_FIM'],
     INSC_PRIVACIDADE: [],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
+    INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
-    INSC_CONCLUIDA: ['INSC_PORTAL'],
+    INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS'],
+    INSC_STATUS: ['INSC_DOC_A', 'INSC_FIM'],
+    INSC_DOC_A: ['INSC_DOC_B', 'INSC_DOCS_FIM', 'INSC_FIM'],
+    INSC_DOC_B: ['INSC_DOC_C', 'INSC_DOCS_FIM', 'INSC_FIM'],
+    INSC_DOC_C: ['INSC_DOCS_FIM', 'INSC_FIM'],
+    INSC_DOCS_FIM: [],
     INSC_PORTAL: ['INSC_AVALIACAO'],
     INSC_AVALIACAO: ['INSC_ORIENTACAO'],
     INSC_ORIENTACAO: ['INSC_REDACAO', 'INSC_FIM'],
@@ -135,6 +149,41 @@ const flow = {
       }
     },
     {
+      // Nota do ENEM: curso e turno + os dados do ENEM na mesma tela, igual ao site (passo 300708).
+      // A média é calculada pelo Cloud Run e aparece na tela seguinte (o site mostra o campo bloqueado).
+      id: 'INSC_CURSO_ENEM',
+      title: 'Curso de interesse',
+      data: {
+        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), anos_enem: opcoes(),
+        ...Object.fromEntries(CURSO_ENEM.map(k => ['valor_' + k, str()]))
+      },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [{
+          type: 'Form', name: 'form_curso_enem',
+          'init-values': init(CURSO_ENEM),
+          children: [
+            imagem(LOGO_ENEM, 40),
+            { type: 'TextHeading', text: 'Curso de interesse' },
+            { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
+            erroTexto,
+            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'on-select-action': troca('buscar_turnos', form(CURSO_ENEM)) },
+            { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
+            { type: 'TextSubheading', text: 'Dados do ENEM' },
+            { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
+            { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
+            notaEnem('nota_natureza_enem', 'Nota de ciências da natureza'),
+            notaEnem('nota_humanas_enem', 'Nota de ciências humanas'),
+            notaEnem('nota_matematica_enem', 'Nota de matemática'),
+            notaEnem('nota_linguagens_enem', 'Nota de linguagens'),
+            notaEnem('nota_redacao_enem', 'Nota da redação'),
+            { type: 'TextCaption', text: 'A média das notas é calculada automaticamente.' },
+            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(CURSO_ENEM)) }
+          ]
+        }]
+      }
+    },
+    {
       id: 'INSC_QUASE_LA',
       title: 'Estamos quase lá',
       data: {
@@ -142,8 +191,7 @@ const flow = {
         valor_cpf: str(), valor_nacionalidade: str('10'), valor_concluiu_ensino_medio: str(), valor_possui_deficiencia: str(),
         valor_tipos_deficiencia: { type: 'array', items: { type: 'string' }, __example__: [] }, valor_deficiencia_outra: str(),
         valor_como_conheceu: str(), valor_como_conheceu_outro: str(),
-        eh_nota_enem: bool(), anos_enem: opcoes(),
-        ...Object.fromEntries(ENEM.map(k => ['valor_' + k, str()]))
+        eh_nota_enem: bool(), resumo_enem: str('Média das notas do ENEM: 628,10')
       },
       layout: {
         type: 'SingleColumnLayout',
@@ -154,6 +202,7 @@ const flow = {
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Estamos quase lá!' },
             { type: 'TextBody', text: 'Complete as suas informações para concluir a sua inscrição:' },
+            { type: 'TextCaption', text: '${data.resumo_enem}', visible: '${data.eh_nota_enem}' },
             erroTexto,
             { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
             { type: 'Dropdown', name: 'nacionalidade', label: 'Nacionalidade', required: true, 'data-source': [{ id: '10', title: 'Brasileira' }, { id: '20', title: 'Naturalizado Brasileiro' }, { id: '50', title: 'Outros' }] },
@@ -165,17 +214,6 @@ const flow = {
             ], else: [] },
             { type: 'Dropdown', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
-            { type: 'If', condition: '${data.eh_nota_enem} == true', then: [
-              { type: 'TextSubheading', text: 'Notas do ENEM' },
-              { type: 'TextBody', text: 'Informe os dados oficiais do seu exame (notas entre 0 e 1000):' },
-              { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Nº de inscrição do ENEM', 'helper-text': '12 a 15 números', 'input-type': 'text', required: true },
-              { type: 'Dropdown', name: 'ano_enem', label: 'Ano do exame', 'data-source': '${data.anos_enem}', required: true },
-              { type: 'TextInput', name: 'nota_natureza_enem', label: 'Ciências da Natureza', 'input-type': 'text', required: true },
-              { type: 'TextInput', name: 'nota_humanas_enem', label: 'Ciências Humanas', 'input-type': 'text', required: true },
-              { type: 'TextInput', name: 'nota_matematica_enem', label: 'Matemática', 'input-type': 'text', required: true },
-              { type: 'TextInput', name: 'nota_linguagens_enem', label: 'Linguagens e Códigos', 'input-type': 'text', required: true },
-              { type: 'TextInput', name: 'nota_redacao_enem', label: 'Redação', 'input-type': 'text', required: true }
-            ], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]
         }]
@@ -215,6 +253,49 @@ const flow = {
         ]
       }
     },
+    {
+      // Transferência, Portador e ENEM: o status que o portal mostra logo depois de concluir a inscrição
+      // (conferido no site em 17/11/2026). "Verificar" abre os documentos de inscrição, como no site.
+      id: 'INSC_STATUS',
+      title: 'Portal do candidato',
+      data: { estado: str(), eh_nota_enem: bool() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_PORTAL, 40),
+          { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
+          { type: 'TextSubheading', text: '✅ Inscrição' },
+          { type: 'TextCaption', text: 'Concluída' },
+          { type: 'TextSubheading', text: '⏳ Checando as notas', visible: '${data.eh_nota_enem}' },
+          { type: 'TextCaption', text: 'Validando', visible: '${data.eh_nota_enem}' },
+          { type: 'TextSubheading', text: '❗ Documentos inscrição' },
+          { type: 'TextCaption', text: 'Pendentes' },
+          { type: 'Footer', label: 'Verificar', 'on-click-action': troca('verificar_documentos') }
+        ]
+      }
+    },
+    // Documentos de inscrição: um por tela, com o título vindo do Cloud Run (a lista é a do processo).
+    ...DOCS_INSC.map((id, i) => ({
+      id,
+      title: 'Documentos inscrição',
+      data: { estado: str(), erro: str(), tem_erro: bool(), titulo_doc: str('Histórico acadêmico *'), legenda_doc: str('Obrigatório. Documento 1 de 3.'), botao: str('Avançar') },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [{
+          type: 'Form', name: 'form_doc_insc',
+          children: [
+            imagem(LOGO_DOCUMENTOS, 40),
+            { type: 'TextHeading', text: 'Envio de arquivos' },
+            ...(i === 0 ? [{ type: 'TextBody', text: 'Envie o arquivo com todas as páginas do documento, incluindo frente e verso. A análise ocorre em até 48 horas úteis.' }] : []),
+            { type: 'TextSubheading', text: '${data.titulo_doc}' },
+            { type: 'TextCaption', text: '${data.legenda_doc}' },
+            erroTexto,
+            { type: 'DocumentPicker', name: 'arquivo', label: 'Arquivo', description: 'PDF, JPG ou PNG de até 740 KB', 'min-uploaded-documents': i === 0 ? 1 : 0, 'max-uploaded-documents': 1, 'max-file-size-kb': 740, 'allowed-mime-types': ['application/pdf', 'image/jpeg', 'image/png'] },
+            { type: 'Footer', label: '${data.botao}', 'on-click-action': troca('enviar_documento_inscricao', { arquivo: '${form.arquivo}' }) }
+          ]
+        }]
+      }
+    })),
     {
       // Igual à página "Avaliação online disponível" do site.
       id: 'INSC_AVALIACAO',
@@ -299,6 +380,23 @@ const flow = {
           { type: 'TextHeading', text: '${data.titulo}' },
           { type: 'TextBody', text: '${data.mensagem}' },
           { type: 'Footer', label: 'Concluir', 'on-click-action': { name: 'complete', payload: {} } }
+        ]
+      }
+    },
+    {
+      // Fim da etapa 1 da Transferência, do Portador e do ENEM: documentos recebidos, análise da equipe.
+      id: 'INSC_DOCS_FIM',
+      title: 'Documentos inscrição',
+      terminal: true,
+      success: true,
+      data: { titulo: str('Documentos enviados ✅'), mensagem: str('') },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [
+          imagem(LOGO_DOCUMENTOS, 40),
+          { type: 'TextSubheading', text: '${data.titulo}' },
+          { type: 'TextBody', text: '${data.mensagem}' },
+          { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
         ]
       }
     }

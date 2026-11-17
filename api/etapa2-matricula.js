@@ -14,6 +14,7 @@
 import crypto from 'node:crypto';
 import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js';
 import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
+import { ICONES } from './icones.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
@@ -23,6 +24,35 @@ const hash = v => crypto.createHash('sha256').update(String(v)).digest('hex');
 const curto = id => String(id).slice(0, 10);
 const digits = v => String(v ?? '').replace(/\D/g, '');
 export const norm = v => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+// Etapas da inscrição direta (Transferência, Portador, ENEM) que dependem da equipe: "Documentos inscrição"
+// (não confundir com "Documentos matrícula") e "Checando as notas" (ENEM).
+export const ehDocsInscricao = t => /document/.test(norm(t)) && /inscri/.test(norm(t));
+const ehDocsMatricula = t => /document/.test(norm(t)) && !/inscri/.test(norm(t));
+export const ehNotasEnem = t => /checando.*nota|nota.*enem/.test(norm(t));
+
+// Resultado da análise da inscrição direta, pela situação do portal (summarizeStages) e, no ENEM, pelo campo
+// 38623 "Status da opção" do passo "Checando as notas" (3 = desclassificado; 4 a 8 = aprovado; 0 = validando).
+// Devolve 'desclassificado', 'aprovado', 'recusado' (documento de volta a Pendentes) ou null (aguardando).
+export function avaliarInscricao(s2, { statusOpcao = null } = {}) {
+  const rows = s2?.rows ?? [];
+  const docs = rows.find(r => ehDocsInscricao(r.title));
+  const notas = rows.find(r => ehNotasEnem(r.title));
+  const op = statusOpcao === null || statusOpcao === undefined || statusOpcao === '' ? null : Number(statusOpcao);
+  if (op === 3 || (notas && /desclassific|insuficien/.test(norm(notas.status)))) return 'desclassificado';
+  // Etapa seguinte liberada (ex.: "Seleção resp. financeiro" com Verificar): aprovado.
+  const seguinte = s2?.next && !ehDocsInscricao(s2.next.title) && !ehNotasEnem(s2.next.title);
+  if (seguinte) return 'aprovado';
+  if (docs && !docs.conclusive && docs.step && docs.action) return 'recusado';
+  if (op !== null && op >= 4 && op <= 8 && (!docs || docs.conclusive)) return 'aprovado';
+  return null;
+}
+// Ícone da linha na lista de status (ilustração do status, como no portal).
+export function iconeDoStatus(r, aberta) {
+  if (r.conclusive) return ICONES.ok;
+  if (/recusad|indeferid|desclassific|reprovad/.test(norm(r.status))) return ICONES.recusado;
+  if (aberta) return ICONES.pendente;
+  return ICONES.analise;
+}
 
 export const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'].map(u => ({ id: u, title: u }));
 export const RACAS = ['Branca', 'Preta', 'Parda', 'Amarela', 'Indígena', 'Não declarada'].map(t => ({ id: norm(t).replace(/\s+/g, '_'), title: t }));
@@ -99,8 +129,11 @@ export function proximaTela(s2, blocos = {}, menor = false) {
   if (s2 && !next) return fechar;
   // Etapa 3: contrato (baixar, assinar no GOV.BR e enviar por e-mail, como no site).
   if (next && /contrato/.test(norm(next.title))) return { tela: 'CONTR_TERMOS', botao: String(next.action || 'Verificar').slice(0, 35) };
+  // Documentos de inscrição: telas da etapa 1 (abertas pela lista de status), nunca as da matrícula.
+  if (next && ehDocsInscricao(next.title)) return fechar;
   if (next && !/resp|pre.?matric|document/.test(norm(next.title))) return fechar;
-  const concluida = re => (s2?.rows ?? []).some(r => r.conclusive && re.test(norm(r.title)));
+  // "Documentos inscrição" concluída não conta como "Documentos matrícula" concluída.
+  const concluida = re => (s2?.rows ?? []).some(r => r.conclusive && re.test(norm(r.title)) && !ehDocsInscricao(r.title));
   const quem = blocos.responsavel?.responsavel;
   const respOk = concluida(/resp/) || (quem === 'Eu' && !menor) || ((quem === 'Outro' || menor) && Boolean(blocos.resp_dados));
   const preOk = concluida(/pre.?matric/);
@@ -117,6 +150,8 @@ export function createEtapa2({
   store, enqueue, sealState, openState, matricula, runCtx = fn => fn(), validCpf,
   buscarCep = null, clock = Date.now, log = e => console.info(JSON.stringify(e)), orcamentoMs = 80000,
   portalSite = null, baixarMidia = null, entrarNaProva = null,
+  // Transferência, Portador e ENEM: "Documentos inscrição" abre as telas da etapa 1 (api/etapa1-fila.js).
+  entrarNosDocsInscricao = null, tituloProcesso = () => 'processo seletivo 2027/1',
   // Avisos pelo Blip (api/blip.js createAvisosBlip): { atualizacao, cobranca, configurado }. Sem ele, nada é enviado.
   avisos = null,
   // Endereço público do Cloud Run (links do contrato).
@@ -297,9 +332,12 @@ export function createEtapa2({
   const aberta = r => !r.conclusive && Boolean(r.step && r.action) && !emCorrecao(r);
   function itensStatus({ id, menor, s2 }) {
     return (s2.rows ?? []).slice(0, 20).map((r, i) => {
+      // Ilustração do status no ícone da linha; sem o arquivo do ícone, volta o emoji no título.
+      const icone = iconeDoStatus(r, aberta(r));
       const item = {
         id: 'etapa_' + i,
-        'main-content': { title: `${r.conclusive ? '✅' : '❗'} ${r.title}`.slice(0, 30), metadata: String(r.status || '—').slice(0, 80) },
+        ...(icone ? { start: { image: icone } } : {}),
+        'main-content': { title: (icone ? r.title : `${r.conclusive ? '✅' : '❗'} ${r.title}`).slice(0, 30), metadata: String(r.status || '—').slice(0, 80) },
         'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: sealState('MATR_STATUS', { m2: true, fila_id: id, menor, etapa: { title: r.title, action: r.action, aberta: aberta(r) } }) } }
       };
       if (aberta(r)) item.end = { title: String(r.action).slice(0, 10) };
@@ -440,6 +478,7 @@ export function createEtapa2({
   const VIGIA_INTERVALO_S = Number(process.env.ETAPA3_VIGIA_INTERVALO_S) || 600;
   const VIGIA_LONGO_S = Number(process.env.VIGIA_INTERVALO_LONGO_S) || 3600;
   const VIGIA_MAX_MS = 15 * DIA;
+  const PRIMEIRA_CONFERENCIA_S = Number(process.env.VIGIA_PRIMEIRA_S) || 120;
   const intervaloVigia = desde => (clock() - (desde ?? clock()) < 2 * 3600000 ? VIGIA_INTERVALO_S : VIGIA_LONGO_S);
   const salvarFilaDe = id => async patch => { for (let i = 0; i < 4; i++) { const a = await store.get(id, FILA); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, FILA)) return; } };
 
@@ -500,7 +539,14 @@ export function createEtapa2({
       const rec = (await store.get(id, FILA))?.record;
       if (!rec || !s2?.rows?.length || rec.matricula_concluida_em) return;
       const linha = re => s2.rows.find(r => re.test(norm(r.title)));
-      const docs = s2.rows.find(r => /document/.test(norm(r.title)) && /matric/.test(norm(r.title))) ?? linha(/document/);
+      // Inscrição direta (Transferência, Portador, ENEM) aguardando a equipe: vigia da análise e do resultado.
+      const docsInsc = s2.rows.find(r => ehDocsInscricao(r.title)), notas = s2.rows.find(r => ehNotasEnem(r.title));
+      const inscEmAnalise = (docsInsc && !docsInsc.conclusive && !aberta(docsInsc)) || (notas && !notas.conclusive);
+      if (inscEmAnalise && !rec.insc_vigia?.fim && !s2.rows.some(r => ehDocsMatricula(r.title))) {
+        if (await garantirVigia(id, 'inscricao_vigia', VIGIA_INTERVALO_S, rec.insc_vigia ? null : { insc_vigia: { desde: clock(), ate: clock() + VIGIA_MAX_MS } })) log({ event: 'inscricao_vigia', id: curto(id), passo: 'vigia_ligado' });
+        return;
+      }
+      const docs = s2.rows.find(r => /document/.test(norm(r.title)) && /matric/.test(norm(r.title))) ?? s2.rows.find(r => ehDocsMatricula(r.title));
       const contrato = linha(/contrato/), pagamento = linha(/pagamento|taxa/), matriculado = linha(/matriculad/);
       if (matriculado?.conclusive) return;
       const antes = docs ? s2.rows.slice(0, s2.rows.indexOf(docs)) : [];
@@ -651,7 +697,7 @@ export function createEtapa2({
     if (!contato?.celular || (rec?.contato?.celular === contato.celular && rec?.contato?.nome === contato.nome)) return;
     await salvarFilaDe(id)({ contato }).catch(() => {});
   }
-  async function avisar(id, chave, { sessao = null, processo = '' } = {}) {
+  async function avisar(id, chave, { sessao = null, processo = '', textos = null } = {}) {
     if (!avisos?.configurado?.atualizacao?.()) return false;
     const rec = (await store.get(id, FILA))?.record;
     if (!avisoPendente(rec, chave)) return Boolean(rec?.avisos?.[chave]);
@@ -659,7 +705,7 @@ export function createEtapa2({
     if (!contato?.celular && sessao && portalSite?.pagina) {
       try { contato = contatoDaResposta(await portalSite.pagina(sessao, 432, processo || rec.ultimo_status?.processo)); await guardarContato(id, rec, contato); } catch {}
     }
-    const ok = contato?.celular ? await avisos.atualizacao({ celular: contato.celular, nome: contato.nome, ...AVISOS[chave] }).catch(() => false) : false;
+    const ok = contato?.celular ? await avisos.atualizacao({ celular: contato.celular, nome: contato.nome, ...(textos ?? AVISOS[chave]) }).catch(() => false) : false;
     const atual = (await store.get(id, FILA))?.record ?? rec;
     await salvarFilaDe(id)(ok
       ? { avisos: { ...(atual.avisos ?? {}), [chave]: clock() } }
@@ -730,7 +776,8 @@ export function createEtapa2({
     // Nova redação (ex.: refez a avaliação): recomeça o vigia.
     if (atual) await store.update(id, novo, atual.version, REDACAO); else await store.create(id, novo, REDACAO);
     log({ event: 'redacao_vigia', id: curto(id), passo: 'iniciado' });
-    await agendarVigia(id, 'redacao_vigia', VIGIA_INTERVALO_S, REDACAO);
+    // 1ª conferência em 2 min (V1: deixa o status salvo cedo para o LOGIN); depois, o ritmo de sempre.
+    await agendarVigia(id, 'redacao_vigia', PRIMEIRA_CONFERENCIA_S, REDACAO);
     return true;
   }
   async function salvarRedacao(id, patch) {
@@ -752,6 +799,8 @@ export function createEtapa2({
     try {
       const sessao = await portalSite.entrar(rec.login, rec.data_nascimento);
       const { stages, processo } = await portalSite.inscricao(sessao);
+      // V1: o último status fica salvo para o LOGIN abrir a lista na hora (o portal passa do tempo do WhatsApp).
+      await guardarStatusDaInscricao({ applyment_id: sessao.applyment_id, login: rec.login, data_nascimento: rec.data_nascimento, stages, processo }).catch(() => {});
       const st = summarizeStages(stages ?? []);
       const prova = st.rows.find(r => /prova|avaliacao|redacao/.test(norm(r.title)));
       let resultado = null;
@@ -780,6 +829,123 @@ export function createEtapa2({
     }
     if (clock() < (rec.ate ?? 0)) await agendarVigia(id, 'redacao_vigia', proximoEm, REDACAO);
     else await salvarRedacao(id, { fim: clock(), resultado: 'sem_correcao' });
+    return 204;
+  }
+
+  // ---------------------------------------------------------------- status salvo para o LOGIN (V1)
+  // O portal leva ~7 s e o login tem ~6,5 s: quem já tem o último status salvo vê a lista na hora. O registro da
+  // matrícula (mesmo id do login) é criado aqui quando ainda não existe, com o login criptografado, como no login.
+  async function guardarStatusDaInscricao({ applyment_id, login, data_nascimento, stages, processo, extra = {} }) {
+    if (!applyment_id || !login || !data_nascimento) return null;
+    const id = hash('matr:' + applyment_id);
+    const ultimo = stages?.length ? { ultimo_status: { stages: enxugar(stages), processo: String(processo ?? ''), at: clock() } } : {};
+    for (let i = 0; i < 4; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) {
+        const novo = { id, applyment_id: String(applyment_id), flow: '', login: digits(login), data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA, ...ultimo, ...extra };
+        if (await store.create(id, novo, FILA).then(() => true, () => false)) return id;
+        continue;
+      }
+      if (await store.update(id, { ...atual.record, ...ultimo, ...extra }, atual.version, FILA)) return id;
+    }
+    return id;
+  }
+
+  // ---------------------------------------------------------------- vigia da inscrição direta
+  // Transferência, Portador e ENEM depois do envio dos documentos de inscrição (e, no ENEM, das notas): confere
+  // o portal no ritmo dos outros vigias e avisa pelo Blip (template de atualização, botão abre o Flow):
+  //  - aprovado (etapa seguinte liberada, ou ENEM com 38623 entre 4 e 8): fim;
+  //  - desclassificado (ENEM, 38623 = 3): texto do site e nova inscrição; fim;
+  //  - documento recusado (Documentos inscrição volta a Pendentes): pede o reenvio só dos recusados; segue vigiando.
+  const CAMPO_STATUS_OPCAO = 38623;
+  function valorDoCampo(resp, campo) {
+    const cs = resp?.data?.steps?.currentStep ?? {};
+    const a = (cs.applicantData ?? []).find(x => Number(x?.field_id) === campo);
+    if (a && a.value !== null && a.value !== undefined && a.value !== '') return String(a.value);
+    const todos = [];
+    (function achatar(l) { for (const c of l ?? []) { todos.push(c); achatar(c.container_content); } })(cs.content);
+    const c = todos.find(x => Number(x?.field_id) === campo);
+    return c?.value_now !== undefined && c?.value_now !== null && c.value_now !== '' ? String(c.value_now) : null;
+  }
+  const primeiroNome = n => String(n ?? '').trim().split(/\s+/)[0] ?? '';
+  function textosInscricao(resultado, processo) {
+    const p = 'inscrição em ' + tituloProcesso(processo);
+    if (resultado === 'aprovado') return { processo: p, situacao: 'Parabéns, você foi aprovado(a) em nosso processo seletivo! 🎉', proximo: 'dê continuidade à sua pré-matrícula pelo botão abaixo (Já sou inscrito).' };
+    if (resultado === 'desclassificado') return { processo: p, situacao: 'Não foi dessa vez: suas notas não foram suficientes (desclassificado por insuficiência de nota).', proximo: 'não desista! Há outras formas de ingresso: faça uma nova inscrição pelo botão abaixo.' };
+    return { processo: p, situacao: 'Um documento da sua inscrição foi recusado na análise.', proximo: 'envie o documento de novo pelo botão abaixo (Já sou inscrito → Documentos inscrição).' };
+  }
+  async function iniciarVigiaInscricao({ applyment_id, processo, login, data_nascimento, contato, stages }) {
+    // Reenvio depois de uma recusa: mantém a contagem de recusas (cada nova recusa tem o seu aviso).
+    const antigo = applyment_id ? (await store.get(hash('matr:' + applyment_id), FILA).catch(() => null))?.record?.insc_vigia : null;
+    const recusas = (antigo?.recusas ?? 0) + (antigo?.em_recusa ? 1 : 0);
+    const extra = { insc_vigia: { desde: clock(), ate: clock() + VIGIA_MAX_MS, processo: String(processo ?? ''), recusas }, docs_inscricao_recusados: [], ...(contato?.celular ? { contato: { nome: String(contato.nome ?? ''), celular: digits(contato.celular) } } : {}) };
+    const id = await guardarStatusDaInscricao({ applyment_id, login, data_nascimento, stages, processo, extra });
+    if (!id) return false;
+    log({ event: 'inscricao_vigia', id: curto(id), passo: 'iniciado' });
+    await agendarVigia(id, 'inscricao_vigia', VIGIA_INTERVALO_S);
+    return true;
+  }
+  async function vigiarInscricao(id) {
+    const antes = await store.get(id, FILA);
+    if (!antes || antes.record.insc_vigia?.fim) return 204;
+    if (correnteAntiga(antes.record, 'inscricao_vigia')) return 204;
+    if (!(await travarVigia(id, 'insc_rodando_ate'))) return 503;
+    try { return await conferirInscricao(id); }
+    finally { await destravarVigia(id, 'insc_rodando_ate'); }
+  }
+  async function conferirInscricao(id) {
+    const f = await store.get(id, FILA);
+    if (!f || f.record.insc_vigia?.fim) return 204;
+    const rec = f.record, v = rec.insc_vigia ?? { desde: clock(), ate: clock() + VIGIA_MAX_MS };
+    const salvarFila = salvarFilaDe(id);
+    let proximoEm = intervaloVigia(v.desde);
+    try {
+      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento);
+      const { stages, processo: procPortal } = await portalSite.inscricao(sessao);
+      const processo = procPortal || v.processo || rec.ultimo_status?.processo || '';
+      await salvarStatus(id, stages, processo).catch(() => {});
+      const st = summarizeStages(stages ?? []);
+      const notas = st.rows.find(r => ehNotasEnem(r.title));
+      let statusOpcao = null;
+      if (notas?.step) {
+        try {
+          const bruto = await portalSite.passoBruto(sessao, notas.step, processo);
+          statusOpcao = valorDoCampo(bruto, CAMPO_STATUS_OPCAO);
+          await guardarContato(id, rec, contatoDaResposta(bruto));
+        } catch (e) { log({ event: 'inscricao_vigia', id: curto(id), passo: 'notas_erro', message: String(e?.message ?? e).slice(0, 80) }); }
+      }
+      const resultado = avaliarInscricao(st, { statusOpcao });
+      log({ event: 'inscricao_vigia', id: curto(id), passo: resultado ?? 'aguardando', status_opcao: statusOpcao ?? '', docs: st.rows.find(r => ehDocsInscricao(r.title))?.status ?? '' });
+      if (resultado === 'recusado') {
+        const docs = st.rows.find(r => ehDocsInscricao(r.title));
+        let recusados = [];
+        try { recusados = (await portalSite.passoDocumentos(sessao, docs.step, processo)).docs.filter(d => String(d.status) === '2').map(d => d.codigo); } catch {}
+        // Pendentes sem recusa marcada (ex.: equipe pediu um documento que faltou): pede a lista toda.
+        // Um aviso por recusa: a chave muda só quando os documentos voltam para análise e são recusados de novo.
+        const chave = `docs_inscricao_recusa_${v.recusas ?? 0}`;
+        await salvarFila({ docs_inscricao_recusados: recusados, insc_vigia: { ...v, em_recusa: true } });
+        await avisar(id, chave, { sessao, processo, textos: textosInscricao('recusado', processo) }).catch(() => false);
+        // Segue vigiando: o reenvio volta a "Em análise".
+      } else if (!resultado && v.em_recusa) {
+        // Reenviado (voltou para análise): a próxima recusa é um novo ciclo, com novo aviso.
+        await salvarFila({ insc_vigia: { ...v, em_recusa: false, recusas: (v.recusas ?? 0) + 1 }, docs_inscricao_recusados: [] });
+      } else if (resultado) {
+        const ok = await avisar(id, 'inscricao_' + resultado, { sessao, processo, textos: textosInscricao(resultado, processo) }).catch(() => false);
+        const tentativas = ((await store.get(id, FILA))?.record?.avisos_tentativas?.['inscricao_' + resultado]) ?? 0;
+        if (ok || !avisos?.configurado?.atualizacao?.() || tentativas >= MAX_TENTATIVAS_AVISO) {
+          await salvarFila({ insc_vigia: { ...v, fim: clock(), resultado, aviso_enviado: Boolean(ok) }, docs_inscricao_recusados: [] });
+          // Aprovado: a etapa 2 segue igual à do Vestibular (religa os vigias da matrícula pelo status atual).
+          if (resultado === 'aprovado') await religarVigias(id, st);
+          return 204;
+        }
+        proximoEm = VIGIA_INTERVALO_S;
+      }
+    } catch (e) {
+      if (e?.agendar) throw e;
+      log({ event: 'inscricao_vigia', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
+    }
+    if (clock() < (v.ate ?? 0)) await agendarVigia(id, 'inscricao_vigia', proximoEm);
+    else await salvarFila({ insc_vigia: { ...v, fim: clock(), resultado: 'sem_resultado' } }).catch(() => {});
     return 204;
   }
 
@@ -885,6 +1051,11 @@ export function createEtapa2({
       const e = s.etapa ?? {};
       if (!e.aberta) return voltar(); // concluída ou aguardando a equipe: só o status, como no site
       const t = norm(e.title);
+      // Documentos de inscrição (Transferência, Portador, ENEM): telas da etapa 1; se a equipe recusou algum,
+      // pede só os recusados (lidos pelo vigia).
+      if (ehDocsInscricao(e.title) && entrarNosDocsInscricao && rec) {
+        return entrarNosDocsInscricao({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token, codigos: rec.docs_inscricao_recusados ?? [] });
+      }
       if (/prova|avaliacao|redacao/.test(t) && entrarNaProva && rec) {
         return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token });
       }
@@ -1078,6 +1249,8 @@ export function createEtapa2({
           await salvar({ ultimo_status: { stages: enxugar(p.stages), processo: String(p.processo_seletivo_id ?? ''), at: clock() } });
           const next = summarizeStages(p.stages).next;
           if (!next) { await salvar({ status: 'concluida', passo: 'fim' }); return; }
+          // Documentos de inscrição são da etapa 1 (telas INSC_DOC_*, envio pelo worker da etapa 1).
+          if (ehDocsInscricao(next.title)) { await salvar({ passo: 'aguardando_docs_inscricao' }); return; }
           if (/document/.test(norm(next.title))) {
             const docsB = rec.blocos?.documentos;
             if (!docsB?.completo) { await salvar({ passo: 'aguardando_documentos' }); return; }
@@ -1136,5 +1309,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao };
+  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao, iniciarVigiaInscricao, vigiarInscricao, guardarStatusDaInscricao };
 }

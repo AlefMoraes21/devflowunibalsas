@@ -8,6 +8,7 @@
 // Liga com ETAPA1_FILA=on. Sem o cache completo, o Flow segue o caminho síncrono de sempre (e esse
 // caminho aquece o cache).
 import crypto from 'node:crypto';
+import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo } from './portal-site.js';
 
 const DIA = 86400000;
 const FILA = 'inscricoesFila';
@@ -18,6 +19,11 @@ export const DUPLICADA_MSG = 'Você já possui inscrição neste processo seleti
 const hash = v => crypto.createHash('sha256').update(String(v)).digest('hex');
 const digits = v => String(v ?? '').replace(/\D/g, '');
 const curto = id => String(id).slice(0, 10);
+const norm = v => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// Etapa "Documentos inscrição" do portal (Transferência, Portador, ENEM); não confundir com "Documentos matrícula".
+export const ehDocsInscricao = titulo => /document/.test(norm(titulo)) && /inscri/.test(norm(titulo));
+const passoDoLink = link => { const m = String(link ?? '').match(/passo\/(\d+)/); return m ? Number(m[1]) : null; };
+const tipoArquivo = nome => tipoDoArquivo(nome) ?? 'application/pdf';
 
 class ErroPasso extends Error {
   constructor(message, { final = false, motivo = 'passo' } = {}) { super(message); this.final = final; this.motivo = motivo; }
@@ -33,6 +39,12 @@ export function createEtapa1({
   aoConfirmarRedacao = async () => {},
   validateBasic, validateFinal, origens, hoje, requiresEssay, academicId, userFields,
   jaInscritoNoRm = async () => false,
+  // Transferência, Portador e ENEM: documentos de inscrição (lista por processo), envio pelo caminho do site
+  // (api/portal-site.js) e, depois do envio, o vigia da análise (etapa 2). Nada disso vale para o Vestibular.
+  docsInscricao = () => [], portalSite = null, baixarMidia = null, aoEnviarDocsInscricao = async () => {},
+  mediaEnem = () => '',
+  // Calma entre o Concluir e o envio dos documentos: o RM ainda sincroniza a inscrição.
+  esperaDocsInscricaoMs = Number(process.env.ETAPA1_ESPERA_DOCS_MS) || 60000,
   clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
   orcamentoMs = 80000, intervaloEntregaMs = 8000,
   // Calma no envio da redação: o Rubeus/RM ainda ajusta a prova da inscrição por alguns minutos.
@@ -165,12 +177,19 @@ export function createEtapa1({
   // com o flow_token do aviso direto na INSC_REDACAO, e o envio também fecha o Flow na hora.
   const valor = (...n) => n.map(x => 'valor_' + x);
   const ENEM_CAMPOS = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
+  const DOC_KEYS = ['estado', 'erro', 'tem_erro', 'titulo_doc', 'legenda_doc', 'botao'];
+  const TELAS_DOC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
   const INSC_KEYS = {
     INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
     INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
-    INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'anos_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', ...ENEM_CAMPOS)],
+    // Nota do ENEM: as notas ficam na tela do curso, como no site (passo 300708).
+    INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', 'anos_enem', ...valor('curso_id', 'turno_id', ...ENEM_CAMPOS)],
+    INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'resumo_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
     INSC_CONCLUIDA: ['estado'],
     INSC_PORTAL: ['estado'],
+    INSC_STATUS: ['estado', 'eh_nota_enem'],
+    ...Object.fromEntries(TELAS_DOC.map(t => [t, DOC_KEYS])),
+    INSC_DOCS_FIM: ['titulo', 'mensagem'],
     INSC_AVALIACAO: ['estado'],
     INSC_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
     INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
@@ -230,6 +249,46 @@ export function createEtapa1({
   const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
   const falha = (passo, e) => log({ event: 'etapa1_fila_erro', passo, message: String(e?.message ?? e).slice(0, 160) });
 
+  // ---------------------------------------------------------------- documentos de inscrição (Flow)
+  // Tela do documento i da lista (INSC_DOC_A/B/C). O 1º da lista é sempre o obrigatório nos 3 processos;
+  // a lista pode ter só os recusados (reenvio pelo LOGIN).
+  function telaDocumento(s, i, erro = '') {
+    const docs = (Array.isArray(s.docs) ? s.docs : []).slice(0, TELAS_DOC.length);
+    const doc = docs[i];
+    if (!doc) return fimE1('Documentos de inscrição', 'Não há documentos de inscrição para enviar por aqui. Acompanhe pelo Portal do candidato.');
+    const ultimo = i === docs.length - 1;
+    const { values, erro: _e, ...estado } = s;
+    return renderE1(TELAS_DOC[i], {
+      ...estado, docs, i,
+      titulo_doc: `${doc.titulo}${doc.obrigatorio ? ' *' : ''}`,
+      legenda_doc: `${doc.obrigatorio ? 'Obrigatório.' : 'Opcional: se não tiver agora, toque no botão abaixo.'} Documento ${i + 1} de ${docs.length}.`,
+      botao: ultimo ? 'Enviar' : 'Avançar',
+      erro
+    });
+  }
+  // Guarda a referência do arquivo (criptografada no Firestore); no último, marca completo e agenda o worker.
+  async function gravarDocumentoInscricao(id, flowToken, codigo, media, completo) {
+    const flow = hash(flowToken ?? '');
+    for (let i = 0; i < 5; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) throw new Error('inscrição não encontrada');
+      if (atual.record.flow !== flow) throw new Error('inscrição de outra sessão');
+      const prev = atual.record.docs_inscricao ?? {};
+      const docs = { ...prev, arquivos: { ...(prev.arquivos ?? {}), ...(media.length ? { [codigo]: media } : {}) }, completo: Boolean(completo || prev.completo), recebido_em: clock() };
+      // Reenvio pelo LOGIN numa inscrição já entregue: reabre o envio.
+      const reabrir = completo && ['concluida', 'falhou', 'conferir'].includes(atual.record.status) && atual.record.passo === 'docs_inscricao';
+      const rec = { ...atual.record, docs_inscricao: docs, ...(reabrir ? { status: 'inscrita', tentativas: 0, rodando_ate: 0 } : {}) };
+      if (await store.update(id, rec, atual.version, FILA)) {
+        if (completo) {
+          log({ event: 'etapa1_fila', id: curto(id), passo: 'documentos_inscricao_recebidos', quantidade: Object.keys(docs.arquivos).length });
+          await disparar(id);
+        }
+        return;
+      }
+    }
+    throw new Error('conflito');
+  }
+
   async function routeE1(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
     if (screen === 'INSC_INICIO') {
@@ -252,32 +311,42 @@ export function createEtapa1({
       catch (e) { falha('dados_basicos', e); return renderE1('INSC_DADOS', { ...s, values: u, erro: ERRO_GRAVAR }); }
       const c = await esperarCache(processo, x => x?.cursos?.length);
       if (!c?.cursos?.length) return renderE1('INSC_DADOS', { ...s, values: u, erro: 'Seus dados foram salvos. Estamos carregando os cursos: toque em Avançar de novo.' });
+      if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, cursos: c.cursos, turnos: [], turno_visivel: false, anos_enem: anosEnem, erro: '' });
       return renderE1('INSC_CURSO', { ...base, cursos: c.cursos, turnos: [], turno_visivel: false, erro: '' });
     }
 
-    // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo.
-    if (screen === 'INSC_CURSO' && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
+    // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo. No ENEM, os dados do
+    // exame ficam na mesma tela (INSC_CURSO_ENEM) e o que já foi digitado volta preenchido.
+    if ((screen === 'INSC_CURSO' || screen === 'INSC_CURSO_ENEM') && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
+      const enem = screen === 'INSC_CURSO_ENEM';
+      const notas = enem ? Object.fromEntries(ENEM_CAMPOS.map(k => [k, u[k] == null ? '' : String(u[k]).trim()])) : {};
       const curso = String(u.curso_id ?? '');
-      if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1('INSC_CURSO', { ...s, erro: 'Selecione um curso.' });
+      if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1(screen, { ...s, values: notas, erro: 'Selecione um curso.' });
       if (acao === 'buscar_turnos' || curso !== s.curso_selecionado) {
         const c = await esperarCache(processo, x => x?.turnos?.[curso]?.length);
         const turnos = c?.turnos?.[curso] ?? [];
-        if (!turnos.length) return renderE1('INSC_CURSO', { ...s, curso_selecionado: '', turnos: [], turno_visivel: false, values: { curso_id: curso }, erro: 'Estamos carregando os turnos deste curso. Toque no curso de novo em alguns segundos.' });
+        if (!turnos.length) return renderE1(screen, { ...s, curso_selecionado: '', turnos: [], turno_visivel: false, values: { ...notas, curso_id: curso }, erro: 'Estamos carregando os turnos deste curso. Toque no curso de novo em alguns segundos.' });
         const unico = turnos.length === 1 ? turnos[0].id : '';
-        return renderE1('INSC_CURSO', { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { curso_id: curso, turno_id: unico }, erro: '' });
+        return renderE1(screen, { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { ...notas, curso_id: curso, turno_id: unico }, erro: '' });
       }
       const turno = String(u.turno_id ?? '');
-      if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1('INSC_CURSO', { ...s, values: { curso_id: curso }, erro: 'Selecione o turno.' });
-      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: curso, turno_id: turno }); }
-      catch (e) { falha('curso', e); return renderE1('INSC_CURSO', { ...s, values: { curso_id: curso, turno_id: turno }, erro: ERRO_GRAVAR }); }
-      return renderE1('INSC_QUASE_LA', { ...base, origens, anos_enem: base.eh_nota_enem ? anosEnem : [], erro: '' });
+      if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1(screen, { ...s, values: { ...notas, curso_id: curso }, erro: 'Selecione o turno.' });
+      let media = '';
+      if (enem) {
+        try { validateEnem(notas); media = String(mediaEnem(notas) ?? ''); }
+        catch (e) { return renderE1(screen, { ...s, values: { ...notas, curso_id: curso, turno_id: turno }, erro: e.message }); }
+      }
+      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: curso, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
+      catch (e) { falha('curso', e); return renderE1(screen, { ...s, values: { ...notas, curso_id: curso, turno_id: turno }, erro: ERRO_GRAVAR }); }
+      const resumo_enem = enem && media ? `Média das notas do ENEM: ${media.replace('.', ',')}` : '';
+      return renderE1('INSC_QUASE_LA', { ...base, origens, resumo_enem, erro: '' });
     }
 
-    // Concluir: valida, grava no Firestore, agenda o worker e FECHA o Flow na hora.
+    // Concluir: valida, grava no Firestore e agenda o worker. Vestibular: segue para a prova. Transferência,
+    // Portador e ENEM: segue igual ao site (Obrigado → Portal → Documentos inscrição).
     if (screen === 'INSC_QUASE_LA' && acao === 'enviar_informacoes_complementares') {
       try {
         validateFinal({ ...u, origens: s.origens });
-        if (s.eh_nota_enem) validateEnem(u);
       } catch (e) { return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: e.message }); }
       const cpf = digits(u.cpf);
       try {
@@ -294,13 +363,40 @@ export function createEtapa1({
         await gravarTela(s.fila_id, processo, req.flow_token, u, { concluida_em: clock() });
         log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'dados_recebidos', status: 'pendente' });
       } catch (e) { falha('quase_la', e); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: ERRO_GRAVAR }); }
-      if (requiresEssay(processo)) return renderE1('INSC_CONCLUIDA', { ...base, erro: '' });
+      if (requiresEssay(processo) || docsInscricao(processo).length) return renderE1('INSC_CONCLUIDA', { ...base, erro: '' });
       return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo });
     }
 
     // Igual ao site: Obrigado pelo seu cadastro → Portal do candidato → Avaliação online disponível →
     // instruções → redação. Fechar o Flow em qualquer ponto deixa o candidato só como inscrito.
-    if (screen === 'INSC_CONCLUIDA' && acao === 'abrir_portal') return renderE1('INSC_PORTAL', { ...base });
+    // Transferência, Portador e ENEM: Obrigado → Portal (Documentos inscrição: Pendentes) → documentos.
+    if (screen === 'INSC_CONCLUIDA' && acao === 'abrir_portal') {
+      if (!requiresEssay(processo) && docsInscricao(processo).length) return renderE1('INSC_STATUS', { ...base });
+      return renderE1('INSC_PORTAL', { ...base });
+    }
+    if (screen === 'INSC_STATUS' && acao === 'verificar_documentos') return telaDocumento({ ...base, docs: docsInscricao(processo) }, 0);
+
+    // Documentos de inscrição: cada arquivo fica guardado na hora (referência da mídia do WhatsApp); o último
+    // agenda o envio, que o worker faz pelo caminho do site, num único "Enviar", como o candidato faria.
+    const iDoc = TELAS_DOC.indexOf(screen);
+    if (iDoc >= 0 && acao === 'enviar_documento_inscricao') {
+      const docs = Array.isArray(s.docs) ? s.docs : [];
+      const i = Number.isInteger(s.i) ? s.i : iDoc;
+      const doc = docs[i];
+      if (!doc) return fimE1('Algo deu errado', 'Não encontramos este documento. Entre de novo pelo LOGIN para continuar.');
+      const media = Array.isArray(d.arquivo) ? d.arquivo.slice(0, 1) : [];
+      if (doc.obrigatorio && media.length !== 1) return telaDocumento(s, i, `Anexe o arquivo: ${doc.titulo}.`);
+      const ultimo = i >= docs.length - 1 || i >= TELAS_DOC.length - 1;
+      try { await gravarDocumentoInscricao(s.fila_id, req.flow_token, doc.codigo, media, ultimo); }
+      catch (e) { falha('documento_inscricao', e); return telaDocumento(s, i, ERRO_GRAVAR); }
+      if (!ultimo) return telaDocumento(s, i + 1);
+      const enem = docs.length === 1 && Boolean(s.eh_nota_enem);
+      return renderE1('INSC_DOCS_FIM', {
+        titulo: 'Documentos enviados ✅',
+        mensagem: (enem ? 'Recebemos seu boletim do ENEM. Suas notas estão em validação.' : 'Recebemos seus documentos.') +
+          ' A análise ocorre em até 48 horas úteis.\n\nAvisaremos por aqui quando houver novidade. Você também pode acompanhar pelo LOGIN (Já sou inscrito).'
+      });
+    }
     if (screen === 'INSC_PORTAL' && acao === 'realizar_prova') return renderE1('INSC_AVALIACAO', { ...base });
     if (screen === 'INSC_AVALIACAO' && acao === 'iniciar_prova') return renderE1('INSC_ORIENTACAO', { ...base, erro: '' });
     if (screen === 'INSC_ORIENTACAO' && acao === 'iniciar_redacao') {
@@ -498,6 +594,57 @@ export function createEtapa1({
     return salvar({ token_redacao: hash(token), aviso_redacao: enviado ? 'enviado' : 'nao_enviado', aviso_em: clock() });
   }
 
+  // Documentos de inscrição pelo mesmo caminho do site (api/portal-site.js), como os de matrícula: entra no
+  // Portal do candidato, acha a etapa "Documentos inscrição" pelo link (sem fixar o passo), lê a lista do passo,
+  // envia num único "Enviar" (multipart file_0…) e confere no próprio passo. Repetição segura: o que já está
+  // em análise ou aceito (status 1 ou 3) não é reenviado.
+  async function entregarDocsInscricao(rec) {
+    const login = rec.via_login?.login, nasc = rec.via_login?.data_nascimento;
+    if (!login || !nasc) throw new ErroPasso('Sem CPF ou data de nascimento para entrar no portal.', { final: true, motivo: 'login' });
+    const sessao = await portalSite.entrar(login, nasc);
+    const { processo: procPortal, stages } = await portalSite.inscricao(sessao);
+    const processo = procPortal || String(rec.processo);
+    const etapa = (stages ?? []).find(x => ehDocsInscricao(x.title));
+    const passoId = passoDoLink(etapa?.cta_link);
+    const arquivos = rec.docs_inscricao?.arquivos ?? {};
+    const enviados = {};
+    if (!passoId) {
+      // Etapa sem botão = documentos já em análise (ex.: enviados pelo site). Sem a etapa: o portal ainda não liberou.
+      if (!etapa) throw new ErroPasso('A etapa Documentos inscrição ainda não apareceu no portal.', { motivo: 'docs_nao_liberado' });
+      log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'documentos_inscricao_ja_em_analise' });
+      return { applyment_id: sessao.applyment_id, processo, stages, enviados };
+    }
+    const passo = await portalSite.passoDocumentos(sessao, passoId, processo);
+    const naLista = new Map(passo.docs.map(x => [x.codigo, x]));
+    for (const codigo of Object.keys(arquivos)) if (!naLista.has(codigo)) console.error(JSON.stringify({ event: 'etapa1_fila_atencao', id: curto(rec.id), motivo: 'documento_fora_da_lista', doc: codigo }));
+    const lote = [];
+    // Na ordem do passo (a mesma do site).
+    for (const linha of passo.docs) {
+      const codigo = linha.codigo, media = arquivos[codigo];
+      if (!media?.length) continue;
+      if (jaEnviadoNoPortal(linha)) { enviados[codigo] = 'ja_no_portal'; continue; }
+      const m = media[0];
+      const bytes = await baixarMidia(m);
+      if (bytes.length > passo.max_mb * 1024 * 1024) throw new ErroPasso(`Arquivo do documento ${codigo} acima de ${passo.max_mb} MB.`, { final: true, motivo: 'tamanho' });
+      lote.push({ codigo, bytes, nome: String(m.file_name || `documento-${codigo}.pdf`).slice(-80), tipo: tipoArquivo(m.file_name) });
+    }
+    let stagesFinal = stages;
+    if (lote.length) {
+      await portalSite.enviarDocumentos({ sessao, passo, processo, arquivos: lote });
+      let conferidos = [];
+      try { conferidos = (await portalSite.passoDocumentos(sessao, passoId, processo)).docs.filter(jaEnviadoNoPortal).map(x => x.codigo); } catch {}
+      for (const a of lote) {
+        log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'documento_inscricao_enviado', doc: a.codigo, conferido: conferidos.includes(a.codigo) });
+        enviados[a.codigo] = conferidos.includes(a.codigo) ? 'conferido' : 'enviado';
+      }
+      // Nenhum conferido: tenta de novo (o que já entrou não é reenviado, pela lista do passo).
+      if (!conferidos.length) throw new ErroPasso('O portal ainda não mostra os documentos de inscrição enviados.', { motivo: 'docs_conferir' });
+      // Status do portal depois do envio (Documentos inscrição: Em análise), para o LOGIN abrir na hora.
+      try { stagesFinal = (await portalSite.inscricao(sessao)).stages; } catch {}
+    }
+    return { applyment_id: sessao.applyment_id, processo, stages: stagesFinal, enviados };
+  }
+
   async function redacaoConfirmada(rec, salvar) {
     const r = await salvar({ passo: 'fim', status: 'concluida' });
     const R = rec.respostas ?? {};
@@ -562,11 +709,18 @@ export function createEtapa1({
           await salvar({ passo: 'final' });
           throw new ErroPasso(st.erro || 'Rubeus recusou a conclusão.', { motivo: 'recusada' });
         }
-        // Transferência, Portador e ENEM: a etapa 1 termina na inscrição confirmada.
+        // Transferência, Portador e ENEM: inscrição confirmada; a etapa 1 segue para os documentos de inscrição
+        // (só o CPF e a data de nascimento ficam, para entrar no portal; o resto dos dados sai do registro).
         if (!requiresEssay(rec.processo)) {
           if (!['ACOMPANHAMENTO', 'CONFIRMACAO', 'PORTAL_STATUS'].includes(r?.screen)) throw new ErroPasso('Tela inesperada: ' + r?.screen, { final: true, motivo: 'incerto' });
           let st = {}; try { st = r.data.estado ? openState(r.data.estado, r.screen) : {}; } catch {}
-          return salvar({ passo: 'fim', status: 'concluida', applyment_id: String(st.applyment_id ?? '') });
+          if (!docsInscricao(rec.processo).length || !portalSite) return salvar({ passo: 'fim', status: 'concluida', applyment_id: String(st.applyment_id ?? '') });
+          return salvar({
+            passo: 'docs_inscricao', status: 'inscrita', applyment_id: String(st.applyment_id ?? ''), inscrita_em: clock(),
+            via_login: { login: digits(R.cpf), data_nascimento: R.data_nascimento },
+            contato: { nome: String(R.nome ?? ''), celular: digits(R.celular) },
+            respostas: null, ck: null
+          });
         }
         let st;
         try { st = abrir(r, 'TELA_ORIENTACAO_PROVA'); }
@@ -651,6 +805,18 @@ export function createEtapa1({
         }
         throw new ErroPasso('Portal ainda não confirmou a entrega da redação.', { motivo: 'entrega' });
       }
+      case 'docs_inscricao': {
+        if (!rec.docs_inscricao?.completo) return salvar({ parar: true });
+        const pronta = (rec.inscrita_em ?? 0) + esperaDocsInscricaoMs;
+        if (clock() < pronta) return salvar({ parar: true, proxima: pronta });
+        const r = await entregarDocsInscricao(rec);
+        // Entregue: as referências dos arquivos (com as chaves de criptografia) e o login não ficam guardados.
+        await salvar({ passo: 'fim', status: 'concluida', applyment_id: r.applyment_id || rec.applyment_id || '', docs_inscricao: { completo: true, enviados: r.enviados, enviado_em: clock() }, via_login: null, contato: null });
+        try {
+          await aoEnviarDocsInscricao({ applyment_id: r.applyment_id || rec.applyment_id, processo: r.processo || rec.processo, login: rec.via_login?.login, data_nascimento: rec.via_login?.data_nascimento, contato: rec.contato, stages: r.stages });
+        } catch (e) { log({ event: 'etapa1_fila_erro', id: curto(rec.id), passo: 'vigia_inscricao', message: String(e?.message ?? e).slice(0, 120) }); }
+        return 'parar';
+      }
       case 'final_enviando':
       case 'redacao_enviando':
         throw new ErroPasso('O envio anterior foi interrompido sem confirmação.', { final: true, motivo: 'incerto' });
@@ -711,7 +877,7 @@ export function createEtapa1({
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.
     await salvar({ rodando_ate: 0 });
     const R2 = rec.respostas ?? {};
-    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id && R2.turno_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true };
+    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id && R2.turno_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true, docs_inscricao: Boolean(rec.docs_inscricao?.completo) };
     const temTrabalho = !FINAIS.has(rec.status) && pronto[rec.passo] === true;
     if (temTrabalho) await disparar(id, rec.proxima > clock() ? Math.ceil((rec.proxima - clock()) / 1000) : 0);
     return 204;
@@ -730,5 +896,26 @@ export function createEtapa1({
     return renderE1('INSC_PORTAL', { e1: true, processo_seletivo_id: String(processo), eh_nota_enem: false, fila_id: id });
   }
 
-  return { route, endpoint, worker, entrarNaProva, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
+  // LOGIN com "Documentos inscrição: Pendentes [Verificar]" (fechou o Flow antes de enviar, ou a equipe recusou
+  // algum): abre as mesmas telas de documento. `codigos` = só os recusados (vazio = a lista toda do processo).
+  async function entrarNosDocsInscricao({ applyment_id, processo, login, data_nascimento, flowToken, codigos = [] }) {
+    const todos = docsInscricao(processo);
+    const docs = codigos?.length ? todos.filter(x => codigos.includes(x.codigo)) : todos;
+    if (!applyment_id || !docs.length) return fimE1('Documentos de inscrição', 'Envie os documentos pelo Portal do candidato: vestibular.unibalsas.edu.br/presencial (entre com seu CPF e a data de nascimento).');
+    const id = hash('login-docs:' + applyment_id);
+    const flow = hash(flowToken ?? '');
+    const base = { processo: String(processo), flow, applyment_id: String(applyment_id), via_login: { login: digits(login), data_nascimento }, respostas: {}, redacao: null, status: 'inscrita', passo: 'docs_inscricao', inscrita_em: 0, tentativas: 0, rodando_ate: 0, docs_inscricao: null };
+    for (let i = 0; i < 3; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) { if (await store.create(id, { id, ...base, criado: clock(), expires: clock() + 30 * DIA }, FILA).then(() => true, () => false)) break; continue; }
+      // Envio ainda em andamento (worker rodando): não apaga o que já foi guardado; só troca a sessão do Flow.
+      const emAndamento = atual.record.status === 'inscrita' && atual.record.docs_inscricao?.completo;
+      const novo = emAndamento ? { ...atual.record, flow, via_login: base.via_login } : { ...atual.record, ...base, expires: clock() + 30 * DIA };
+      if (await store.update(id, novo, atual.version, FILA)) break;
+    }
+    log({ event: 'etapa1_fila', id: curto(id), passo: 'login_documentos_inscricao', quantidade: docs.length });
+    return telaDocumento({ e1: true, processo_seletivo_id: String(processo), eh_nota_enem: ehEnem(processo), fila_id: id, docs }, 0);
+  }
+
+  return { route, endpoint, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
 }

@@ -313,20 +313,25 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
 
-test('Etapa 1 ENEM: notas na última tela; o worker só envia o curso com as notas e conclui sem redação', async () => {
+test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o curso com as notas e conclui sem redação', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
-  ateOrientacao.E = E;
   await store.create('etapa1-20386', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
-  const quase = await etapa1(E, '20386');
-  assert.equal(quase.data.eh_nota_enem, true); assert.equal(quase.data.anos_enem.length, 1);
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
+  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+  assert.equal(curso.screen, 'INSC_CURSO_ENEM'); assert.equal(curso.data.anos_enem.length, 1);
+  // Escolher o curso não apaga o que já foi digitado do ENEM.
+  const t = await e1(E, 'INSC_CURSO_ENEM', 'buscar_turnos', curso.data.estado, { curso_id: 'ads', numero_inscricao_enem: '123456789012' });
+  assert.equal(t.data.valor_turno_id, 'not'); assert.equal(t.data.valor_numero_inscricao_enem, '123456789012');
   const id = fila[0].id;
   await E.worker(id);
-  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'curso', 'espera as notas antes de gravar o curso');
+  assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'turnos', 'espera curso, turno e notas');
   assert.ok(!rubeus.chamadas.includes('avancar_curso_interesse'));
-  const semNotas = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
-  assert.equal(semNotas.screen, 'INSC_QUASE_LA'); assert.match(semNotas.data.erro, /ENEM/);
-  const okEnem = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, { ...FINAL, ...ENEM }, 'ft-e1');
-  assert.equal(okEnem.data.erro, undefined, okEnem.data.erro);
+  const semNotas = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', numero_inscricao_enem: '123' });
+  assert.equal(semNotas.screen, 'INSC_CURSO_ENEM'); assert.match(semNotas.data.erro, /ENEM/);
+  const quase = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', ...ENEM });
+  assert.equal(quase.screen, 'INSC_QUASE_LA'); assert.equal(quase.data.eh_nota_enem, true);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.numero_inscricao_enem, ENEM.numero_inscricao_enem, 'notas guardadas com o curso');
+  const okEnem = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
   SUCCESS(okEnem);
   await E.worker(id);
   const rec = (await store.get(id, 'inscricoesFila')).record;

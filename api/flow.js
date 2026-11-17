@@ -1,4 +1,4 @@
-import {processPolicy,isDirectRegistration,requiresEssay,academicIds} from "./processes.js";
+import {processPolicy,isDirectRegistration,requiresEssay,academicIds,docsInscricao,tituloProcesso} from "./processes.js";
 import {enemAverage,enemYears} from "./enem.js";
 import {portalConfirmsDelivery} from "./proof-binding.js";
 import {promptText} from "./prompt-text.js";
@@ -1526,7 +1526,11 @@ const etapa1=createEtapa1({
   aoConfirmarRedacao:dados=>etapa2.iniciarVigiaRedacao(dados),
   loginRubeus:(login,nasc)=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+60000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>matricula.login(login,nasc)),
   prepararProva:data=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},()=>proofRouter.prepare(data)),
-  jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}}
+  jaInscritoNoRm:async(idps,cpf)=>{if(process.env.ETAPA1_CONSULTA_RM==="off"||!idps)return false;try{await findInscription(idps,cpf,{timeoutMs:2500});return true}catch{return false}},
+  // Transferência, Portador e ENEM: documentos de inscrição pelo caminho do site e vigia da análise (etapa 2).
+  docsInscricao,portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),
+  mediaEnem:d=>enemAverage(d,{checkTyped:false}),
+  aoEnviarDocsInscricao:dados=>etapa2.iniciarVigiaInscricao(dados)
 });
 // Etapa 2 (matrícula): telas MATR_* gravam no Firestore; o worker envia cada subetapa ao Rubeus, em ordem.
 const etapa2=createEtapa2({
@@ -1534,6 +1538,7 @@ const etapa2=createEtapa2({
   buscarCep:d=>matricula.cep(d),
   portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),avisos:createAvisosBlip(),
   entrarNaProva:a=>etapa1.entrarNaProva(a),
+  entrarNosDocsInscricao:a=>etapa1.entrarNosDocsInscricao(a),tituloProcesso,
   runCtx:fn=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request:{action:"data_exchange",data:{}},write:null,worker:true},fn)
 });
 export async function workerHandler(req,res){
@@ -1546,6 +1551,11 @@ export async function workerHandler(req,res){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
     try{return res.status(await etapa2.vigiarRedacao(req.body.id)).send("")}
     catch(error){console.error(JSON.stringify({event:"redacao_vigia_error",message:String(error?.message??error).slice(0,160)}));return res.status(error?.agendar?500:204).send("")}
+  }
+  if(req.body?.tipo==="inscricao_vigia"){
+    if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
+    try{return res.status(await etapa2.vigiarInscricao(req.body.id)).send("")}
+    catch(error){console.error(JSON.stringify({event:"inscricao_vigia_error",message:String(error?.message??error).slice(0,160)}));return res.status(error?.agendar?500:204).send("")}
   }
   if(req.body?.tipo==="etapa4_vigia"){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
@@ -1595,7 +1605,7 @@ export async function contratoHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.12.3" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.13.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

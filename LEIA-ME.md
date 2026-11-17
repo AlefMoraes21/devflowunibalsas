@@ -1,3 +1,16 @@
+# Versão 2.13.0 — Transferência, Portador e Nota do ENEM igual ao site (etapa 1 com documentos de inscrição)
+
+Projeto e mapeamento: `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md` (e as engenharias reversas de cada processo). **O Flow da WABA muda:** colar o novo `flows/etapa1-vestibular.json` no editor da Meta.
+
+- **Etapa 1 dos 3 processos:** Concluir → "Obrigado pelo seu cadastro!" → Portal (`INSC_STATUS`: Inscrição Concluída · [ENEM] Checando as notas Validando · Documentos inscrição Pendentes) → **Verificar** → documentos de inscrição, um por tela (`INSC_DOC_A/B/C`; o 1º é o obrigatório) → `INSC_DOCS_FIM`. Listas em `api/processes.js` (Transferência 28\*/29/27, Portador 10\*/17/26, ENEM 25\*).
+- **Worker (etapa 1):** depois da inscrição, passo `docs_inscricao`: calma de 60 s (`ETAPA1_ESPERA_DOCS_MS`), entra no portal, acha "Documentos inscrição" pelo link, um único "Enviar" multipart (mesmo caminho dos documentos de matrícula), confere no passo; não reenvia o que já está em análise/aceito. Depois apaga os dados pessoais e as referências dos arquivos.
+- **Vigia da inscrição (`inscricao_vigia`, etapa 2):** 10 min nas 2 primeiras horas, depois de hora em hora, até 15 dias. Recusa → aviso e o LOGIN pede só os recusados; aprovado (etapa seguinte liberada, ou ENEM 38623 de 4 a 8 com documentos aprovados) → aviso e para; ENEM 38623 = 3 → aviso "desclassificado" (texto do site) e para. Template `unibalsas_atualizacao_processo` (sem template novo).
+- **Nota do ENEM:** notas na tela do curso (`INSC_CURSO_ENEM`), como no site; a média é calculada no Run e aparece na "Estamos quase lá" (V3: os campos do ENEM saíram dessa tela).
+- **LOGIN:** "Documentos inscrição: Pendentes [Verificar]" abre as telas de documento; a lista de status ganhou ícones (concluída, pendente, em análise, recusada). "Documentos inscrição" nunca é confundida com "Documentos matrícula" (status, vigias e worker).
+- **V1:** o status do portal fica salvo para o LOGIN (vigia da redação com 1ª conferência em 2 min; envio dos documentos de inscrição; vigia da inscrição).
+- **V2 (5 MB) não entrou:** continua 740 KB, para homologar depois.
+- 211 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.13.0`.
+
 # Versão 2.12.3 — toque em "Pagamento" fala do Pix por mensagem
 
 Correção C10 de `REVISAO-CHECK-2.12.0.md`. Só servidor; o Flow da WABA não muda.

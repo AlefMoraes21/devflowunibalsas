@@ -8,6 +8,7 @@ process.env.RBS_TOKEN = 'unit';
 const { sealState, openState, flowContext } = await import('../api/flow.js');
 const { createEtapa2, escolherOpcao, idade, DOCS, proximaTela, buscarEscolas, opcaoEscola, SEM_ESCOLA } = await import('../api/etapa2-matricula.js');
 const { validCpf } = await import('../api/matricula.js');
+const { ICONES } = await import('../api/icones.js');
 
 // Um único Flow: a etapa 2 está no mesmo JSON da etapa 1.
 const FLOW = JSON.parse(readFileSync(new URL('../flows/etapa1-vestibular.json', import.meta.url), 'utf8'));
@@ -111,7 +112,9 @@ const continuar = (E, tela, re = null) => {
   return toque(E, 'MATR_STATUS', it['on-click-action'].payload.acao, it['on-click-action'].payload.estado);
 };
 const filaDe = tela => openState(tela.screen === 'MATR_PORTAL' ? tela.data.estado : tela.data.etapas[0]['on-click-action'].payload.estado, tela.screen).fila_id;
-const textoStatus = tela => tela.data.etapas.map(i => `${i['main-content'].title}: ${i['main-content'].metadata}${i.end ? ' [' + i.end.title + ']' : ''}`).join('\n');
+// O status vem ilustrado pelo ícone da linha (start.image): ✅ concluída; ❗ as demais (pendente, em análise, recusada).
+const marca = i => !i.start ? '' : i.start.image === ICONES.ok ? '✅ ' : '❗ ';
+const textoStatus = tela => tela.data.etapas.map(i => `${marca(i)}${i['main-content'].title}: ${i['main-content'].metadata}${i.end ? ' [' + i.end.title + ']' : ''}`).join('\n');
 const END = { cep: '65800000', rua: 'Rua A', numero: '10', bairro: 'Centro', cidade: 'Balsas', uf: 'MA', estado_natal: 'MA', cidade_natal: 'Balsas' };
 const IDENT = { rg: 'MA-123456', orgao_emissor: 'ssp', uf_rg: 'MA', cor_raca: 'parda', estado_civil: 'solteiro_a', ano_conclusao: '', busca_escola: '', escola: '' };
 
@@ -523,7 +526,7 @@ test('Status igual ao portal: uma linha por etapa, botão só nas abertas; etapa
   const E = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
   const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(st.screen, 'MATR_STATUS');
-  assert.equal(textoStatus(st), '✅ Inscrição: Concluída\n✅ Contrato: Concluído\n❗ Pagamento - Taxa de matrícul: Pendente [Pagar]\n❗ Matriculado: Existem pendências');
+  assert.equal(textoStatus(st), '✅ Inscrição: Concluída\n✅ Contrato: Concluído\n❗ Pagamento - Taxa de matrícula: Pendente [Pagar]\n❗ Matriculado: Existem pendências');
   const pag = await continuar(E, st);
   assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Estamos finalizando! .*Pix ou Cartão de crédito/s);
   const nada = await continuar(E, st, /Matriculado/);
@@ -673,7 +676,8 @@ test('Vigia da redação: aguarda a correção e avisa "aprovada, matrícula lib
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {}, portalSite, avisos });
   assert.equal(await E.iniciarVigiaRedacao({ login: '391.847.205-14', data_nascimento: NASC, celular: '(99) 98888-0001', nome: 'Maria' }), true);
   const id = fila.at(-1).id;
-  assert.equal(fila.at(-1).tipo, 'redacao_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600);
+  // V1: 1ª conferência em 2 minutos (status salvo cedo para o LOGIN).
+  assert.equal(fila.at(-1).tipo, 'redacao_vigia'); assert.equal(fila.at(-1).atrasoSeg, 120);
   // Logo após o envio o portal ainda pode mostrar a prova pendente com o botão: não é reprovação.
   store.naHora(); await E.vigiarRedacao(id);
   assert.equal(enviados.length, 0);

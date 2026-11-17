@@ -7,6 +7,8 @@ const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('
 const LOGO_PORTAL = png('logo_portal.png');
 const LOGO_MATRICULA = png('logo_matricula.png');
 const LOGO_UNIBALSAS = png('logo_unibalsas.png');
+const ICONE_OK = png('icone_ok.png');
+const ICONE_PENDENTE = png('icone_pendente.png');
 const imagem = (src, height = 40) => ({ type: 'Image', src, height, 'scale-type': 'contain' });
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
@@ -44,7 +46,8 @@ const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length 
 export const routing = {
   MATR_LOGIN: ['MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
   MATR_PORTAL: ['MATR_STATUS', 'MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
-  MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
+  // "Documentos inscrição: Pendentes [Verificar]" (Transferência, Portador, ENEM) abre as telas da etapa 1.
+  MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL', 'INSC_DOC_A'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
   MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
@@ -81,16 +84,18 @@ export const screens = [
   },
   {
     // Status igual ao Portal do candidato: uma linha por etapa (✅ concluída / ❗ pendente), com o status e, nas
-    // etapas abertas, o botão do site (ex.: "Verificar"). A NavigationList não aceita outros componentes na tela.
+    // etapas abertas, o botão do site (ex.: "Verificar"). A NavigationList não aceita outros componentes na tela;
+    // a ilustração de cada status vai no ícone da linha (start.image: concluída, pendente, em análise, recusada).
     id: 'MATR_STATUS', title: 'Portal do candidato',
     data: { etapas: { type: 'array', items: { type: 'object', properties: {
       id: { type: 'string' },
+      start: { type: 'object', properties: { image: { type: 'string' } } },
       'main-content': { type: 'object', properties: { title: { type: 'string' }, metadata: { type: 'string' } } },
       end: { type: 'object', properties: { title: { type: 'string' } } },
       'on-click-action': { type: 'object', properties: { name: { type: 'string' }, payload: { type: 'object', properties: { acao: { type: 'string' }, estado: { type: 'string' } } } } }
     } }, __example__: [
-      { id: 'etapa_0', 'main-content': { title: '✅ Inscrição', metadata: 'Concluída' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'x' } } },
-      { id: 'etapa_1', 'main-content': { title: '❗ Contrato', metadata: 'Pendente' }, end: { title: 'Verificar' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'y' } } }
+      { id: 'etapa_0', start: { image: ICONE_OK }, 'main-content': { title: 'Inscrição', metadata: 'Concluída' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'x' } } },
+      { id: 'etapa_1', start: { image: ICONE_PENDENTE }, 'main-content': { title: 'Contrato', metadata: 'Pendente' }, end: { title: 'Verificar' }, 'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: 'y' } } }
     ] } },
     layout: { type: 'SingleColumnLayout', children: [
       { type: 'NavigationList', name: 'lista_etapas', label: 'Acompanhe aqui o status da sua inscrição', 'list-items': '${data.etapas}' }
