@@ -387,6 +387,8 @@ export function createEtapa2({
       const insc = await portalSite.inscricao(sessao);
       processo = processo || insc.processo;
       passoId = passoDe(insc.stages);
+      const etapaContrato = (insc.stages ?? []).find(x => /contrato/.test(norm(x.title)));
+      if (Number(etapaContrato?.feedback?.conclusive) === 1) throw new ErroContrato('O contrato já foi assinado.', 'concluido');
     }
     if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
     // Calma (vigia): o portal acabou de liberar o contrato; espera o Rubeus terminar de processar antes de gerar.
@@ -427,23 +429,38 @@ export function createEtapa2({
     return pdf;
   }
 
-  // Vigia da etapa 3 (Cloud Tasks): depois dos documentos entregues, confere de tempos em tempos se o portal
-  // liberou o contrato (análise da equipe) e, quando liberar, gera e guarda o PDF. O aviso ao candidato vem depois.
+  // Vigias (Cloud Tasks): o Rubeus não avisa o Run, então o Run confere o portal de tempos em tempos.
+  // Para economizar (Cloud Run com mínimo 0, cobrado por uso), confere a cada 10 min nas 2 primeiras horas e
+  // depois de hora em hora. Cada conferência leva ~15 s (o portal demora a devolver as etapas).
   const VIGIA_INTERVALO_S = Number(process.env.ETAPA3_VIGIA_INTERVALO_S) || 600;
+  const VIGIA_LONGO_S = Number(process.env.VIGIA_INTERVALO_LONGO_S) || 3600;
   const VIGIA_MAX_MS = 15 * DIA;
+  const intervaloVigia = desde => (clock() - (desde ?? clock()) < 2 * 3600000 ? VIGIA_INTERVALO_S : VIGIA_LONGO_S);
+  const salvarFilaDe = id => async patch => { for (let i = 0; i < 4; i++) { const a = await store.get(id, FILA); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, FILA)) return; } };
+
+  // Etapa 3: depois dos documentos entregues, espera a liberação do contrato (análise da equipe) e, quando
+  // liberar, gera e guarda o PDF. Contrato pronto ou já assinado: passa a vigiar o pagamento e a matrícula.
   async function vigiarContrato(id, { imediato = false } = {}) {
     const f = await store.get(id, FILA);
     if (!f) return 204;
     const rec = f.record;
-    if (await contratoPronto(id)) return 204;
+    const salvarFila = salvarFilaDe(id);
+    if (await contratoPronto(id)) { if (!rec.final_vigiando) { await salvarFila({ final_vigiando: clock() }).catch(() => {}); try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {} } return 204; }
     const ate = rec.vigia_ate ?? clock() + VIGIA_MAX_MS;
-    const salvarFila = async patch => { for (let i = 0; i < 4; i++) { const a = await store.get(id, FILA); if (!a) return; if (await store.update(id, { ...a.record, ...patch }, a.version, FILA)) return; } };
-    if (!rec.vigia_ate) await salvarFila({ vigia_ate: ate }).catch(() => {});
+    if (!rec.vigia_ate) await salvarFila({ vigia_ate: ate, vigia_desde: clock() }).catch(() => {});
     try {
       await gerarContrato(id, rec, '', { calma: !imediato });
+      await salvarFila({ final_vigiando: clock() }).catch(() => {});
+      try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {}
       return 204;
     } catch (e) {
       if (e?.motivo === 'gerando') return 204; // outra geração em andamento
+      if (e?.motivo === 'concluido') {
+        log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_ja_assinado' });
+        await salvarFila({ final_vigiando: clock() }).catch(() => {});
+        try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: 60 }); } catch {}
+        return 204;
+      }
       if (e?.motivo === 'calma') {
         // Acabou de liberar: marca o momento e volta daqui a ~2 minutos para gerar.
         const desde = rec.contrato_liberado_em ?? clock();
@@ -454,7 +471,45 @@ export function createEtapa2({
       }
       log({ event: 'etapa3_contrato', id: curto(id), passo: e?.motivo === 'nao_liberado' ? 'contrato_aguardando' : 'contrato_erro', message: String(e?.message ?? e).slice(0, 120) });
     }
-    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: VIGIA_INTERVALO_S }); } catch {} }
+    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa3_vigia', atrasoSeg: intervaloVigia(rec.vigia_desde) }); } catch {} }
+    return 204;
+  }
+
+  // Etapa final (igual para todos os processos): Pagamento "Pendente/Verificar" → "Recebido" e
+  // Matriculado "Existem pendências" → "Parabéns!". O pagamento é feito fora do Flow (portal; depois, a
+  // mensagem de pagamento do WhatsApp). O vigia registra quando o pagamento libera e quando a matrícula
+  // conclui — são os momentos dos avisos ao candidato.
+  const FINAL_MAX_MS = 30 * DIA;
+  async function vigiarFinal(id) {
+    const f = await store.get(id, FILA);
+    if (!f) return 204;
+    const rec = f.record;
+    if (rec.matricula_concluida_em) return 204;
+    const salvarFila = salvarFilaDe(id);
+    const ate = rec.final_ate ?? clock() + FINAL_MAX_MS;
+    if (!rec.final_ate) await salvarFila({ final_ate: ate }).catch(() => {});
+    try {
+      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
+      const { stages } = await portalSite.inscricao(sessao);
+      await salvarStatus(id, stages, rec.ultimo_status?.processo).catch(() => {});
+      const st = summarizeStages(stages ?? []);
+      const linha = re => st.rows.find(r => re.test(norm(r.title)));
+      const pagamento = linha(/pagamento|taxa/), matriculado = linha(/matriculad/);
+      if (matriculado?.conclusive || (pagamento?.conclusive && !matriculado)) {
+        await salvarFila({ matricula_concluida_em: clock() });
+        log({ event: 'etapa_final', id: curto(id), passo: 'matricula_concluida', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
+        return 204;
+      }
+      if (pagamento && !pagamento.conclusive && pagamento.step && pagamento.action && !rec.pagamento_liberado_em) {
+        await salvarFila({ pagamento_liberado_em: clock() });
+        log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_liberado' });
+      } else {
+        log({ event: 'etapa_final', id: curto(id), passo: 'aguardando', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
+      }
+    } catch (e) {
+      log({ event: 'etapa_final', id: curto(id), passo: 'erro', message: String(e?.message ?? e).slice(0, 120) });
+    }
+    if (clock() < ate) { try { await enqueue(id, { tipo: 'etapa4_vigia', atrasoSeg: VIGIA_LONGO_S }); } catch {} }
     return 204;
   }
 
@@ -787,5 +842,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato };
+  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal };
 }

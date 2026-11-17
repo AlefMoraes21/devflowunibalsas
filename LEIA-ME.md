@@ -1,3 +1,9 @@
+# Versão 2.11.0 — Etapa final (Pagamento → Matriculado) e vigias mais econômicos
+
+- **Etapa final, igual para todos os processos:** Pagamento "Pendente/Verificar" → "Recebido" e Matriculado "Existem pendências" → "Parabéns!". O pagamento é feito fora do Flow (no Flow, "Verificar" no Pagamento mostra o texto do site: Pix ou Cartão de crédito pelo Portal do candidato). Novo **vigia final** (`tipo: etapa4_vigia`, de hora em hora por até 30 dias): registra `pagamento_liberado_em` (momento da mensagem de pagamento) e `matricula_concluida_em` (fim da jornada; momento do aviso final). Log `etapa_final`.
+- **Vigia do contrato:** a cada 10 min nas 2 primeiras horas e depois de hora em hora (`VIGIA_INTERVALO_LONGO_S`); **não gera de novo um contrato já assinado** (passa direto ao vigia final); com o contrato pronto, agenda o vigia final.
+- Revisão técnica e modelo de mensagem para a Meta: `REVISAO-ARQUITETURA-2027.md`. O JSON da WABA não mudou desde a 2.10.0. 185 testes.
+
 # Versão 2.10.0 — Status igual ao portal (botão por etapa) e contrato refinado pela captura do site
 
 - **Login → tela de status igual ao Portal do candidato** (`MATR_STATUS`, componente NavigationList do WhatsApp): uma linha por etapa (✅ concluída / ❗ pendente), com o status do site e, **nas etapas abertas, o botão do site** (ex.: "Verificar"). Tocar numa etapa aberta leva à sua tela (subetapas da matrícula, documentos, contrato); etapa ainda fora do Flow (pagamento) mostra a orientação do site; concluída ou aguardando a equipe só mostra o status. Prova liberada continua indo ao "Portal do candidato" da etapa 1 (sem mudar a etapa 1). Sem status ainda: tela "Estamos buscando…" com **Atualizar**. A NavigationList não aceita outros componentes na tela (sem logo nessa tela).

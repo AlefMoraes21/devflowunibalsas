@@ -457,7 +457,7 @@ test('Etapa 3 em segundo plano: o vigia espera a liberação, gera o contrato no
   await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 1);
   assert.equal(site.cliques[0].data.find(x => x.field_id === 52136).value, '');
-  assert.equal(fila.length, n, 'pronto: o vigia para');
+  assert.deepEqual(fila.slice(n).map(f => f.tipo), ['etapa4_vigia'], 'pronto: o vigia do contrato para e passa a vigiar o pagamento/matrícula');
   // O candidato entra, toca em Verificar e abre o link: PDF na hora, sem clicar de novo no portal.
   const termos = await continuar(E, portal);
   assert.equal(termos.screen, 'CONTR_TERMOS');
@@ -523,7 +523,46 @@ test('Status igual ao portal: uma linha por etapa, botão só nas abertas; etapa
   assert.equal(st.screen, 'MATR_STATUS');
   assert.equal(textoStatus(st), '✅ Inscrição: Concluída\n✅ Contrato: Concluído\n❗ Pagamento - Taxa de matrícul: Pendente [Pagar]\n❗ Matriculado: Existem pendências');
   const pag = await continuar(E, st);
-  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Pix, cartão ou boleto/);
+  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Estamos finalizando! .*Pix ou Cartão de crédito/s);
   const nada = await continuar(E, st, /Matriculado/);
   assert.equal(nada.screen, 'MATR_STATUS');
+});
+
+test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluída (Pagamento Recebido / Matriculado Parabéns!)', async () => {
+  const store = memoria(); const fila = [];
+  let fase = 'pendente';
+  const etapas = () => [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300669' },
+    fase === 'pendente'
+      ? { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300670' }
+      : { title: 'Pagamento', feedback: { complementary_text: 'Recebido', conclusive: 1, cta_text: 'null' }, cta_link: 'presencial/passo/300670' },
+    fase === 'pendente'
+      ? { title: 'Matriculado', feedback: { complementary_text: 'Existem pendências', conclusive: 0 } }
+      : { title: 'Matriculado', feedback: { complementary_text: 'Parabéns!', conclusive: 1 } }
+  ];
+  const site = siteContrato();
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: etapas() });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example' });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = filaDe(portal);
+  // Contrato já assinado no portal: o vigia do contrato não gera de novo e passa para o vigia final.
+  await E.vigiarContrato(id);
+  assert.equal(site.cliques.length, 0, 'contrato assinado não é gerado de novo');
+  assert.equal(fila.at(-1).tipo, 'etapa4_vigia');
+  await E.vigiarFinal(id);
+  let rec = (await store.get(id, 'matriculaFila')).record;
+  assert.ok(rec.pagamento_liberado_em, 'pagamento liberado registrado (momento da mensagem de pagamento)');
+  assert.ok(!rec.matricula_concluida_em);
+  assert.equal(fila.at(-1).tipo, 'etapa4_vigia'); assert.equal(fila.at(-1).atrasoSeg, 3600);
+  // Pago: Pagamento Recebido e Matriculado Parabéns! — a jornada termina.
+  fase = 'pago';
+  const n = fila.length;
+  await E.vigiarFinal(id);
+  rec = (await store.get(id, 'matriculaFila')).record;
+  assert.ok(rec.matricula_concluida_em, 'matrícula concluída registrada');
+  assert.equal(fila.length, n, 'concluída: o vigia para');
+  // Status no Flow: as duas linhas com ✅, igual ao site.
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(st.screen, 'MATR_STATUS');
 });

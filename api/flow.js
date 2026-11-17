@@ -1541,6 +1541,11 @@ export async function workerHandler(req,res){
     try{return res.status(await etapa2.atualizarStatus(req.body.id)).send("")}
     catch(error){console.error(JSON.stringify({event:"etapa2_status_error",message:String(error?.message??error).slice(0,160)}));return res.status(204).send("")}
   }
+  if(req.body?.tipo==="etapa4_vigia"){
+    if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
+    try{return res.status(await etapa2.vigiarFinal(req.body.id)).send("")}
+    catch(error){console.error(JSON.stringify({event:"etapa_final_error",message:String(error?.message??error).slice(0,160)}));return res.status(204).send("")}
+  }
   if(req.body?.tipo==="etapa3_vigia"||req.body?.tipo==="etapa3_gerar"){
     if(!validWorkerSignature(req.body?.id,req.headers["x-flow-worker-signature"]))return res.status(403).send("");
     try{return res.status(await etapa2.vigiarContrato(req.body.id,{imediato:req.body.tipo==="etapa3_gerar"})).send("")}
@@ -1584,7 +1589,7 @@ export async function contratoHandler(req,res){
 export default async function handler(req, res) {
   const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.10.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.11.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

@@ -231,7 +231,8 @@ const PORTAL_TEXT = [
   // Observado no site (passo do contrato, 10/11/2026): não há aceite no portal; o contrato é baixado,
   // assinado pelo GOV.BR e enviado por e-mail à central de matrícula.
   [/contrato/, "Contrato", "1. No Portal do candidato, toque em \"Clique aqui para fazer o download do contrato\".\n2. Assine o contrato digitalmente pelo GOV.BR.\n3. Envie o contrato assinado para centraldematriculaub@unibalsas.edu.br.\nDúvidas: WhatsApp (99) 99131-1684. A matrícula segue quando a equipe receber o contrato assinado."],
-  [/pagamento|taxa/, "Pagamento", "Escolha Pix, cartão ou boleto e conclua o pagamento pelo ambiente seguro do Portal do candidato."],
+  // Site (passo da taxa de matrícula, 17/11/2026): "Estamos finalizando! Para concluir a sua matrícula, realize o seu pagamento"; meios Pix ou Cartão de crédito.
+  [/pagamento|taxa/, "Pagamento", "Estamos finalizando! Para concluir a sua matrícula, realize o seu pagamento.\n\nNo Portal do candidato (vestibular.unibalsas.edu.br/presencial), toque em Verificar no Pagamento e escolha Pix ou Cartão de crédito."],
   [/filiacao/, "Filiação", "Cadastre os nomes dos seus responsáveis pelo Portal do candidato."]
 ];
 export function portalScreenData(stageTitle, step) {
