@@ -398,3 +398,22 @@ Inscrição Concluída · Prova online Aprovado · Resp. financeiro menor 18 Con
 - `data`: 50893 nome (`textfield`), 50894 número (`textfield`), 50895 mês (`select`), 50896 ano (`select`), 50897 país (`select`, `BRA`), 50898 bandeira (`textfield`), 50899 CVV (`textfield`), **61956 parcelas (`select`, `1`)** + textos 226387, 226388 (`content`) e 231789 (`htmlelement`).
 - Resposta (HTTP 200): **`{"success":false,"data":"Não foi possível concluir o pagamento!"}`** — recusa genérica (sem código da operadora). O site continua na mesma página; nenhum popup.
 - Para o Flow: o cartão é processado no servidor do Rubeus/TOTVS a partir do número digitado; não coletar no WhatsApp (política). Aprovação, prazo de confirmação e a passagem para "Matriculado" seguem sem mapeamento (exigem pagamento real).
+
+### Etapa final — inscrição 100% concluída (17/11/2026, candidato real de Transferência 20385, só leitura; dados pessoais não registrados)
+`register-portal-data` (7,6 s) e tela do portal:
+
+| Etapa | Status | Botão |
+|---|---|---|
+| Inscrição | Concluída | — |
+| Documentos inscrição | Obrigatório entregues | Verificar (300696) |
+| Seleção resp. financeiro | Concluído | — |
+| Pré-matrícula | Concluída | — |
+| Documentos matrícula | Entregues | — |
+| Contrato | Assinado | Verificar (300700) |
+| **Pagamento** | **Recebido** (`conclusive 1`) | **some o botão** (`cta_text "null"`; o link 300701 continua no dado) |
+| **Matriculado** | **Parabéns!** (`conclusive 1`) | — (sem passo, sem feedback, sem popup) |
+
+- O passo do pagamento (300701 na Transferência) continua acessível pela API com o meio gravado (`38702 = P`, pago por Pix) e os campos do TOTVS preenchidos; nada novo aparece depois do pagamento.
+- **Fim da jornada = status "Pagamento: Recebido" + "Matriculado: Parabéns!"**, todas as etapas com `conclusive 1`. Não há tela final própria no site.
+- Antes da confirmação (Bárbara, Pix gerado e não pago): "Pagamento: Pendente / Verificar" e "Matriculado: Existem pendências"; o passo guarda o Pix gerado (`38702 = P`, QR 50900 e copia e cola 50901), lido de novo sem gerar outra cobrança.
+- **Para o Flow:** o vigia detecta "Pagamento: Recebido"/"Matriculado: Parabéns!" e encerra a jornada (aviso final ao candidato quando o aviso existir). Tempo entre pagar e "Recebido" ainda não medido.
