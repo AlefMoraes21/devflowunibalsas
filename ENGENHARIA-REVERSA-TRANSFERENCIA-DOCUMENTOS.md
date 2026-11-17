@@ -1,5 +1,7 @@
 # Engenharia reversa — Transferência 2027/1 (20385): etapa Documentos inscrição
 
+> **Estado no Flow (2.14.0, 17/11/2026):** implementado e publicado. Como o Flow e o Run fazem: `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md`. Este documento guarda o que o site faz (rotas, campos, textos).
+
 Capturado em 09/11/2026 em `vestibular.unibalsas.edu.br/presencial` com a inscrição fictícia de teste abaixo (login feito pelo usuário; as demais ações foram autorizadas por ele). Fontes: leitura das telas, lista de chamadas `/api/applyment/*` (só método, URL e status) e o corpo de duas respostas. **Corpos de requisição não ficaram visíveis**; o que depende deles está em "Não verificado".
 
 ## Inscrição de teste
@@ -36,31 +38,6 @@ Capturado em 09/11/2026 em `vestibular.unibalsas.edu.br/presencial` com a inscri
 | 3 de 3 enviados | **Em análise**, sem Verificar | todos EM ANÁLISE |
 
 Conclusão: a etapa só sai de "Pendentes" quando **todos** os documentos da lista estão enviados, mesmo com um só marcado como obrigatório. Depois disso o candidato não tem mais ação; a análise é da equipe. Nenhuma etapa seguinte apareceu para esse candidato.
-
-## 4. Correspondência com a API de integração (Blip)
-
-| Passo do site | Equivalente na API UniBalsas |
-|---|---|
-| Lista de documentos do passo | `GET /rm/documents?codColigada=1&idps=…` → `CODDOCUMENTO`, `DESCRICAO` |
-| Número da inscrição | `GET /blip/inscritos/{idps}/{cpf}` → `NUMEROINSCRICAO`, `CODCOLIGADA` |
-| Upload em Base64 do navegador | `POST /blip/documents?codColigada&idps&numeroInscricao&codDocumento&nomeArquivo` com `{base64}` |
-
-Limites: o portal aceita 5 MB; a API aceita corpo de 1 MiB (cerca de 768 KiB de binário), por isso o Flow limita a 740 KB. A API grava como não entregue e a conferência é manual no RM. Após falha de comunicação, conferir no RM antes de reenviar.
-
-## 5. O que o Flow precisa fazer nessa etapa (Transferência)
-
-1. **Lista:** mostrar os 3 documentos; o payload do Dropdown leva só `{id,title}` (correção já aplicada em `api/flow.js`, ver `test/dropdown-options.test.js`).
-2. **Progresso:** mostrar "N de 3 enviados" e quais faltam. Hoje a tela só acumula o texto ✅. Ao reabrir por "Já sou inscrito", refletir o que o portal já tem em `EM ANÁLISE`.
-3. **Conclusão:** só quando os três estiverem enviados, avisar que a etapa está em análise (até 48 h úteis) e trocar o rodapé para "Atualizar situação" (sem "Continuar").
-4. **Envio de cada arquivo:** receber a mídia (DocumentPicker, um por vez), validar PDF/JPG/PNG e 740 KB, decifrar, enviar em Base64. Não prometer aprovação, só recebimento.
-5. **Repetição:** reenviar o mesmo `codDocumento` pode sobrescrever; tratar como atualização, como o código já faz ("atualizado").
-6. **Mapeamento IDPS:** o Flow usa `academicId(processo_seletivo_id)` para converter 20385 no IDPS acadêmico. Não confirmei esse valor para a Transferência.
-
-## 6. Como o arquivo chega ao Flow
-
-- Pela documentação da Meta, o DocumentPicker entrega no `data_exchange` um objeto com `media_id`, `cdn_url`, `file_name` e `encryption_metadata`; o arquivo é cifrado (AES-256-CBC + HMAC) e fica na CDN por até 20 dias. `api/documentos.js` já faz o download e a decifragem.
-- Se o Flow rodar de forma que o endpoint não receba o `data_exchange`, o Blip baixa a imagem pela Graph API e anexa a URL como metadado da mensagem. Nesse caminho o arquivo só chega depois do `complete`, sem retorno dentro da tela.
-- **Aberto:** qual dos dois o Blip usa no Flow de produção, e o nome e o formato do metadado.
 
 ## Não verificado
 
@@ -119,36 +96,11 @@ Nenhuma etapa seguinte aparece enquanto os documentos estão em análise. As eta
 - Releitura do passo: os 3 itens com **`STATUSENVIO` "1"** (em análise).
 - **É exatamente o formato de `montarEnvio` / `lerPassoDocumentos` em `api/portal-site.js`.** Conferido no navegador: o leitor acharia o botão 3940675, o componente 3940672 e o campo 38633 sem nenhuma mudança. `jaEnviado` (status 1 ou 3) também vale aqui.
 
-## D. Comparação com o Flow/Run atual (2.12.3)
+## D. No Flow (2.14.0)
 
-| Ponto | Site | Run hoje | Ação |
-|---|---|---|---|
-| Inscrição (3 telas) | 300692–300694 | `etapa1-fila.js` já faz pela mesma engine (curso → `CURSO_INGRESSO`, IDPS 225) | nada |
-| Depois do Concluir | Obrigado → Portal → Documentos inscrição | fecha o Flow (`sucesso`, `dados_recebidos`), sem telas de portal nem de documentos | criar telas: Concluída → Portal → Documentos de inscrição |
-| Documentos de inscrição | 3 docs (28\*, 29, 27), um "Enviar" | **não existe no fluxo novo**; `DOCS` só tem os 7 da matrícula | novo bloco `documentos_inscricao` gravado no Firestore e enviado pelo worker via `portalSite.enviarDocumentos` no passo da etapa |
-| Etapa 2 com "Documentos inscrição: Pendentes" | Verificar abre 300696 | `proximaTela` cai em **MATR_RESPONSAVEL** (o resp. financeiro ainda nem existe no site) | tratar "documentos inscrição" antes do resp. financeiro |
-| Worker com próximo passo "document…" | — | `/document/` confunde inscrição com matrícula e enviaria os códigos 1, 2, 5… para o 300696 | separar por `/inscri/` × `/matric/` |
-| "Em análise" | sem botão | `next` = null → só status e Fechar | ok; vigia/aviso quando liberar o resp. financeiro (como na redação) |
+Obrigado → Portal (Documentos inscrição: Pendentes) → Histórico acadêmico (28\*), Planos de ensino (29) e Declaração de vínculo (27), um por tela → status com "Em análise" (tela final). O worker entra no portal, acha a etapa pelo link, envia num único "Enviar" multipart e confere no passo; o vigia acompanha a análise (recusa → reenvio só dos recusados; aprovado → aviso e segue para a matrícula).
 
-## E. Plano para o Flow (mesma lógica da redação)
-
-1. **Etapa 1, Transferência:** depois de "Concluir", em vez de fechar, segue igual ao site:
-   - `INSC_CONCLUIDA` (Obrigado)
-   - `INSC_PORTAL`, com "Inscrição: Concluída" e "Documentos inscrição: Pendentes" + Verificar
-   - Telas de documento: **Histórico acadêmico\*** (obrigatório), **Planos de ensino** e **Declaração de vínculo**, uma por tela, como a matrícula
-   - Fim: "Recebemos seus documentos. A análise ocorre em até 48 horas úteis."
-2. **Firestore primeiro:** cada arquivo vai para `blocos.documentos_inscricao` na hora (como `gravarDocumento`) e o Flow responde de imediato.
-3. **Worker:** depois que a inscrição tem `applyment_id`, ele:
-   - entra no portal (`entrar` com CPF e nascimento);
-   - lê o passo de "Documentos inscrição" pelo `cta_link` do `register-portal-data`, sem fixar 300696;
-   - faz **um** `button-click` com todos os arquivos (`montarEnvio`);
-   - grava `enviados_docs_inscricao`.
-   Repetição segura: pula os que já estão com `STATUSENVIO` 1 ou 3.
-4. **Vigia:** depois de "Em análise", o vigia segue o portal. Quando aparecer "Seleção resp. financeiro: Pendente", manda o aviso pelo Blip, como na aprovação da redação, e o candidato entra na etapa 2 normal (resp. financeiro → pré-matrícula → docs → contrato → pagamento), que já é genérica por título de etapa.
-5. **Etapa 2:** `proximaTela`/`MATR_STATUS` precisam reconhecer "Documentos inscrição: Pendentes" e abrir as telas de documentos de inscrição (quem fechou o Flow antes de enviar). O worker precisa separar inscrição de matrícula.
-6. Não mexer no Vestibular: tudo condicionado a `isDirectRegistration(processo)`. Portador (300681: 10\*, 17, 26) e ENEM (300711) usam o mesmo componente e podem reaproveitar a mesma solução, com a lista de documentos lida do passo.
-
-## F. Telas e textos do site, na ordem (copiados em 17/11/2026)
+## E. Telas e textos do site, na ordem (copiados em 17/11/2026)
 
 Base para as telas do Flow ("igual ao site"). Barra lateral da inscrição: "Transferência - 2027/1 · Inscrição", com os passos Dados básicos / Curso de interesse / Estamos quase lá. Cada passo mostra "Aguardando conclusão" (atual), "Pendente" (futuro) ou "Concluído".
 

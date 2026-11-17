@@ -1,5 +1,7 @@
 # Engenharia reversa — Portador de Diploma 2027/1 (20384): Etapa 1
 
+> **Estado no Flow (2.14.0, 17/11/2026):** implementado e publicado. Como o Flow e o Run fazem: `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md`. Este documento guarda o que o site faz (rotas, campos, textos).
+
 Mapeada em 17/11/2026 pelo site, com dados fictícios do 4devs fornecidos pelo usuário: **Rosa Helena P. Rodrigues**, Enfermagem – Noturno.
 - **applyment 14320168**, person_id 10163911, contato CRM 607802, CODUSUARIOPS 20171.
 - Corpos e respostas capturados no navegador. Tokens, sessões e CPF não foram registrados.
@@ -87,16 +89,9 @@ Nenhuma etapa seguinte aparece enquanto os documentos estão em análise.
 | Upload / Enviar | — | 3940672 / 3940675 | **3940539 / 3940542** |
 | Pausa humana | correção da redação | docs "Em análise" | docs "Em análise" |
 
-## 6. O que muda no Flow/Run (o mesmo plano da Transferência, seção E)
+## 6. No Flow (2.14.0)
 
-O Run atual (`etapa1-fila.js:565`) fecha a etapa 1 do Portador logo depois da inscrição confirmada (`sucesso`, `dados_recebidos`). Para ficar igual ao site:
-
-1. **Etapa 1 do Portador:** depois de "Concluir", seguir pelas telas `INSC_CONCLUIDA` (Obrigado) → `INSC_PORTAL` ("Inscrição: Concluída", "Documentos inscrição: Pendentes" + Verificar) → 3 telas de documento (**Diploma de graduação\***, Histórico da graduação, Certidão de conclusão – graduação) → fim: "Recebemos seus documentos. A análise ocorre em até 48 horas úteis." e **fecha a etapa 1**.
-2. **Firestore primeiro:** os arquivos vão para `blocos.documentos_inscricao` e o Flow responde de imediato.
-3. **Worker:** `entrar` → passo lido do `cta_link` de "Documentos inscrição" → **um** `button-click` com `montarEnvio` → pula `STATUSENVIO` 1 ou 3.
-4. **Vigia:** acompanha o portal enquanto estiver "Em análise". Quando liberar a próxima etapa, avisa pelo Blip (template `unibalsas_atualizacao_processo`) e o candidato entra na etapa 2.
-5. **Uma solução para os três** (Transferência, Portador e ENEM): a lista de documentos e os IDs vêm sempre do passo lido (`lerPassoDocumentos`), sem tabela fixa por processo. Só os títulos das telas vêm do `upload_content`. Condicionar por `isDirectRegistration(processo)`, sem mexer no Vestibular.
-6. **Etapa 2:** `proximaTela` e o worker precisam separar "Documentos inscrição" (`/inscri/`) de "Documentos matrícula" (`/matric/`). Hoje "Documentos inscrição: Pendentes" cai em MATR_RESPONSAVEL.
+O mesmo caminho da Transferência: Obrigado → Portal (Documentos inscrição: Pendentes) → Diploma (10\*), Histórico (17) e Certidão (26), um por tela → status com "Em análise". O worker envia num único "Enviar" pelo passo do portal; "Documentos inscrição" nunca é confundida com "Documentos matrícula".
 
 ## 7. Telas e textos do site, na ordem (copiados em 17/11/2026)
 

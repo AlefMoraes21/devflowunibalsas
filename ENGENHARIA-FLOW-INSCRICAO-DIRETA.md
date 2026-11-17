@@ -5,7 +5,7 @@ Projeto das telas e do trabalho do Run para os 3 processos de inscrição direta
 - `ENGENHARIA-REVERSA-PORTADOR-DIPLOMA.md`
 - `ENGENHARIA-REVERSA-NOTA-ENEM.md`
 
-**Status (17/11/2026):** **implementado na 2.13.0, NÃO publicado** (aguardando "publicar"). Entraram V1 e V3; V2 (5 MB) fica para homologar. Diferenças do projeto: as telas de documento chamam-se `INSC_DOC_A/B/C` (a Meta não aceita número no id) e o fim é `INSC_DOCS_FIM` (logo "Documentos de inscrição"); a lista de status do LOGIN ganhou ícones por status (`start.image`, `flows/img/icone_*.png`), porque a NavigationList não aceita imagem solta na tela.
+**Status:** no ar desde a 2.13.0; na 2.14.0 o "Enviar" do último documento volta ao status do portal (Documentos inscrição: Em análise), que é a tela final do Flow (`INSC_DOCS_FIM`, terminal: Concluir ou fechar finaliza; o envio já está agendado no Run). V2 (5 MB) segue para homologar.
 
 Princípios, os mesmos do Vestibular:
 - Igual ao site, sem inventar etapas.
@@ -181,28 +181,10 @@ Depois da aprovação, a etapa 2 desses processos segue a jornada genérica que 
 
 ---
 
-## 7. Sugestões de melhoria que tocam o Vestibular (preciso do seu OK)
-
-| # | Sugestão | Por quê | Risco |
-|---|---|---|---|
-| **V1** | Salvar o status do portal também no fim da etapa 1 do Vestibular e no vigia da redação (como na seção 4.4) | O portal levou 6,7 s e o limite do login é 6,5 s. Hoje o login costuma cair em "Buscando… Atualizar". Com o status salvo, abre na hora. | Baixo: só grava um campo a mais |
-| **V2** | Subir o limite dos documentos de 740 KB para 5 MB, igual ao site | Os 740 KB vinham da API antiga (corpo de 1 MiB). Hoje os documentos vão pelo caminho do site (multipart), que aceita 5 MB. Uma foto de celular passa fácil de 740 KB. | Médio: conferir o download da mídia e a memória do Cloud Run com arquivo de 5 MB antes |
-| **V3** | Tirar da `INSC_QUASE_LA` os campos do ENEM que ficam escondidos | Limpeza: deixa o JSON menor. | Baixo, mas mexe numa tela do Vestibular. Pode ficar para depois. |
-
----
-
-## 8. Ainda em aberto (não bloqueiam a implementação)
+## 7. Ainda em aberto
 
 - Como fica o portal quando um documento é recusado (`STATUSENVIO` 2) e se o reenvio usa o mesmo botão. É provável, mas não foi testado.
 - O nome da etapa que aparece depois da aprovação no Portador e no ENEM. Pelo Caleb, deve ser "Seleção resp. financeiro".
 - O texto que "Checando as notas" mostra depois da validação.
 - O vigia trata por título e status. Os candidatos de teste (Rebeca 14320114, Rosa 14320168, Juan 14320206) ficam para conferir quando a equipe agir.
 - O rótulo dinâmico do Footer e o `min-uploaded-documents` 0 do DocumentPicker precisam ser validados no editor da Meta.
-
-## 9. Ordem de implementação proposta
-
-1. `processes.js`: `temDocsInscricao` e a lista de documentos por processo.
-2. Flow: telas `INSC_CURSO_ENEM`, `INSC_STATUS` e `INSC_DOC_1..3` (`flows/gerar-etapa1.mjs`).
-3. `etapa1-fila.js`: notas na tela do curso, a sequência depois do Concluir, `gravarDocumentoInscricao`, o passo `docs_inscricao` e o registro na `matriculaFila`.
-4. `etapa2-matricula.js`: os 3 pontos da seção 5 e o `inscricao_vigia`.
-5. Testes (regressão do Vestibular + os 3 processos) → validar o JSON no editor da Meta → teste no celular com um candidato fictício novo.

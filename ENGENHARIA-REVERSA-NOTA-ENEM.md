@@ -1,5 +1,7 @@
 # Engenharia reversa — Nota do ENEM 2027/1 (20386): Etapa 1
 
+> **Estado no Flow (2.14.0, 17/11/2026):** implementado e publicado. Como o Flow e o Run fazem: `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md`. Este documento guarda o que o site faz (rotas, campos, textos).
+
 Mapeada em 17/11/2026 pelo site, com dados fictícios do 4devs fornecidos pelo usuário: **Juan Luiz L. da Costa**, Psicologia – Noturno.
 - Inscrição: **applyment 14320206**, person_id 10163943, contato CRM 607807, CODUSUARIOPS 20172.
 - ENEM de teste: inscrição `999999999999` (fictícia), ano 2025.
@@ -91,18 +93,9 @@ O motor e o formato são os mesmos do Vestibular, da Transferência e do Portado
 | Upload / Enviar | — | 3940672 / 3940675 | 3940539 / 3940542 | **3940807 / 3940810** |
 | Pausa humana | correção da redação | docs em análise | docs em análise | **notas validando + docs em análise** |
 
-## 7. O que muda no Flow/Run
+## 7. No Flow (2.14.0)
 
-1. **Notas no lugar certo.** No site, as notas ficam no passo **Curso de interesse** (300708), logo abaixo de curso e turno. O Flow atual (`etapa1-fila.js`, `INSC_QUASE_LA` + `ENEM_CAMPOS`) as pede na **última** tela. Para ficar "igual ao site", passar o bloco de notas para a tela de curso quando `eh_nota_enem`. O worker já manda o curso junto com as notas (`etapa1-fila.js:546`), então o envio ao Rubeus não muda.
-2. **Média.** No site ela é calculada e bloqueada. O Flow deve mostrá-la calculada (`enemAverage` já faz isso) e enviá-la com 2 casas decimais (`"628.10"`).
-3. **Depois do Concluir:** o mesmo plano da Transferência e do Portador. São as telas Obrigado → Portal (Inscrição: Concluída · **Checando as notas: Validando** · Documentos inscrição: Pendentes + Verificar) → 1 tela de documento (**Boletim nota ENEM\***) → fim ("Recebemos seu boletim. A análise ocorre em até 48 horas úteis.") e **fecha a etapa 1**.
-4. **Worker:** `entrar` → passo do `cta_link` de "Documentos inscrição" → um `button-click` (`montarEnvio`). É a mesma solução única para os processos de inscrição direta.
-5. **Vigia do resultado**, como o da redação:
-   - Ler "Checando as notas" no portal, ou o campo 38623 no `applicantData` do passo 300719.
-   - **Aprovado (4–8):** aviso pelo Blip "Parabéns… aprovado", e o candidato entra na etapa 2 (pré-matrícula).
-   - **Desclassificado (3):** aviso com o texto do site e a opção de nova inscrição.
-   - É preciso confirmar no portal qual `complementary_text` aparece em cada caso.
-6. **Etapa 2:** `proximaTela` deve reconhecer "Checando as notas" (só status, sem botão) e "Documentos inscrição" (separado de matrícula).
+Notas na tela do curso (`INSC_CURSO_ENEM`), média calculada no Run e mostrada na "Estamos quase lá"; Obrigado → Portal (Checando as notas: Validando · Documentos inscrição: Pendentes) → boletim (25\*) → status com "Em análise". O vigia da inscrição lê o campo 38623 (3 = desclassificado; 4 a 8 = aprovado) e avisa pelo Blip.
 
 ## 8. Telas e textos do site, na ordem (copiados em 17/11/2026)
 

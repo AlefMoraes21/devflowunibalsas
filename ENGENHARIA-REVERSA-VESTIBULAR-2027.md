@@ -1,5 +1,7 @@
 # Engenharia reversa — Vestibular Online 2027/1 (UniBalsas)
 
+> **Estado no Flow (2.14.0, 17/11/2026):** inscrição, prova, matrícula, contrato e pagamento no ar pelo único Flow (`flows/etapa1-vestibular.json`). Comparações com versões antigas do endpoint foram retiradas; o histórico de versões fica no git. Este documento guarda o que o site faz.
+
 Capturado em 06/11/2026 no site `vestibular.unibalsas.edu.br/presencial` e no módulo de avaliação `avaliacao.apprubeus.com.br`, com uma inscrição de teste real.
 
 ## Inscrição de teste (para localizar no CRM)
@@ -59,25 +61,6 @@ Botões: **Iniciar prova** (`3940382`) e **Continuar Prova** (`3940383`), ambos 
 6. Portal passa a mostrar "Prova online — Aguardando correção".
 
 Tema real desta prova: **"O papel da educação na redução das desigualdades sociais"**.
-
-## 4. Comparação com o endpoint do Flow (v1.4.0, igual ao Cloud Run)
-
-| Ponto | Site observado | Flow / código | Situação |
-|---|---|---|---|
-| IDs de campos e botões dos 3 passos | ver seção 1 | `buildBasicScreenData`, `buildCourseScreenData`, `buildAlmostThereScreenData` (com fallbacks iguais) | ✅ igual |
-| Valores ocultos (IDPS 223, LGPD 1/4, gênero Rubeus 1/2) | enviados pelo site | enviados pelo Flow | ✅ igual |
-| Códigos de origem 01–10 | `query_data` TOTVS | `ORIGENS_PADRAO` | ✅ igual (títulos encurtados por limite de 30 caracteres do Dropdown) |
-| Celular | só dígitos `99988880001` | formatado `(99) 98888-0001` | ⚠️ diferente — avaliar se o CRM normaliza |
-| Escolha Iniciar/Continuar prova | status 38592 + opção 38623 | `chooseProofButton` | ✅ cobre o status inicial "parâmetros obrigatórios…" |
-| Rota `/execucao/inicio/...` com código alfanumérico | IDEXECPROVA | regex de `avaliacao.init` | ✅ igual |
-| Corpo de `create` e `salve` | seção 3 | `avaliacao.init` / `avaliacao.send` | ✅ chaves idênticas |
-| Confirmação no portal | "Aguardando correção" | `portalConfirmsDelivery` (`/aguardando.*correc/`) | ✅ reconhecida |
-| Tema exibido na TELA_REDACAO | enunciado HTML da questão | `promptText` → 1025 caracteres legíveis | ✅ testado com o enunciado real |
-| Tema fixo em `enviar_informacoes_complementares` | — | "A romantização da produtividade…" | ⚠️ texto antigo, não exibido no layout atual (dado morto) |
-| Limite da redação | sem limite (`maxCaracteres` null) | TextArea `max-length` 3000 | ℹ️ limite do WhatsApp |
-| Colar texto | bloqueado no site | permitido no WhatsApp | ℹ️ diferença de canal |
-
-Testes do repositório: `node --test "test/*.test.js"` → 73/73 passam. (Os `*.test.js` soltos na raiz são cópias antigas e falham por caminho relativo; podem ser removidos.)
 
 ## 5. Etapas após a prova (mapeadas em 06/11/2026, mesma inscrição de teste)
 
@@ -200,15 +183,6 @@ Envio (botão `3940449` "Enviar", stage 261006), multipart:
 - demais campos de controle iguais aos outros passos.
 
 Resposta: `success:true`, `place_type_id` 5. Portal do passo: **"COMPROVANTE DE RESIDÊNCIA — EM ANÁLISE"** (arquivo renomeado para `COMPROVANTE DE RESIDÊNCIA.pdf`). Envio parcial é aceito; a etapa só sai de "Pendentes" com os obrigatórios. Arquivo usado: PDF de 1 página "DOCUMENTO DE TESTE - NAO VALIDO - Teste".
-
-### Comparação com o Flow (`api/matricula.js`)
-| Ponto | Site | Flow | Situação |
-|---|---|---|---|
-| Upload | binário em `file_0` + `value:["file_0"]` no item do campo 38733 | arquivo **dentro do JSON** (`formio`, `lista`, `dataurl`, `base64`, linha 134) | ❌ causa provável dos HTTP 500 da 1.6.12–1.6.15 |
-| Limite | 5 MB | 740 KB | ℹ️ limite do Flow |
-| RG | como digitado (`123456-X`) | só dígitos | ❌ perde letra/dígito X |
-| Idade 38704 | enviada (oculta) | — | ⚠️ conferir se o `/submit` oficial calcula sozinho |
-| Ano de conclusão | lista 1995–2027 | texto 1950–ano atual | ⚠️ |
 
 ### Etapa assíncrona seguinte
 Contrato (300669) só libera depois dos 3 obrigatórios **e** da análise da equipe (até 48 h). Para seguir: enviar Histórico, Certificado e Declaração de teste e aguardar a análise — ou a equipe validar manualmente, como foi feito com a redação.

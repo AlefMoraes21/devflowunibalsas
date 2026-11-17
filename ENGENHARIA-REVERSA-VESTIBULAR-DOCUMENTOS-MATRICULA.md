@@ -1,5 +1,7 @@
 # Engenharia reversa - Vestibular Online: "Documentos de matrícula" (passo 300671)
 
+> **Estado no Flow (2.14.0):** documentos de matrícula pelo caminho do site (`api/portal-site.js`, `button-click` do passo 300671, um único "Enviar"), no ar desde a 2.8.0. As opções e o plano antigos foram retirados.
+
 Origem: portal `https://vestibular.unibalsas.edu.br/presencial/portal-inscrito`, cadastro fictício Nicole Catarina Olivia Peixoto, passo `/presencial/passo/300671`. Mapeamento **somente leitura**: nenhum arquivo foi enviado e nenhum botão de envio foi clicado.
 
 Legenda: **[OBSERVADO]** visto nas respostas do portal; **[INFERIDO]** dedução; **[DESCONHECIDO]** precisa de confirmação.
@@ -124,31 +126,10 @@ Fonte: `https://docs.rubeus.com.br/api_im/` (aberta pelo craft, evidência `ev_f
 | PATHARQUIVO | campo 38719 |
 | STATUS | fixo 1 |
 
-## 4. Como o Flow deve fazer (um Flow só)
-
-Fluxo: ESCOLHA_PROCESSO -> "Já sou inscrito" (CPF + nascimento) -> etapa "Documentos de matrícula" (tela já existente `DOCUMENTOS_INSCRICAO`, reaproveitada) -> DocumentPicker (um por tela, PDF/JPG/PNG, até 740 KB) -> `data_exchange` com `media_id/cdn_url/encryption_metadata` -> servidor decifra (`api/documentos.js`) -> **entrega ao RM** (ponto em aberto).
-
-Mudanças no Flow quando houver destino:
-1. `matricula.js`: nova fonte da lista (7 documentos, marcando os 3 obrigatórios) em vez de `/rm/documents`.
-2. Progresso "N de 3 obrigatórios" (os opcionais não bloqueiam a conclusão).
-3. `documentos.js`: novo `saveEnrollmentDocument` com o mesmo tratamento de arquivo (`sendFile` já valida tipo e tamanho).
-
-## 5. Duas opções de entrega ao RM
-
-**A. Endpoint da UniBalsas (recomendado)** - pedir à equipe técnica:
-- `GET` lista de documentos de matrícula por inscrição (equivalente à query RB.PS.IM.017: CODDOCUMENTO, DESCRICAO, obrigatório, situação);
-- `POST` que grave em SDOCALUNO (parâmetros: coligada, idperlet, RA/inscrição, codDocumento, nomeArquivo, body `{base64}`), no mesmo padrão de `/blip/documents`.
-
-**B. Replicar o Rubeus pelo servidor** - chamar `/api/applyment/*` (`getApplymentDataByStep`, `register-portal-data`, `button-click` 3940449) como o portal faz. **Não recomendado**: depende de sessão do candidato e de tokens do portal, não é API pública, muda sem aviso e exige autenticação em nome do candidato. **[DESCONHECIDO]** se o portal aceitaria isso sem login interativo.
-
-## 6. Pontos desconhecidos
+## 4. Pontos desconhecidos
 
 - **[DESCONHECIDO]** Códigos CODDOCUMENTO dos 7 documentos (a query RB.PS.IM.017 não foi executada pelo Flow; a captura trouxe a estrutura, não a lista com ids).
 - **[DESCONHECIDO]** De onde vêm IDPERLET, RA e CODUSUARIO para um candidato recém-aprovado (campos 38613, 38651, 38742).
 - **[DESCONHECIDO]** Se o status do contrato "Aguardando documentação" muda sozinho após os 3 obrigatórios ou depende de conferência manual.
 - **[DESCONHECIDO]** Limite de tamanho do campo ARQUIVO nesta ação (o `/blip/documents` aceita 1 MiB).
 - Etapas Contrato e Matriculado ("Existem pendências") não foram detalhadas neste mapeamento.
-
-## 7. Próximo passo sugerido
-
-Enviar à UniBalsas o pedido da opção A (seção 5). Com os endpoints, a alteração no Flow é pequena, porque DocumentPicker, decifragem, validação de tipo/tamanho e progresso já estão prontos na 1.6.8.

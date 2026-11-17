@@ -57,6 +57,17 @@ test/                     testes (node:test), sem chamar sistemas reais
 
 A imagem do Cloud Run leva só `server.js`, `package.json`, `api/` e os ícones de status (`.dockerignore`).
 
+## Documentação
+
+| Arquivo | Conteúdo |
+|---|---|
+| `LEIA-ME.md` | O que mudou na versão atual e o mapa do "Atualizar" |
+| `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md` | Como o Flow e o Run fazem a etapa 1 da Transferência, do Portador e do ENEM |
+| `ENGENHARIA-REVERSA-VESTIBULAR-2027.md` | O site, passo a passo: inscrição, prova, matrícula, contrato e pagamento |
+| `ENGENHARIA-REVERSA-VESTIBULAR-DOCUMENTOS-MATRICULA.md` | Documentos de matrícula (passo 300671) |
+| `ENGENHARIA-REVERSA-TRANSFERENCIA-DOCUMENTOS.md`, `…-PORTADOR-DIPLOMA.md`, `…-NOTA-ENEM.md` | Etapa 1 de cada processo no site |
+| `.claude/skills/verify/SKILL.md` | Como rodar a API localmente e percorrer as telas como a Meta |
+
 ## Configuração
 
 Variáveis de ambiente (no Cloud Run; nunca no código):
