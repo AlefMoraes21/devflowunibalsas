@@ -1,0 +1,24 @@
+// Sonda da entrada única (2.14.0): ping, INIT, tela do Flow antigo, e o status final depois do Enviar.
+import { call, mostrar, ctrl } from './lib.mjs';
+mostrar('ping', await call(null, 'ping', {}));
+mostrar('INIT sem link de redação', await call(null, 'INIT', {}));
+mostrar('tela do Flow antigo (ESCOLHA_PROCESSO)', await call('ESCOLHA_PROCESSO', 'data_exchange', { acao: 'selecionar_processo', processo_seletivo_id: '20383' }));
+mostrar('erro do cliente', await call('INSC_DADOS', 'data_exchange', { error: 'teste', error_message: 'x' }));
+const agora = Date.now(), T = 'verify-fim-' + agora;
+await ctrl('/put', { col: 'flowCache', id: 'etapa1-20385', record: { cursos: [{ id: 'c1', title: 'Direito' }], turnos: { c1: [{ id: 't1', title: 'Noturno' }] }, atualizado: agora, expires: agora + 864e5 } });
+await ctrl('/env', { ETAPA1_CONSULTA_RM: 'off' });
+let r = await call('INSC_INICIO', 'data_exchange', { acao: 'e1_iniciar', processo_seletivo_id: '20385' }, T);
+r = await call('INSC_DADOS', 'data_exchange', { acao: 'enviar_dados_basicos', estado: r.data.estado, nome: 'Rebeca Isabelly Stefany Drumond', possui_nome_social: false, nome_social: '', email: 'rebeca_drumond@piscinasegura.com.br', data_nascimento: '1959-04-13', celular: '68999966749', genero: 'F', aceite_privacidade: true }, T);
+r = await call('INSC_CURSO', 'data_exchange', { acao: 'escolher_curso', estado: r.data.estado, curso_id: 'c1' }, T);
+r = await call('INSC_CURSO', 'data_exchange', { acao: 'escolher_curso', estado: r.data.estado, curso_id: 'c1', turno_id: 't1' }, T);
+r = await call('INSC_QUASE_LA', 'data_exchange', { acao: 'enviar_informacoes_complementares', estado: r.data.estado, cpf: '999.456.334-30', nacionalidade: '10', concluiu_ensino_medio: 'Sim', possui_deficiencia: 'F', tipos_deficiencia: [], deficiencia_outra: '', como_conheceu: r.data.origens[0].id, como_conheceu_outro: '' }, T);
+r = await call('INSC_CONCLUIDA', 'data_exchange', { acao: 'abrir_portal', estado: r.data.estado }, T);
+r = await call('INSC_STATUS', 'data_exchange', { acao: 'verificar_documentos', estado: r.data.estado }, T);
+const m1 = await ctrl('/media', { name: 'historico.pdf' });
+r = await call('INSC_DOC_A', 'data_exchange', { acao: 'enviar_documento_inscricao', estado: r.data.estado, arquivo: [m1] }, T);
+r = await call('INSC_DOC_B', 'data_exchange', { acao: 'enviar_documento_inscricao', estado: r.data.estado, arquivo: [] }, T);
+r = await call('INSC_DOC_C', 'data_exchange', { acao: 'enviar_documento_inscricao', estado: r.data.estado, arquivo: [] }, T);
+mostrar('Transferência: Enviar no último documento', r);
+const rec = (await ctrl('/store?col=inscricoesFila')).at(-1).record;
+console.log('### registro', JSON.stringify({ status: rec.status, passo: rec.passo, docs: { completo: rec.docs_inscricao?.completo, codigos: Object.keys(rec.docs_inscricao?.arquivos ?? {}) } }));
+console.log('### tarefas', JSON.stringify((await ctrl('/tasks')).map(t => t.tipo).reduce((a, t) => ({ ...a, [t]: (a[t] ?? 0) + 1 }), {})));

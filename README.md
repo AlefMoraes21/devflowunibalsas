@@ -1,89 +1,73 @@
 # DevFlow UniBalsas
 
-Endpoint do **WhatsApp Flow** de inscrição nos processos seletivos da UniBalsas. O candidato faz a inscrição, a redação online, acompanha as etapas e envia documentos sem sair do WhatsApp. O servidor traduz cada tela do Flow em chamadas ao **Rubeus** (CRM e portal do candidato), ao módulo de **avaliação** (redação) e à **API acadêmica da UniBalsas** (documentos).
+Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.13.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.13.0`; histórico em `LEIA-ME.md`; Flow da WABA: `flows/etapa1-vestibular.json`); documentos de matrícula do Vestibular via DocumentPicker (desligar com `MATRICULA_DOCS_UPLOAD=off`)
-- Execução: Node.js 22+, sem dependências externas (`npm install` não baixa pacotes)
-- Hospedagem: Google Cloud Run (`southamerica-east1`), com Firestore e Cloud Tasks para tarefas lentas
-- Flow: JSON versão 7.3, Data API 3.0 (`flow-waba.json`)
+- Versão atual: **2.14.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.14.0`; histórico em `LEIA-ME.md`)
+- Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
+- Execução: Node.js 22+, sem dependências externas
+- Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
 
 ## Como funciona
 
 ```
-WhatsApp Flow ──(data_exchange, criptografado)──▶ POST /api/flow ──▶ Rubeus (inscrição e portal)
-                                                        │          ├─▶ Módulo de avaliação (redação)
-                                                        │          └─▶ API UniBalsas (documentos)
-                                                        ▼
-                                          Firestore + Cloud Tasks (tarefas lentas)
-                                                        ▼
-                                          POST /internal/flow-worker
+WhatsApp Flow ──(criptografado)──▶ POST /api/flow ──▶ grava no Firestore e responde na hora
+                                                         │
+                                       Cloud Tasks ──▶ POST /internal/flow-worker ──▶ Rubeus / portal do candidato
+                                                         │                         └─▶ módulo de avaliação (redação)
+                                                         └─▶ vigias (correção, análise, contrato, pagamento) ──▶ avisos pelo Blip
 ```
 
-A Meta dá no máximo 10 s para o endpoint responder. Por isso as operações lentas (gravar curso e notas, concluir inscrição, abrir a prova, enviar a redação, consultar o portal, enviar documento) viram um **job** durável:
+A Meta dá 10 s para cada resposta. Por isso o Flow só grava e responde; o envio ao Rubeus é feito pelo worker, com
+calma e conferência, igual ao que o candidato faria no site. Ao vivo ficam só o login (CPF + data de nascimento) e o CEP.
 
-1. O Flow envia a ação; o servidor grava o job no Firestore (cifrado com AES-GCM, expira em 2 h) e agenda no Cloud Tasks.
-2. A tela mostra "Só um instante ⏳" e o botão **Verificar andamento**.
-3. O worker (`/internal/flow-worker`, assinado por HMAC) executa a operação uma única vez; clique repetido gera o mesmo job.
-4. Cada "Verificar andamento" lê o estado real do job. Nada é confirmado antes do retorno do sistema de destino.
-
-O estado de cada tela vai selado (AES-GCM) no campo `estado`, nunca vindo do cliente.
+O estado de cada tela vai selado (AES-GCM) no campo `estado`, nunca vindo do cliente. Telas que não são do Flow atual
+(`INSC_*`, `MATR_*`, `CONTR_*`) recebem uma tela de fim com orientação.
 
 ## Jornada
 
-| Processo | Rubeus / IDPS | Caminho |
+| Processo | Rubeus / IDPS | Etapa 1 no Flow |
 |---|---|---|
-| Vestibular Online | 20383 / 223 | dados básicos → curso → "Estamos quase lá" → redação |
-| ENEM | 20386 / 226 | dados básicos → curso e notas → "Estamos quase lá" → comprovante |
-| Transferência | 20385 / 225 | dados básicos → curso → "Estamos quase lá" |
-| Portador de Diploma | 20384 / 224 | dados básicos → curso → "Estamos quase lá" |
+| Vestibular Online | 20383 / 223 | dados → curso → "Estamos quase lá" → Obrigado → Portal → prova → redação |
+| Transferência | 20385 / 225 | dados → curso → "Estamos quase lá" → Obrigado → Portal → documentos (28\*, 29, 27) → status |
+| Portador de Diploma | 20384 / 224 | dados → curso → "Estamos quase lá" → Obrigado → Portal → documentos (10\*, 17, 26) → status |
+| Nota do ENEM | 20386 / 226 | dados → curso e notas → "Estamos quase lá" → Obrigado → Portal → boletim (25\*) → status |
 
-Depois da inscrição o Flow não fecha: abre o painel de **acompanhamento** com a situação de cada etapa do portal. Quem já se inscreveu entra por **Já sou inscrito** (CPF + data de nascimento) e continua por responsável financeiro, dados do responsável, endereço, identidade, cupom, documentos, contrato e pagamento.
-
-### Documentos pelo WhatsApp
-
-A tela `DOCUMENTOS_INSCRICAO` usa o componente nativo **DocumentPicker**:
-
-1. `GET /rm/documents` lista os documentos exigidos pelo processo (`CODDOCUMENTO`).
-2. `GET /blip/inscritos/{idps}/{cpf}` devolve o `NUMEROINSCRICAO`.
-3. O Flow entrega ao endpoint `cdn_url` + chaves de criptografia; o servidor baixa o arquivo, confere SHA-256/HMAC, descriptografa (AES-256-CBC) e confere o tipo pelo conteúdo (PDF, JPG ou PNG, até 740 KB).
-4. `POST /blip/documents` envia o arquivo em Base64. O sucesso só é mostrado com `status: ok` e a chave `primaryKey` esperada.
-
-A API da UniBalsas grava o documento como **não conferido**; a equipe confere manualmente. Documentos de matrícula (RG, CPF, histórico), contrato e pagamento ainda abrem o Portal do candidato.
+Quem já se inscreveu entra por **Já sou inscrito (LOGIN)** e vê a lista de etapas do portal, com o botão da etapa liberada
+(documentos de inscrição, responsável financeiro, pré-matrícula, documentos de matrícula, contrato, pagamento).
 
 ## Estrutura
 
 ```
-server.js              servidor HTTP (/api/flow, /internal/flow-worker, /healthz)
-api/flow.js            roteador do Flow: telas, ações, estado selado, Rubeus
-api/jobs.js            fila durável: job, polling, worker, idempotência
-api/cloud-store.js     Firestore, Cloud Tasks, cifragem dos jobs
-api/matricula.js       login do candidato e telas de matrícula
-api/documentos.js      API da UniBalsas e mídia do DocumentPicker
-api/avaliacao.js       módulo de avaliação (redação)
-api/prova-route.js     link oficial da prova
-api/proof-binding.js   vínculo prova ↔ inscrição
-api/prompt-text.js     texto do tema da redação
-api/enem.js            notas e média do ENEM
-api/processes.js       política por processo seletivo
-api/diagnostics.js     resume erros de validação do Rubeus sem os valores enviados
-flow-waba.json         JSON do Flow para colar na Meta
-implantar.sh           cria Firestore/Cloud Tasks/permissões e publica no Cloud Run
-test/                  testes automatizados (node:test)
-LEIA-ME.md             histórico de versões e notas de cada entrega
-ENGENHARIA-REVERSA-VESTIBULAR-2027.md   endpoints do site e do módulo de avaliação
+server.js                 servidor HTTP (/api/flow, /internal/flow-worker, /contrato/<token>, /healthz)
+api/flow.js               entrada do Flow, criptografia, worker e o motor de gravação no Rubeus
+api/etapa1-fila.js        telas INSC_* (inscrição, redação, documentos de inscrição) e worker da etapa 1
+api/etapa2-matricula.js   LOGIN, status do portal, matrícula, contrato, pagamento e vigias
+api/portal-site.js        caminho do site (portal do candidato): status, documentos, contrato, Pix
+api/matricula.js          login no Rubeus e leitura das etapas do portal
+api/blip.js               avisos pelo Blip (templates aprovados)
+api/cloud-store.js        Firestore, Cloud Tasks e cifragem
+api/processes.js          política e documentos de inscrição por processo
+api/avaliacao.js, prova-route.js, proof-binding.js, prompt-text.js   prova e redação
+api/documentos.js         mídia do DocumentPicker
+api/enem.js, diagnostics.js, icones.js
+flows/                    gerador do Flow, JSON para a Meta e imagens
+implantar.sh              cria Firestore/Cloud Tasks/permissões e publica no Cloud Run
+test/                     testes (node:test), sem chamar sistemas reais
 ```
+
+A imagem do Cloud Run leva só `server.js`, `package.json`, `api/` e os ícones de status (`.dockerignore`).
 
 ## Configuração
 
-Variáveis de ambiente (configure no Cloud Run; nunca no código):
+Variáveis de ambiente (no Cloud Run; nunca no código):
 
 | Variável | Para quê |
 |---|---|
 | `RBS_TOKEN` | Token da API do Rubeus |
-| `FLOW_PRIVATE_KEY` / `FLOW_PASSPHRASE` | Chave privada do endpoint do Flow; também deriva as chaves do estado e dos jobs |
-| `APP_SECRET` / `META_APP_SECRET` | Segredo do app Meta (assinatura das requisições) |
+| `FLOW_PRIVATE_KEY` / `FLOW_PASSPHRASE` | Chave privada do endpoint do Flow; também deriva as chaves do estado e da fila |
+| `META_APP_SECRET` | Segredo do app Meta (confere a assinatura de cada requisição) |
 | `FLOW_PROJECT_ID`, `FLOW_DATABASE_ID`, `FLOW_TASKS_REGION`, `FLOW_TASKS_QUEUE`, `FLOW_WORKER_ORIGIN` | Firestore e Cloud Tasks (preenchidas por `implantar.sh`) |
-| `UNIBALSAS_API_URL` | Opcional. Padrão `https://api.unibalsas.edu.br` |
+| `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_TEMPLATE_REDACAO`, `PIX_CHAVE` | Avisos e cobrança pelo Blip (sem elas, nada é enviado) |
 | `PORT` | Opcional. Padrão `8080` |
 
 ## Testes
@@ -92,32 +76,18 @@ Variáveis de ambiente (configure no Cloud Run; nunca no código):
 npm test
 ```
 
-Roda `test/*.test.js` com `node --test`. As chamadas ao Rubeus, à avaliação e à API da UniBalsas são **simuladas**; nada é gravado em sistemas reais.
-
 ## Publicar
 
-Primeira vez (cria Firestore, fila e permissões, depois publica):
-
-```bash
-bash implantar.sh
-```
-
-Atualizações:
-
-```bash
-gcloud run deploy devflowunibalsas-git --project=talks-servidor --region=southamerica-east1 --source=.
-```
-
-Confira a versão publicada:
+Um push no `main` publica no Cloud Run. Confira a versão:
 
 ```bash
 curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api/flow
 ```
 
-Depois de qualquer mudança no `flow-waba.json`, cole o JSON novo no Flow da Meta e reabra o Flow em uma sessão nova.
+Se o Flow mudou, gere (`node flows/gerar-etapa1.mjs`), cole `flows/etapa1-vestibular.json` no editor da Meta e publique.
 
 ## Cuidados
 
-- Os logs não registram CPF completo, arquivos, Base64 nem tokens.
-- Nunca reenviamos uma gravação cujo resultado é incerto; o candidato é orientado a conferir no Portal.
-- Dados de teste usam o sufixo "Teste" no nome, para localizar no CRM.
+- Os logs não registram CPF, telefone, arquivos nem tokens.
+- Gravação com resultado incerto nunca é reenviada; vai para conferência.
+- Dados de teste são fictícios (4devs).

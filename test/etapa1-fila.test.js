@@ -55,8 +55,8 @@ function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) 
   const fila = [];
   const avisos = [], redacoes = [];
   const e1 = createEtapa1({
-    ativo: () => true, store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
-    runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
+    store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
+    runStep: rubeus.runStep, sealState, openState,
     validateBasic: d => { if (!String(d.nome ?? '').includes(' ')) throw new Error('Informe nome e sobrenome.'); },
     validateFinal: d => { if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(d.cpf ?? '')) throw new Error('CPF inválido.'); if (!(d.origens ?? []).some(o => o.id === d.como_conheceu)) throw new Error('Selecione como ficou sabendo.'); },
     origens: [{ id: '01', title: 'Site oficial' }], hoje: () => '2026-11-15',
@@ -76,132 +76,6 @@ async function toque(e1, screen, acao, estado, user = {}, flow_token = 'ft-1') {
   const req = { screen, action: 'data_exchange', flow_token, data: { acao, estado, ...user } };
   return flowContext.run({ request: req, deadline: Date.now() + 9500, write: null }, () => e1.route(req));
 }
-async function ateRedacao(e1) {
-  const inicio = sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] });
-  const basicos = await toque(e1, 'ESCOLHA_PROCESSO', 'selecionar_processo', inicio, { processo_seletivo_id: '20383' });
-  assert.equal(basicos.screen, 'DADOS_BASICOS');
-  const curso = await toque(e1, 'DADOS_BASICOS', 'enviar_dados_basicos', basicos.data.estado, BASICOS);
-  assert.equal(curso.screen, 'CURSO_INTERESSE');
-  assert.deepEqual(curso.data.cursos, CURSOS);
-  const turnos = await toque(e1, 'CURSO_INTERESSE', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
-  assert.equal(turnos.data.turno_visivel, true);
-  assert.equal(turnos.data.valor_turno_id, 'not', 'turno único já vem selecionado');
-  const quase = await toque(e1, 'CURSO_INTERESSE', 'avancar_curso_interesse', turnos.data.estado, { curso_id: 'ads', turno_id: 'not' });
-  assert.equal(quase.screen, 'QUASE_LA');
-  return quase;
-}
-
-test('cache incompleto: segue o caminho síncrono de sempre', async () => {
-  const { e1 } = montar();
-  const r = await toque(e1, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' });
-  assert.equal(r, null);
-});
-
-test('jornada instantânea sem Rubeus; o worker repete os passos e conclui', async () => {
-  const { e1, store, fila, rubeus, redacoes } = montar();
-  await cacheCompleto(store);
-  const quase = await ateRedacao(e1);
-  assert.equal(rubeus.chamadas.length, 0, 'nenhuma tela chamou o Rubeus');
-
-  const orient = await toque(e1, 'QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
-  assert.equal(orient.screen, 'TELA_ORIENTACAO_PROVA');
-  assert.equal(orient.data.rotulo_rodape, 'Iniciar redação');
-  assert.equal(fila.length, 1);
-  const id = fila[0].id;
-
-  // Worker roda a inscrição antes da redação chegar e para esperando o texto.
-  await e1.worker(id);
-  let rec = (await store.get(id, 'inscricoesFila')).record;
-  assert.equal(rec.status, 'inscrita');
-  assert.equal(rec.applyment_id, '777');
-  assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos', 'buscar_turnos', 'avancar_curso_interesse', 'enviar_informacoes_complementares']);
-
-  const red = await toque(e1, 'TELA_ORIENTACAO_PROVA', 'iniciar_redacao', orient.data.estado);
-  assert.equal(red.screen, 'TELA_REDACAO');
-  assert.equal(red.data.tema_redacao, TEMA);
-  const fim = await toque(e1, 'TELA_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO });
-  assert.equal(fim.screen, 'CONFIRMACAO');
-  assert.doesNotMatch(fim.data.mensagem, /Já sou inscrito|data de nascimento/);
-
-  await e1.worker(id);
-  rec = (await store.get(id, 'inscricoesFila')).record;
-  assert.equal(rec.status, 'concluida');
-  assert.equal(rec.respostas, null, 'dados pessoais apagados depois da entrega');
-  assert.equal(redacoes.length, 1, 'redação confirmada agenda o vigia da correção');
-  assert.ok(redacoes[0].login && redacoes[0].data_nascimento && redacoes[0].celular);
-  assert.equal(rec.redacao, null);
-  assert.deepEqual(rubeus.chamadas.slice(5), ['conferir_prova_existente', 'conferir_prova_existente', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
-});
-
-test('redação curta é recusada na hora e nada é guardado', async () => {
-  const { e1, store } = montar();
-  await cacheCompleto(store);
-  const quase = await ateRedacao(e1);
-  const orient = await toque(e1, 'QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
-  const red = await toque(e1, 'TELA_ORIENTACAO_PROVA', 'iniciar_redacao', orient.data.estado);
-  const r = await toque(e1, 'TELA_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: 'curto' });
-  assert.equal(r.screen, 'TELA_REDACAO');
-  assert.match(r.data.erro, /desenvolva mais/);
-});
-
-test('CPF já inscrito (RM ou outra sessão) mostra a mensagem do site', async () => {
-  const a = montar({ rm: true });
-  await cacheCompleto(a.store);
-  const q1 = await ateRedacao(a.e1);
-  const r1 = await toque(a.e1, 'QUASE_LA', 'enviar_informacoes_complementares', q1.data.estado, FINAL);
-  assert.equal(r1.screen, 'QUASE_LA');
-  assert.equal(r1.data.erro, DUPLICADA_MSG);
-
-  const b = montar();
-  await cacheCompleto(b.store);
-  const q2 = await ateRedacao(b.e1);
-  assert.equal((await toque(b.e1, 'QUASE_LA', 'enviar_informacoes_complementares', q2.data.estado, FINAL)).screen, 'TELA_ORIENTACAO_PROVA');
-  // Mesmo toque reenviado pelo WhatsApp (mesma sessão): não é duplicidade.
-  assert.equal((await toque(b.e1, 'QUASE_LA', 'enviar_informacoes_complementares', q2.data.estado, FINAL)).screen, 'TELA_ORIENTACAO_PROVA');
-  const q3 = await ateRedacao(b.e1);
-  const r3 = await toque(b.e1, 'QUASE_LA', 'enviar_informacoes_complementares', q3.data.estado, FINAL, 'ft-outra');
-  assert.equal(r3.data.erro, DUPLICADA_MSG);
-});
-
-test('Rubeus acusa inscrição existente no envio: fica marcada como duplicada, sem nova tentativa', async () => {
-  const { e1, store, fila } = montar({ rubeus: rubeusFalso({ finalErro: 'Você já possui inscrição neste processo seletivo.' }) });
-  await cacheCompleto(store);
-  const q = await ateRedacao(e1);
-  await toque(e1, 'QUASE_LA', 'enviar_informacoes_complementares', q.data.estado, FINAL);
-  await e1.worker(fila[0].id);
-  const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
-  assert.equal(rec.status, 'duplicada');
-  assert.equal(fila.length, 1, 'não reagenda');
-});
-
-test('resultado incerto na conclusão: vai para conferência e nunca reenvia', async () => {
-  const rubeus = rubeusFalso({ finalPendente: true });
-  const { e1, store, fila } = montar({ rubeus });
-  await cacheCompleto(store);
-  const q = await ateRedacao(e1);
-  await toque(e1, 'QUASE_LA', 'enviar_informacoes_complementares', q.data.estado, FINAL);
-  await e1.worker(fila[0].id);
-  await e1.worker(fila[0].id);
-  const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
-  assert.equal(rec.status, 'conferir');
-  assert.equal(rubeus.chamadas.filter(a => a === 'enviar_informacoes_complementares').length, 1);
-});
-
-test('falha passageira antes da conclusão: reagenda e recomeça numa sessão nova', async () => {
-  const rubeus = rubeusFalso({ turnoAusente: true });
-  const { e1, store, fila } = montar({ rubeus });
-  await cacheCompleto(store);
-  const q = await ateRedacao(e1);
-  await toque(e1, 'QUASE_LA', 'enviar_informacoes_complementares', q.data.estado, FINAL);
-  await e1.worker(fila[0].id);
-  const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
-  assert.equal(rec.status, 'pendente');
-  assert.equal(rec.passo, 'inicio');
-  assert.equal(rec.tentativas, 1);
-  assert.equal(fila.length, 2);
-  assert.ok(fila[1].atrasoSeg > 0);
-  assert.ok(!rubeus.chamadas.includes('enviar_informacoes_complementares'));
-});
 
 // ---------------------------------------------------------------- Flow próprio da etapa 1 (INSC_*)
 import { readFileSync } from 'node:fs';
@@ -298,7 +172,7 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   const id = fila[0].id;
   await E.worker(id);
   const token = avisos[0].flowToken;
-  assert.equal(await E.route({ action: 'INIT', flow_token: 'desconhecido' }), null, 'token desconhecido segue o Flow antigo');
+  assert.equal(await E.route({ action: 'INIT', flow_token: 'desconhecido' }), null, 'token desconhecido: o handler abre a tela inicial');
   const red = confere('INSC_REDACAO', await flowContext.run({ request: {}, deadline: Date.now() + 9500 }, () => E.route({ action: 'INIT', flow_token: token })));
   assert.equal(red.screen, 'INSC_REDACAO'); assert.equal(red.data.tema_redacao, TEMA);
   const curta = await toque(E, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: 'curto' }, token);
@@ -359,14 +233,14 @@ test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do 
   const rubeus = rubeusFalso();
   let E;
   const pend = [];
-  E = createEtapa1({ ativo: () => false, store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, render: responseForScreen, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: () => new Promise(r => setTimeout(r, 5)), log: () => {} });
+  E = createEtapa1({ store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: () => new Promise(r => setTimeout(r, 5)), log: () => {} });
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.deepEqual(curso.data.cursos, CURSOS);
   const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
   assert.equal(t.data.turnos.length, 2);
   await Promise.all(pend);
-  assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null, 'Flow antigo segue igual');
+  assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null, 'tela que não é INSC_* não é da etapa 1');
 });
 
 test('Blip: sem configuração não envia; com configuração monta a campanha individual sem expor o telefone no log', async () => {
@@ -389,17 +263,6 @@ test('Blip: sem configuração não envia; com configuração monta a campanha i
   assert.equal(enviado.body.resource.audience.recipient, '+5599999990000');
   assert.equal(enviado.body.resource.audience.contextVariables.flow_token, 'tok-123');
   assert.doesNotMatch(JSON.stringify(logs), /99999990000|tok-123/);
-});
-
-test('endpoint /api/flow/etapa1: INIT abre INSC_INICIO e nunca devolve tela do Flow antigo', async () => {
-  const { e1: E, store } = montar();
-  ateOrientacao.E = E;
-  await cacheCompleto(store);
-  const init = await E.endpoint({ action: 'INIT', flow_token: 'x' });
-  assert.equal(init.screen, 'INSC_INICIO');
-  assert.deepEqual(await E.endpoint({ action: 'ping' }), { data: { status: 'active' } });
-  const antigo = await E.endpoint({ action: 'data_exchange', screen: 'ESCOLHA_PROCESSO', data: { acao: 'selecionar_processo' } });
-  assert.equal(antigo.screen, 'INSC_FIM');
 });
 
 test('Realizar prova logo após concluir: abre a redação na hora; o worker inscreve e entrega sem mandar aviso', async () => {
@@ -437,7 +300,7 @@ test('Redação com calma: espera a prova da inscrição ficar estável antes de
   const store = memoria();
   const fila = [];
   let agora = Date.now();
-  const E = createEtapa1({ ativo: () => true, store, enqueue: async (id, o) => fila.push({ id, ...o }), runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
+  const E = createEtapa1({ store, enqueue: async (id, o) => fila.push({ id, ...o }), runStep: rubeus.runStep, sealState, openState,
     validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER,
     sleep: async () => {}, log: () => {}, clock: () => agora, esperaProvaMs: 600000, estabilidadeMs: 60000 });
   await cacheCompleto(store);
@@ -458,4 +321,56 @@ test('Redação com calma: espera a prova da inscrição ficar estável antes de
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
   assert.equal(rubeus.chamadas.filter(a => a === 'enviar_redacao').length, 1);
+});
+
+// Worker da etapa 1 pelas telas INSC_* (o mesmo envio ao Rubeus para os 4 processos).
+async function concluirInsc(E, flow = 'ft-e1') {
+  ateOrientacao.E = E;
+  const quase = await etapa1(E);
+  return toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, flow);
+}
+test('CPF já inscrito (RM ou outra sessão) mostra a mensagem do site', async () => {
+  const a = montar({ rm: true });
+  await cacheCompleto(a.store);
+  const r1 = await concluirInsc(a.e1);
+  assert.equal(r1.screen, 'INSC_QUASE_LA'); assert.equal(r1.data.erro, DUPLICADA_MSG);
+  const b = montar();
+  await cacheCompleto(b.store);
+  assert.equal((await concluirInsc(b.e1)).screen, 'INSC_CONCLUIDA');
+  const r3 = await concluirInsc(b.e1, 'ft-outra');
+  assert.equal(r3.data.erro, DUPLICADA_MSG, 'mesmo CPF em outra sessão');
+});
+
+test('Rubeus acusa inscrição existente no envio: fica marcada como duplicada, sem nova tentativa', async () => {
+  const { e1: E, store, fila } = montar({ rubeus: rubeusFalso({ finalErro: 'Você já possui inscrição neste processo seletivo.' }) });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id, antes = fila.length;
+  await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'duplicada');
+  assert.equal(fila.length, antes, 'não reagenda');
+});
+
+test('resultado incerto na conclusão: vai para conferência e nunca reenvia', async () => {
+  const rubeus = rubeusFalso({ finalPendente: true });
+  const { e1: E, store, fila } = montar({ rubeus });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  await E.worker(fila[0].id);
+  await E.worker(fila[0].id);
+  assert.equal((await store.get(fila[0].id, 'inscricoesFila')).record.status, 'conferir');
+  assert.equal(rubeus.chamadas.filter(a => a === 'enviar_informacoes_complementares').length, 1);
+});
+
+test('falha passageira antes da conclusão: reagenda e recomeça numa sessão nova', async () => {
+  const rubeus = rubeusFalso({ turnoAusente: true });
+  const { e1: E, store, fila } = montar({ rubeus });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const antes = fila.length;
+  await E.worker(fila[0].id);
+  const rec = (await store.get(fila[0].id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'pendente'); assert.equal(rec.passo, 'inicio'); assert.equal(rec.tentativas, 1);
+  assert.equal(fila.length, antes + 1); assert.ok(fila.at(-1).atrasoSeg > 0);
+  assert.ok(!rubeus.chamadas.includes('enviar_informacoes_complementares'));
 });

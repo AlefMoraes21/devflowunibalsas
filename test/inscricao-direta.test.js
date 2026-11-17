@@ -95,8 +95,8 @@ function montar(processo, opcoes = {}) {
   const avisos = { configurado: { atualizacao: () => true, cobranca: () => false }, async atualizacao(d) { enviados.push(d); return true; } };
   const ref = {};
   const e1 = createEtapa1({
-    ativo: () => true, store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
-    runStep: rubeus.runStep, sealState, openState, render: responseForScreen,
+    store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
+    runStep: rubeus.runStep, sealState, openState,
     validateBasic: () => {}, validateFinal: d => { if (!(d.origens ?? []).some(o => o.id === d.como_conheceu)) throw new Error('Selecione como ficou sabendo.'); },
     origens: [{ id: '01', title: 'Site oficial' }], hoje: () => '2026-11-17',
     requiresEssay: id => String(id) === '20383', academicId: () => '225', userFields: USER,
@@ -172,10 +172,15 @@ test('Flow JSON: telas novas com logo, um seletor por tela, 1º documento obriga
   assert.ok(comps(tela('INSC_CURSO_ENEM')).some(c => c.name === 'nota_redacao_enem'));
   assert.ok(!comps(tela('INSC_QUASE_LA')).some(c => c.name === 'numero_inscricao_enem'), 'V3: ENEM fora da Estamos quase lá');
   assert.ok(FLOW.routing_model.MATR_STATUS.includes('INSC_DOC_A'), 'LOGIN abre os documentos de inscrição');
+  const fimDocs = tela('INSC_DOCS_FIM');
+  assert.equal(fimDocs.terminal, true); assert.deepEqual(Object.keys(fimDocs.data), ['eh_nota_enem']);
+  const textos = comps(fimDocs).map(c => c.text ?? c.label);
+  for (const t of ['✅ Inscrição', '⏳ Documentos inscrição', 'Em análise', 'Concluir']) assert.ok(textos.includes(t), t);
+  assert.equal(comps(fimDocs).find(c => c.type === 'Footer')['on-click-action'].name, 'complete');
   assert.ok(FLOW.screens.find(s => s.id === 'MATR_STATUS').data.etapas.items.properties.start, 'ícone de status declarado');
 });
 
-test('Transferência: Concluir → Obrigado → Portal (Pendentes) → 3 documentos → fim; worker envia pelo site e liga o vigia', async () => {
+test('Transferência: Concluir → Obrigado → Portal (Pendentes) → 3 documentos → Enviar volta ao status (Em análise); worker envia pelo site e liga o vigia', async () => {
   const M = montar('20385');
   await cache(M.store, '20385');
   const { status } = await inscrever(M, '20385');
@@ -191,7 +196,7 @@ test('Transferência: Concluir → Obrigado → Portal (Pendentes) → 3 documen
   const c = await toque(M, 'INSC_DOC_B', 'enviar_documento_inscricao', b.data.estado, { arquivo: [] });
   assert.equal(c.screen, 'INSC_DOC_C'); assert.equal(c.data.botao, 'Enviar');
   const fim = await toque(M, 'INSC_DOC_C', 'enviar_documento_inscricao', c.data.estado, { arquivo: MIDIA(27) });
-  assert.equal(fim.screen, 'INSC_DOCS_FIM'); assert.match(fim.data.mensagem, /48 horas úteis/);
+  assert.equal(fim.screen, 'INSC_DOCS_FIM', 'depois do Enviar: status do portal, como no site'); assert.deepEqual(Object.keys(fim.data), ['eh_nota_enem']); assert.equal(fim.data.eh_nota_enem, false);
 
   const id = M.fila[0].id;
   await M.e1.worker(id);
@@ -220,7 +225,7 @@ test('Worker: repetição segura (documento já em análise no portal não é re
   assert.deepEqual(M.portal.estado.lotes.map(l => l.codigos), [['17']]);
 });
 
-test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim) e mensagem própria', async () => {
+test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim) e volta ao status com as notas', async () => {
   const M = montar('20386');
   await cache(M.store, '20386');
   const { status, quase } = await inscrever(M, '20386');
@@ -229,7 +234,7 @@ test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim)
   const a = await toque(M, 'INSC_STATUS', 'verificar_documentos', status.data.estado);
   assert.equal(a.data.titulo_doc, 'Boletim nota ENEM *'); assert.equal(a.data.botao, 'Enviar');
   const fim = await toque(M, 'INSC_DOC_A', 'enviar_documento_inscricao', a.data.estado, { arquivo: MIDIA(25) });
-  assert.equal(fim.screen, 'INSC_DOCS_FIM'); assert.match(fim.data.mensagem, /boletim/i); assert.match(fim.data.mensagem, /validação/);
+  assert.equal(fim.screen, 'INSC_DOCS_FIM'); assert.equal(fim.data.eh_nota_enem, true, 'status mostra Checando as notas: Validando');
   await M.e1.worker(M.fila[0].id);
   const curso = M.rubeus.chamadas.find(x => x.a === 'avancar_curso_ingresso');
   assert.equal(curso.data.numero_inscricao_enem, ENEM.numero_inscricao_enem, 'notas vão junto com o curso');
@@ -276,7 +281,9 @@ test('Vigia da inscrição: em análise aguarda; recusa pede só os recusados (u
   const st = await toque(M, 'MATR_LOGIN', 'entrar', null, { login: FINAL.cpf, data_nascimento: BASICOS.data_nascimento });
   const docs = st.data.etapas.find(i => ehDocsInscricao(i['main-content'].title));
   const a = await toque(M, 'MATR_STATUS', 'abrir_etapa', docs['on-click-action'].payload.estado);
-  assert.equal(a.data.titulo_doc, 'Histórico acadêmico *'); assert.match(a.data.legenda_doc, /1 de 1/);
+  assert.equal(a.data.titulo_doc, 'Histórico acadêmico *'); assert.match(a.data.legenda_doc, /Recusado na análise: envie de novo\. Documento 1 de 1/);
+  const semArquivo = await toque(M, 'INSC_DOC_A', 'enviar_documento_inscricao', a.data.estado, { arquivo: [] });
+  assert.match(semArquivo.data.erro, /Anexe o arquivo/, 'recusado é obrigatório no reenvio');
   // Aprovado: próxima etapa liberada → aviso e o vigia para.
   M.portal.estado.fase = 'aprovado';
   M.store.naHora(); await M.e2.vigiarInscricao(id);

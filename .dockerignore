@@ -1,6 +1,9 @@
 .git
+.claude
 node_modules
 test
 *.md
-flow-waba.json
 implantar.sh
+flows/*.json
+flows/*.mjs
+flows/img/logo_*

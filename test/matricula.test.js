@@ -4,36 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
 import {SCREENS,summarizeStages,search,canAdvance} from '../api/matricula.js';
 
-const flowJson=()=>readFile(new URL('../flow-waba.json',import.meta.url)).then(JSON.parse);
 function walk(x,out=[]){if(Array.isArray(x))x.forEach(v=>walk(v,out));else if(x&&typeof x==='object'){if(x.type)out.push(x);for(const v of Object.values(x))if(v&&typeof v==='object')walk(v,out)}return out}
-
-test('routing_model: só rotas para frente, sem ciclos, até 10 destinos e todas as telas existem',async()=>{
- const j=await flowJson(),r=j.routing_model,ids=new Set(j.screens.map(s=>s.id));
- for(const [from,to] of Object.entries(r)){assert.ok(ids.has(from),from);assert.ok(to.length<=10,from);for(const t of to){assert.ok(ids.has(t),t);assert.ok(!(r[t]??[]).includes(from),`${from}<->${t}`)}}
- const state={};const visit=id=>{if(state[id]===1)throw new Error('ciclo em '+id);if(state[id]===2)return;state[id]=1;(r[id]??[]).forEach(visit);state[id]=2};Object.keys(r).forEach(visit);
- for(const s of j.screens.filter(s=>!s.terminal&&s.id!=='OPTIN_SCREEN_screen_dhaobf'))assert.ok((r[s.id]??[]).length>0,s.id+' sem saída');
-});
-
-test('telas novas respeitam limites de componentes da Meta e batem com o servidor',async()=>{
- const j=await flowJson();
- for(const id of Object.keys(SCREENS)){
-  const s=j.screens.find(x=>x.id===id);assert.ok(s,id);
-  process.env.FLOW_PRIVATE_KEY??='unit-schema-key';assert.deepEqual(Object.keys(s.data).sort(),Object.keys(responseForScreen(id,{}).data).sort(),id+': data do JSON = chaves do servidor');
-  const comps=walk(s.layout);
-  assert.equal(comps.filter(c=>c.type==='Footer').length,1,id+': um Footer');
-  const links=comps.filter(c=>c.type==='EmbeddedLink');assert.ok(links.length<=2,id);links.forEach(l=>assert.ok(l.text.length<=25,l.text));
-  comps.filter(c=>c.type==='Footer'&&!c.label.startsWith('${')).forEach(f=>assert.ok(f.label.length<=35,f.label));
-  assert.ok(comps.length<=50,id);
-  for(const c of comps)for(const v of [c.text,c.label])if(typeof v==='string'&&v.includes('${data.')){const k=v.match(/\$\{data\.([a-z_]+)\}/)[1];assert.ok(k in s.data,`${id}: ${k}`)}
-  for(const c of comps)if(typeof c['data-source']==='string'){const k=c['data-source'].match(/\$\{data\.([a-z_]+)\}/)[1];assert.equal(s.data[k].type,'array',`${id}: ${k}`)}
- }
- const first=j.screens.find(s=>s.id==='ESCOLHA_PROCESSO');assert.ok(j.routing_model.ESCOLHA_PROCESSO.includes('PORTAL_STATUS'));assert.ok(JSON.stringify(first).includes('Já sou inscrito'));
- assert.ok(!j.screens.some(s=>s.id==='LOGIN_CANDIDATO'));
- // A WABA exige que init-values tenha o mesmo tipo do input: campos "number" não aceitam ${data.valor_*} (string).
- for(const s of j.screens){const forms=walk(s.layout).filter(c=>c.type==='Form'&&c['init-values']);for(const f of forms)for(const c of walk(f.children))if(c.type==='TextInput'&&c['input-type']==='number')assert.ok(!(c.name in f['init-values']),`${s.id}.${c.name}`)}
- for(const s of ['QUASE_LA','TELA_REDACAO'])assert.ok(j.routing_model[s].includes('ACOMPANHAMENTO'),s);
- const doc=walk(j.screens.find(s=>s.id==='DOCUMENTOS_INSCRICAO').layout).find(c=>c.type==='DocumentPicker');assert.equal(doc['max-uploaded-documents'],1);assert.ok(doc['max-file-size-kb']<=740);
-});
 
 test('resumo do portal escolhe a primeira etapa pendente com ação',()=>{
  const s=summarizeStages([
@@ -129,26 +100,7 @@ test('etapa anterior na ordem do Flow encerra em STATUS_FINAL em vez de criar ro
  }finally{globalThis.fetch=previous}
 });
 
-import {createJobEngine} from '../api/jobs.js';
-import {workerSignature} from '../api/cloud-store.js';
 function memoryStore(){const map=new Map();return {async create(id,record){if(map.has(id))return false;map.set(id,{record:structuredClone(record),version:1});return true},async get(id){return structuredClone(map.get(id)??null)},async update(id,record,version){const prev=map.get(id);if(prev.version!==version)return false;map.set(id,{record:structuredClone(record),version:version+1});return true}}}
-
-test('carregar jornada roda em segundo plano: tela de espera, worker e etapas sem estourar o prazo do WhatsApp',async()=>{
- process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
- const submits=[],previous=globalThis.fetch;
- globalThis.fetch=rubeus([[stage('Inscrição',1,'Concluída'),stage('Seleção resp. financeiro',0,'Pendente',300676,'Verificar')]],{300676:radioForm},submits);
- async function runJob(request,worker=false){request=structuredClone(request);const ctx={request,worker,write:null,deadline:Date.now()+120000};return flowContext.run(ctx,async()=>{const response=await routeFlowRequest(request);return worker?{response,audit:ctx.audit}:response})}
- const engine=createJobEngine({store:memoryStore(),enqueue:async()=>{},run:runJob,render:responseForScreen,openState,waitMs:0});
- try{
-  const state=sealState('PORTAL_STATUS',{token:'sessao-1',applyment_id:'14083470',processo_seletivo_id:'20383',cpf:'11144477735'});
-  const waiting=await engine.route({screen:'PORTAL_STATUS',action:'data_exchange',flow_token:'t',data:{acao:'carregar_jornada',estado:state}});
-  assert.equal(waiting.screen,'PORTAL_STATUS');assert.equal(waiting.data.processando,true);assert.equal(waiting.data.acao_rodape,'consultar_tarefa');assert.match(waiting.data.titulo_processamento,/Carregando sua jornada/);
-  await engine.worker(waiting.data.job_id,workerSignature(waiting.data.job_id));
-  const hub=await engine.route({screen:'PORTAL_STATUS',action:'data_exchange',flow_token:'t',data:{acao:'consultar_tarefa',estado:waiting.data.estado}});
-  assert.equal(hub.screen,'PORTAL_STATUS');assert.equal(hub.data.processando,false);assert.equal(hub.data.acao_rodape,'continuar_etapa');assert.match(hub.data.resumo,/Seleção resp\. financeiro/);
-  await assert.rejects(engine.route({screen:'ENDERECO',action:'data_exchange',flow_token:'t',data:{acao:'carregar_jornada',estado:sealState('ENDERECO',{})}}),/não permitida/);
- }finally{globalThis.fetch=previous}
-});
 
 test('quando a Rubeus devolve o próximo passo no envio, abre direto sem consultar o portal',async()=>{
  process.env.FLOW_PRIVATE_KEY='unit-matricula-key';process.env.RBS_TOKEN='unit';
@@ -162,13 +114,6 @@ test('quando a Rubeus devolve o próximo passo no envio, abre direto sem consult
 });
 
 // Ano de conclusão: digitado e obrigatório (a consulta do Rubeus não devolvia a lista de anos).
-test('IDENTIDADE: ano de conclusão é campo de texto obrigatório de 4 caracteres, não lista',async()=>{
- const j=await flowJson();const s=j.screens.find(x=>x.id==='IDENTIDADE');
- assert.equal('anos' in s.data,false);
- const f=walk(s.layout).find(c=>c.name==='ano_conclusao'&&c.type);
- assert.equal(f.type,'TextInput');assert.equal(f.required,true);assert.equal(f['min-chars'],4);assert.equal(f['max-chars'],4);
- assert.ok(!JSON.stringify(s).includes('data.anos'));
-});
 
 test('IDENTIDADE: ano de conclusão é opcional (como no site); se informado, 4 números de 1995 ao ano seguinte',async()=>{
  const {createMatricula}=await import('../api/matricula.js');

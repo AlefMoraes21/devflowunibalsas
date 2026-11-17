@@ -36,13 +36,3 @@ test('painel de login (PORTAL_STATUS) aguardando correção só oferece atualiza
  const r=await hub([inscricao,prova],'PORTAL_STATUS');
  assert.equal(r.data.acao_rodape,'atualizar_portal');assert.equal(r.data.aguardando_resultado,undefined);
 });
-
-test('JSON do Flow: link Portal do Candidato só com resultado aguardando e Encerrar por agora no restante',async()=>{
- const j=JSON.parse(await readFile(new URL('../flow-waba.json',import.meta.url)));
- const s=j.screens.find(x=>x.id==='ACOMPANHAMENTO');
- assert.equal(s.data.aguardando_resultado.type,'boolean');
- const cond=s.layout.children.find(c=>c.type==='If').then.find(c=>c.type==='If');
- assert.equal(cond.condition,'${data.aguardando_resultado} == true');
- assert.equal(cond.then[0].text,'Portal do Candidato');assert.equal(cond.then[0]['on-click-action'].name,'open_url');
- assert.equal(cond.else[0].text,'Encerrar por agora');
-});

@@ -158,6 +158,9 @@ export function createEtapa2({
   urlPublica = String(process.env.FLOW_WORKER_ORIGIN ?? '').replace(/\/+$/, ''),
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
   esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 6500,
+  // Toque em "Atualizar": quanto o Cloud Run espera o status que está sendo lido em segundo plano (prazo da Meta: 10 s).
+  esperaStatusMs = Number(process.env.ETAPA2_ESPERA_STATUS_MS) || 7500,
+  sleep = ms => new Promise(r => setTimeout(r, ms)),
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
   esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000,
   // Link do contrato aberto durante uma geração em andamento: espera o PDF ficar pronto (até ~40 s).
@@ -326,6 +329,18 @@ export function createEtapa2({
     return 204;
   }
   const BUSCANDO = 'Estamos buscando a situação da sua inscrição no Portal do candidato. Aguarde alguns instantes e toque em Atualizar.';
+  // "Atualizar" (só no 1º LOGIN, quando o portal passa do tempo do WhatsApp e ainda não há status salvo): o
+  // Cloud Run já está lendo o portal em segundo plano (etapa2_status); o toque espera esse resultado aqui, dentro
+  // do prazo da Meta, em vez de devolver a mesma tela de novo.
+  async function esperarStatus(id, ms = esperaStatusMs) {
+    const ate = clock() + ms;
+    for (;;) {
+      const rec = (await store.get(id, FILA).catch(() => null))?.record ?? null;
+      const s2 = statusSalvo(rec);
+      if (s2 || clock() + 700 > ate) return { rec, s2 };
+      await sleep(700);
+    }
+  }
   // Tela de status igual ao Portal do candidato: cada etapa com o seu status e, nas etapas abertas, o botão
   // do site (ex.: "Verificar"). Cada linha leva à sua etapa.
   const emCorrecao = r => !r.conclusive && /aguardando.*correc/.test(norm(r.status));
@@ -1035,8 +1050,8 @@ export function createEtapa2({
       // Nada a continuar no Flow agora (aguardando a equipe, ou etapa ainda fora do Flow): fecha.
       if (s.destino === null) return sucesso(req.flow_token);
       if (s.destino === 'atualizar') {
-        const rec = (await store.get(s.fila_id, FILA))?.record;
-        return telaPortal({ id: s.fila_id, menor: s.menor, s2: statusSalvo(rec), blocos: rec?.blocos, rec, flowToken: req.flow_token });
+        const { rec, s2 } = await esperarStatus(s.fila_id);
+        return telaPortal({ id: s.fila_id, menor: s.menor, s2, blocos: rec?.blocos, rec, flowToken: req.flow_token });
       }
       const destino = s.destino || (s.menor ? 'MATR_RESP_DADOS' : 'MATR_RESPONSAVEL');
       try { return await abrirDestino(destino, s, base, req.flow_token); }
@@ -1047,7 +1062,12 @@ export function createEtapa2({
     if (screen === 'MATR_STATUS' && acao === 'abrir_etapa') {
       const rec = (await store.get(s.fila_id, FILA))?.record;
       const st = statusSalvo(rec);
-      const voltar = () => st ? render('MATR_STATUS', { etapas: itensStatus({ id: s.fila_id, menor: s.menor, s2: st }) }) : render('MATR_PORTAL', { ...base, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
+      // Status salvo vencido (mais de 6 h): o Cloud Run relê o portal em segundo plano e o "Atualizar" espera por ele.
+      const voltar = async () => {
+        if (st) return render('MATR_STATUS', { etapas: itensStatus({ id: s.fila_id, menor: s.menor, s2: st }) });
+        try { await enqueue(s.fila_id, { tipo: 'etapa2_status' }); } catch {}
+        return render('MATR_PORTAL', { ...base, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
+      };
       const e = s.etapa ?? {};
       if (!e.aberta) return voltar(); // concluída ou aguardando a equipe: só o status, como no site
       const t = norm(e.title);

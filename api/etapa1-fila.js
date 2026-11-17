@@ -1,12 +1,9 @@
-// Etapa 1 do Vestibular (inscrição + redação) em modo fila.
+// Etapa 1 (telas INSC_* do Flow): inscrição nos 4 processos, redação do Vestibular e documentos de
+// inscrição da Transferência, do Portador e do ENEM.
 //
 // O Flow responde na hora: as telas são montadas com o cache (cursos, turnos e tema da redação) e
-// as respostas são conferidas aqui, com as mesmas regras do caminho síncrono. Ao concluir a
-// inscrição, os dados ficam guardados (Firestore, criptografados) e um worker do Cloud Run repete
-// no Rubeus exatamente os passos do caminho síncrono (mesmo código), conferindo cada tela.
-//
-// Liga com ETAPA1_FILA=on. Sem o cache completo, o Flow segue o caminho síncrono de sempre (e esse
-// caminho aquece o cache).
+// as respostas são conferidas aqui. Os dados ficam guardados (Firestore, criptografados) e um worker do
+// Cloud Run repete no Rubeus os passos do site, conferindo cada tela.
 import crypto from 'node:crypto';
 import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo } from './portal-site.js';
 
@@ -30,8 +27,7 @@ class ErroPasso extends Error {
 }
 
 export function createEtapa1({
-  ativo = () => process.env.ETAPA1_FILA === 'on',
-  store, enqueue, runStep, runLive = runStep, sealState, openState, render,
+  store, enqueue, runStep, runLive = runStep, sealState, openState,
   // Candidato que entrou pelo LOGIN com a prova ainda por fazer: o worker entra no Rubeus por ele.
   loginRubeus = null, prepararProva = null,
   ehEnem = () => false, validateEnem = () => {}, anosEnem = [], avisar = async () => false,
@@ -120,34 +116,6 @@ export function createEtapa1({
   // ---------------------------------------------------------------- Flow (instantâneo)
   const pick = d => Object.fromEntries(Object.entries(d ?? {}).filter(([k]) => userFields.has(k)));
 
-  // Guarda a inscrição completa e agenda o envio. Devolve { id } ou { erro } (mensagem para o candidato).
-  async function receberInscricao(processo, respostas, flowToken) {
-    const cpf = digits(respostas.cpf);
-    const id = hash('etapa1:' + processo + ':' + cpf);
-    const flow = hash(flowToken ?? '');
-    try {
-      if (await jaInscritoNoRm(academicId(processo), cpf)) {
-        log({ event: 'etapa1_fila', id: curto(id), passo: 'duplicada_rm' });
-        return { erro: DUPLICADA_MSG };
-      }
-      const record = { id, processo, flow, respostas, redacao: null, status: 'pendente', passo: 'inicio', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
-      if (!await store.create(id, record, FILA)) {
-        const atual = await store.get(id, FILA);
-        if (atual && atual.record.status === 'falhou') {
-          if (!await store.update(id, record, atual.version, FILA)) throw new Error('conflito');
-        } else if (atual && atual.record.flow !== flow) {
-          log({ event: 'etapa1_fila', id: curto(id), passo: 'duplicada_fila' });
-          return { erro: DUPLICADA_MSG };
-        }
-      }
-      log({ event: 'etapa1_fila', id: curto(id), passo: 'recebida', status: 'pendente' });
-    } catch (e) {
-      log({ event: 'etapa1_fila_erro', passo: 'receber', message: String(e?.message ?? e).slice(0, 120) });
-      return { erro: 'Não conseguimos guardar sua inscrição agora. Toque em Concluir inscrição de novo.' };
-    }
-    await disparar(id);
-    return { id };
-  }
   // Guarda o texto da redação na inscrição e agenda o envio. Devolve null ou a mensagem de erro.
   async function receberRedacao(filaId, texto, flowToken) {
     try {
@@ -189,7 +157,7 @@ export function createEtapa1({
     INSC_PORTAL: ['estado'],
     INSC_STATUS: ['estado', 'eh_nota_enem'],
     ...Object.fromEntries(TELAS_DOC.map(t => [t, DOC_KEYS])),
-    INSC_DOCS_FIM: ['titulo', 'mensagem'],
+    INSC_DOCS_FIM: ['eh_nota_enem'],
     INSC_AVALIACAO: ['estado'],
     INSC_ORIENTACAO: ['estado', 'erro', 'tem_erro'],
     INSC_REDACAO: ['estado', 'erro', 'tem_erro', 'tema_redacao', ...valor('texto_redacao')],
@@ -261,7 +229,7 @@ export function createEtapa1({
     return renderE1(TELAS_DOC[i], {
       ...estado, docs, i,
       titulo_doc: `${doc.titulo}${doc.obrigatorio ? ' *' : ''}`,
-      legenda_doc: `${doc.obrigatorio ? 'Obrigatório.' : 'Opcional: se não tiver agora, toque no botão abaixo.'} Documento ${i + 1} de ${docs.length}.`,
+      legenda_doc: `${doc.recusado ? 'Recusado na análise: envie de novo.' : doc.obrigatorio ? 'Obrigatório.' : 'Opcional: se não tiver agora, toque no botão abaixo.'} Documento ${i + 1} de ${docs.length}.`,
       botao: ultimo ? 'Enviar' : 'Avançar',
       erro
     });
@@ -390,12 +358,9 @@ export function createEtapa1({
       try { await gravarDocumentoInscricao(s.fila_id, req.flow_token, doc.codigo, media, ultimo); }
       catch (e) { falha('documento_inscricao', e); return telaDocumento(s, i, ERRO_GRAVAR); }
       if (!ultimo) return telaDocumento(s, i + 1);
-      const enem = docs.length === 1 && Boolean(s.eh_nota_enem);
-      return renderE1('INSC_DOCS_FIM', {
-        titulo: 'Documentos enviados ✅',
-        mensagem: (enem ? 'Recebemos seu boletim do ENEM. Suas notas estão em validação.' : 'Recebemos seus documentos.') +
-          ' A análise ocorre em até 48 horas úteis.\n\nAvisaremos por aqui quando houver novidade. Você também pode acompanhar pelo LOGIN (Já sou inscrito).'
-      });
+      // Igual ao site depois do "Enviar": volta ao status do portal com "Documentos inscrição: Em análise".
+      // É a última tela: o envio já está agendado, então fechar o Flow aqui finaliza.
+      return renderE1('INSC_DOCS_FIM', { eh_nota_enem: Boolean(s.eh_nota_enem) });
     }
     if (screen === 'INSC_PORTAL' && acao === 'realizar_prova') return renderE1('INSC_AVALIACAO', { ...base });
     if (screen === 'INSC_AVALIACAO' && acao === 'iniciar_prova') return renderE1('INSC_ORIENTACAO', { ...base, erro: '' });
@@ -471,22 +436,6 @@ export function createEtapa1({
     return { tema };
   }
 
-  // Endpoint próprio (/api/flow/etapa1), opcional: o mesmo Flow também funciona em /api/flow.
-  async function endpoint(req) {
-    const action = req?.action;
-    if (action === 'ping') return { data: { status: 'active' } };
-    if (req?.data?.error) {
-      console.warn(JSON.stringify({ event: 'flow_client_error', flow: 'etapa1', screen: String(req.screen ?? ''), error: String(req.data.error).slice(0, 120), error_message: String(req.data.error_message ?? '').slice(0, 300) }));
-      return { data: { acknowledged: true } };
-    }
-    if (action === 'INIT') return (await abrirRedacao(req).catch(() => null)) ?? { screen: 'INSC_INICIO', data: {} };
-    if (action === 'data_exchange' && String(req.screen ?? '').startsWith('INSC_')) {
-      const resposta = await route(req);
-      if (resposta) return resposta;
-    }
-    return fimE1('Algo deu errado', 'Não conseguimos continuar sua inscrição agora. Abra a mensagem de inscrição de novo em alguns minutos.');
-  }
-
   async function route(req) {
     if (req?.action === 'INIT') {
       try { return await abrirRedacao(req); }
@@ -499,69 +448,6 @@ export function createEtapa1({
         console.error(JSON.stringify({ event: 'etapa1_fila_atencao', motivo: 'erro_tela', screen: req.screen, message: String(e?.message ?? e).slice(0, 160) }));
         return fimE1('Algo deu errado', 'Não conseguimos continuar sua inscrição agora. Abra a mensagem de inscrição de novo em alguns minutos.');
       }
-    }
-    if (!ativo()) return null;
-    const d = req.data ?? {}, acao = d.acao, screen = req.screen;
-
-    if (acao === 'selecionar_processo' && screen === 'ESCOLHA_PROCESSO') {
-      if (d.modo === 'continuar') return null;
-      const processo = String(d.processo_seletivo_id ?? d.processo_id ?? '');
-      if (!requiresEssay(processo)) return null;
-      let trusted; try { trusted = openState(d.estado, screen); } catch { return null; }
-      if (!(trusted.processos_disponiveis ?? []).map(String).includes(processo)) return null;
-      const cache = await lerCache(processo);
-      if (!cacheCompleto(cache)) { log({ event: 'etapa1_fila', passo: 'cache_incompleto', processo }); return null; }
-      return render('DADOS_BASICOS', { modo_fila: true, processo_seletivo_id: processo, eh_nota_enem: false, data_maxima_nascimento: hoje(), titulo_etapa: 'Dados básicos', erro: '' });
-    }
-
-    let s; try { s = openState(d.estado, screen); } catch { return null; }
-    if (!s.modo_fila) return null;
-    const u = pick(d);
-    const processo = s.processo_seletivo_id;
-
-    if (screen === 'DADOS_BASICOS' && acao === 'enviar_dados_basicos') {
-      try { validateBasic(u); } catch (e) { return render('DADOS_BASICOS', { ...s, values: u, erro: e.message }); }
-      const cache = await lerCache(processo);
-      if (!cache?.cursos?.length) return render('DADOS_BASICOS', { ...s, values: u, erro: 'Não conseguimos carregar os cursos agora. Toque em Continuar de novo.' });
-      return render('CURSO_INTERESSE', { ...s, respostas: { ...s.respostas, ...u }, cursos: cache.cursos, turnos: [], turno_visivel: false, curso_selecionado: '', turno_selecionado: '', anos_enem: [], erro: '' });
-    }
-
-    if (screen === 'CURSO_INTERESSE' && (acao === 'buscar_turnos' || acao === 'avancar_curso_interesse')) {
-      const curso = String(u.curso_id ?? '');
-      if (!(s.cursos ?? []).some(c => c.id === curso)) return render('CURSO_INTERESSE', { ...s, erro: 'Selecione um curso para ver os turnos.' });
-      if (acao === 'buscar_turnos' || curso !== s.curso_selecionado || !(s.turnos ?? []).length) {
-        const turnos = (await lerCache(processo))?.turnos?.[curso] ?? [];
-        if (!turnos.length) return render('CURSO_INTERESSE', { ...s, turnos: [], turno_visivel: false, curso_selecionado: curso, turno_selecionado: '', erro: 'Nenhum turno disponível para o curso selecionado.' });
-        return render('CURSO_INTERESSE', { ...s, turnos, turno_visivel: true, curso_selecionado: curso, turno_selecionado: turnos.length === 1 ? turnos[0].id : '', erro: '' });
-      }
-      if (!(s.turnos ?? []).some(t => t.id === u.turno_id)) return render('CURSO_INTERESSE', { ...s, erro: 'Selecione o turno correspondente.' });
-      return render('QUASE_LA', { modo_fila: true, processo_seletivo_id: processo, eh_nota_enem: false, respostas: { ...s.respostas, curso_id: curso, turno_id: String(u.turno_id) }, origens, erro: '' });
-    }
-
-    if (screen === 'QUASE_LA' && acao === 'enviar_informacoes_complementares') {
-      try { validateFinal({ ...u, origens: s.origens }); } catch (e) { return render('QUASE_LA', { ...s, values: u, erro: e.message }); }
-      const rec = await receberInscricao(processo, { ...s.respostas, ...u }, req.flow_token);
-      if (rec.erro) return render('QUASE_LA', { ...s, values: u, erro: rec.erro });
-      const id = rec.id;
-      return render('TELA_ORIENTACAO_PROVA', { modo_fila: true, processo_seletivo_id: processo, fila_id: id, tema_redacao: '', texto_motivador: '', erro: '' });
-    }
-
-    if (screen === 'TELA_ORIENTACAO_PROVA' && acao === 'iniciar_redacao') {
-      const tema = (await lerCache(processo))?.tema;
-      if (!tema) return render('TELA_ORIENTACAO_PROVA', { ...s, erro: 'Não conseguimos carregar o tema agora. Toque em Iniciar redação de novo.' });
-      return render('TELA_REDACAO', { modo_fila: true, processo_seletivo_id: processo, fila_id: s.fila_id, tema_redacao: tema, erro: '' });
-    }
-
-    if (screen === 'TELA_REDACAO' && acao === 'enviar_redacao') {
-      const texto = String(u.texto_redacao ?? '').trim();
-      if (texto.length < 50) return render('TELA_REDACAO', { ...s, values: u, erro: 'Por favor, desenvolva mais a sua redação antes de enviar.' });
-      const erroRed = await receberRedacao(s.fila_id, texto, req.flow_token);
-      if (erroRed) return render('TELA_REDACAO', { ...s, values: u, erro: erroRed });
-      return render('CONFIRMACAO', {
-        titulo: 'Redação enviada ✅',
-        mensagem: 'Recebemos sua inscrição e sua redação!\n\nAgora nossa equipe vai corrigir. Assim que a correção sair, você recebe uma mensagem aqui no WhatsApp para seguir para a próxima etapa.',
-        inscricao_id: ''
-      });
     }
     return null;
   }
@@ -900,7 +786,8 @@ export function createEtapa1({
   // algum): abre as mesmas telas de documento. `codigos` = só os recusados (vazio = a lista toda do processo).
   async function entrarNosDocsInscricao({ applyment_id, processo, login, data_nascimento, flowToken, codigos = [] }) {
     const todos = docsInscricao(processo);
-    const docs = codigos?.length ? todos.filter(x => codigos.includes(x.codigo)) : todos;
+    // Reenvio dos recusados: cada um é obrigatório (a equipe pediu de novo), mesmo que no site seja opcional.
+    const docs = codigos?.length ? todos.filter(x => codigos.includes(x.codigo)).map(x => ({ ...x, obrigatorio: true, recusado: true })) : todos;
     if (!applyment_id || !docs.length) return fimE1('Documentos de inscrição', 'Envie os documentos pelo Portal do candidato: vestibular.unibalsas.edu.br/presencial (entre com seu CPF e a data de nascimento).');
     const id = hash('login-docs:' + applyment_id);
     const flow = hash(flowToken ?? '');
@@ -917,5 +804,5 @@ export function createEtapa1({
     return telaDocumento({ e1: true, processo_seletivo_id: String(processo), eh_nota_enem: ehEnem(processo), fila_id: id, docs }, 0);
   }
 
-  return { route, endpoint, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
+  return { route, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
 }

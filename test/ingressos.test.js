@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
-import {createJobEngine} from '../api/jobs.js';
+import {createJobEngine} from './helpers/job-engine.js';
 import {workerSignature} from '../api/cloud-store.js';
 import {processPolicy,isDirectRegistration,requiresEssay} from '../api/processes.js';
 function memory(){const map=new Map();return {async create(id,record){if(map.has(id))return false;map.set(id,{record:structuredClone(record),version:1});return true},async get(id){return structuredClone(map.get(id)??null)},async update(id,record,version){const prev=map.get(id);if(prev.version!==version)return false;map.set(id,{record:structuredClone(record),version:version+1});return true}}}

@@ -8,7 +8,7 @@ const server=http.createServer(async(req,res)=>{
   res.json=(body)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(body))};
   if(req.url==='/'||req.url==='/healthz')return res.status(200).json({status:'ok'});
   if(req.method==='GET'&&/^\/contrato\/[a-f0-9]{48}$/.test(req.url?.split('?')[0]??''))return contratoHandler(req,res).catch(()=>{if(!res.writableEnded)res.end()});
-  if(!['/api/flow','/api/flow/etapa1','/internal/flow-worker'].includes(req.url?.split('?')[0]))return res.status(404).send('Not found');
+  if(!['/api/flow','/internal/flow-worker'].includes(req.url?.split('?')[0]))return res.status(404).send('Not found');
   try{
     if(req.method==='POST'){
       const parts=[];let size=0;

@@ -36,7 +36,7 @@ test('LOGIN com a prova disponível: leva à redação; o Cloud Run inicia a pro
   let agora = Date.now(), provaIniciada = false;
   const tela = (screen, data) => ({ screen, data: { estado: sealState(screen, data) } });
   const E1 = createEtapa1({
-    store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, render: responseForScreen,
+    store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState,
     validateBasic: () => {}, validateFinal: () => {}, origens: [], hoje: () => '2026-11-15', requiresEssay: () => true, academicId: () => '223', userFields: new Set(['texto_redacao']),
     sleep: async () => {}, log: () => {}, clock: () => agora, esperaProvaMs: 600000, estabilidadeMs: 0,
     loginRubeus: async (login, nasc) => { assert.equal(login, '39184720514'); assert.equal(nasc, NASC); return { token: 'tok-login', person_id: '1' }; },

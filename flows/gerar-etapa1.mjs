@@ -48,7 +48,7 @@ const flow = {
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
-    INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS'],
+    INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS', 'INSC_FIM'],
     INSC_STATUS: ['INSC_DOC_A', 'INSC_FIM'],
     INSC_DOC_A: ['INSC_DOC_B', 'INSC_DOCS_FIM', 'INSC_FIM'],
     INSC_DOC_B: ['INSC_DOC_C', 'INSC_DOCS_FIM', 'INSC_FIM'],
@@ -384,19 +384,27 @@ const flow = {
       }
     },
     {
-      // Fim da etapa 1 da Transferência, do Portador e do ENEM: documentos recebidos, análise da equipe.
+      // Fim da etapa 1 da Transferência, do Portador e do ENEM: depois do "Enviar", o status do portal como no
+      // site (Documentos inscrição: Em análise). Última tela: o envio já está agendado no Cloud Run, então
+      // fechar o Flow aqui (Concluir ou o X) finaliza.
       id: 'INSC_DOCS_FIM',
-      title: 'Documentos inscrição',
+      title: 'Portal do candidato',
       terminal: true,
       success: true,
-      data: { titulo: str('Documentos enviados ✅'), mensagem: str('') },
+      data: { eh_nota_enem: bool() },
       layout: {
         type: 'SingleColumnLayout',
         children: [
-          imagem(LOGO_DOCUMENTOS, 40),
-          { type: 'TextSubheading', text: '${data.titulo}' },
-          { type: 'TextBody', text: '${data.mensagem}' },
-          { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
+          imagem(LOGO_PORTAL, 40),
+          { type: 'TextCaption', text: 'Acompanhe aqui o status da sua inscrição' },
+          { type: 'TextSubheading', text: '✅ Inscrição' },
+          { type: 'TextCaption', text: 'Concluída' },
+          { type: 'TextSubheading', text: '⏳ Checando as notas', visible: '${data.eh_nota_enem}' },
+          { type: 'TextCaption', text: 'Validando', visible: '${data.eh_nota_enem}' },
+          { type: 'TextSubheading', text: '⏳ Documentos inscrição' },
+          { type: 'TextCaption', text: 'Em análise' },
+          { type: 'TextBody', text: 'Documentos recebidos ✅ A análise ocorre em até 48 horas úteis. Avisaremos por aqui quando houver novidade; você também acompanha pelo LOGIN (Já sou inscrito).' },
+          { type: 'Footer', label: 'Concluir', 'on-click-action': { name: 'complete', payload: {} } }
         ]
       }
     }

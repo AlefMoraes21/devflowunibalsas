@@ -2,7 +2,6 @@ import {processPolicy,isDirectRegistration,requiresEssay,academicIds,docsInscric
 import {enemAverage,enemYears} from "./enem.js";
 import {portalConfirmsDelivery} from "./proof-binding.js";
 import {promptText} from "./prompt-text.js";
-import {createJobEngine} from "./jobs.js";
 import {validationSummary} from "./diagnostics.js";
 import {createProofRouter} from "./prova-route.js";
 import { createAssessment, claimDelivery, ResultadoIncerto } from "./avaliacao.js";
@@ -1506,16 +1505,10 @@ function encryptResponse(payload, aesKey, iv) {
   return Buffer.concat([encrypted, cipher.getAuthTag()]).toString("base64");
 }
 
-const jobEngine=createJobEngine({
-  openState,render:responseForScreen,
-  run:(request,worker=false)=>{
-    const context={request_id:crypto.randomUUID(),deadline:Date.now()+(worker?120000:FLOW_RESPONSE_BUDGET_MS),request,write:null,worker};
-    return flowContext.run(context,async()=>{const response=await routeFlowRequest(request);return worker?{response,audit:{...context.audit,...(context.write?.receipt?{receipt:context.write.receipt}:{})}}:response})
-  }
-});
-// Etapa 1 do Vestibular em modo fila (ETAPA1_FILA=on): telas instantâneas e envio ao Rubeus pelo worker.
+// Etapa 1 (telas INSC_*): telas instantâneas e envio ao Rubeus pelo worker. As telas internas do motor
+// (ESCOLHA_PROCESSO, DADOS_BASICOS...) só são usadas pelo worker, nunca chegam ao Flow.
 const etapa1=createEtapa1({
-  store:createStore(),enqueue:enqueueJob,sealState,openState,render:responseForScreen,
+  store:createStore(),enqueue:enqueueJob,sealState,openState,
   runStep:request=>flowContext.run({request_id:crypto.randomUUID(),deadline:Date.now()+120000,request,write:null,worker:true},()=>routeFlowRequest(request)),
   // Abertura da prova pelo INIT da etapa 2 (só quando o tema ainda não está guardado), no prazo da Meta.
   runLive:request=>flowContext.run({request_id:crypto.randomUUID(),deadline:Math.min(Date.now()+8500,flowContext.getStore()?.deadline??Infinity),request,write:null,worker:false},()=>routeFlowRequest(request)),
@@ -1577,8 +1570,9 @@ export async function workerHandler(req,res){
     try{return res.status(await etapa1.worker(req.body.id)).send("")}
     catch(error){console.error(JSON.stringify({event:"etapa1_worker_error",message:String(error?.message??error).slice(0,160)}));return res.status(500).send("")}
   }
-  try{return res.status(await jobEngine.worker(req.body?.id,req.headers["x-flow-worker-signature"])).send("")}
-  catch(error){console.error(JSON.stringify({event:"flow_worker_error",kind:error.name,message:error.message}));return res.status(500).send("")}
+  // Tarefa sem tipo conhecido (ex.: do Flow anterior à 2.13.0): descartada sem repetir.
+  console.warn(JSON.stringify({event:"flow_worker_descartado",tipo:String(req.body?.tipo??"").slice(0,30)}));
+  return res.status(204).send("");
 }
 
 // Etapa 3: link exclusivo do contrato (GET /contrato/<token>). Devolve o PDF gerado pelo portal na hora.
@@ -1602,10 +1596,24 @@ export async function contratoHandler(req,res){
   }
 }
 
+// Entrada única do Flow (2.13+): ping da Meta, aviso de erro do cliente, INIT (link da redação ou tela inicial),
+// telas MATR_* (etapa 2) e INSC_* (etapa 1). Qualquer outra tela é de um Flow antigo: fim com orientação.
+async function rotear(req) {
+  if (req?.action === "ping") return { data: { status: "active" } };
+  if (req?.data?.error) {
+    console.warn(JSON.stringify({ event: "flow_client_error", screen: String(req.screen ?? ""), error: String(req.data.error).slice(0, 120), error_message: String(req.data.error_message ?? "").slice(0, 300) }));
+    return { data: { acknowledged: true } };
+  }
+  if (req?.action === "INIT") return (await etapa1.route(req)) ?? { screen: "INSC_INICIO", data: {} };
+  const r = (await etapa2.route(req)) ?? (await etapa1.route(req));
+  if (r) return r;
+  console.warn(JSON.stringify({ event: "flow_tela_desconhecida", screen: String(req?.screen ?? "").slice(0, 40), action: String(req?.action ?? "").slice(0, 20) }));
+  return etapa1.renderE1("INSC_FIM", { titulo: "Mensagem antiga", mensagem: "Esta mensagem é de uma versão antiga. Abra a mensagem mais recente da UniBalsas para continuar." });
+}
+
 export default async function handler(req, res) {
-  const rotaEtapa1 = String(req.url ?? "").split("?")[0] === "/api/flow/etapa1";
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.13.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.14.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1644,25 +1652,17 @@ export default async function handler(req, res) {
 
     const payload = await flowContext.run(
       { request_id:crypto.randomUUID(),deadline: Date.now() + FLOW_RESPONSE_BUDGET_MS, request: requestData, write: null },
-      async () => rotaEtapa1 ? etapa1.endpoint(requestData) : (await etapa2.route(requestData)) ?? (await etapa1.route(requestData)) ?? jobEngine.route(requestData)
+      async () => rotear(requestData)
     );
 
     const enc = encryptResponse(payload, aesKey, iv);
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(enc);
   } catch (err) {
-    if (aesKey && iv && rotaEtapa1) {
-      console.error(JSON.stringify({event:"etapa1_fila_atencao",motivo:"erro_endpoint",message:String(err?.message??err).slice(0,160)}));
-      const enc=encryptResponse(etapa1.renderE1("INSC_FIM",{titulo:"Algo deu errado",mensagem:"Não conseguimos continuar sua inscrição agora. Abra a mensagem de inscrição de novo em alguns minutos."}),aesKey,iv);
-      res.setHeader("Content-Type","text/plain");return res.status(200).send(enc);
-    }
     if (aesKey && iv) {
-      const current=["QUASE_LA","TELA_ORIENTACAO_PROVA","TELA_REDACAO"].includes(requestData?.screen)?requestData.screen:"PENDENTE";
-      let trusted={};try{trusted=openState(requestData?.data?.estado,current)}catch{}
-      const p=responseForScreen(current,{...trusted,values:requestData?.data,erro:err.message||"Não foi possível consultar o processamento.",mensagem:"Não foi possível carregar esta etapa.",inscricao_id:""});
-      const enc = encryptResponse(p, aesKey, iv);
-      res.setHeader("Content-Type", "text/plain");
-      return res.status(200).send(enc);
+      console.error(JSON.stringify({event:"flow_atencao",motivo:"erro_endpoint",screen:String(requestData?.screen??""),message:String(err?.message??err).slice(0,160)}));
+      const enc=encryptResponse(etapa1.renderE1("INSC_FIM",{titulo:"Algo deu errado",mensagem:"Não conseguimos continuar agora. Abra a mensagem de novo em alguns minutos."}),aesKey,iv);
+      res.setHeader("Content-Type","text/plain");return res.status(200).send(enc);
     }
     return res.status(421).send("Erro na descriptografia do payload.");
   }

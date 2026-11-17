@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {enemAverage,enemYears} from '../api/enem.js';
 import {routeFlowRequest,flowContext,sealState,openState,responseForScreen} from '../api/flow.js';
-import {createJobEngine} from '../api/jobs.js';
+import {createJobEngine} from './helpers/job-engine.js';
 import {workerSignature} from '../api/cloud-store.js';
 const notes={nota_natureza_enem:'800,1',nota_humanas_enem:'700.2',nota_matematica_enem:'650,3',nota_linguagens_enem:'750.4',nota_redacao_enem:'900'};
 test('média mantém centésimos, aceita vírgula, zero e mil e rejeita média incompatível',()=>{

@@ -1,3 +1,23 @@
+# Versão 2.14.0 — status depois do Enviar, "Atualizar" resolvido pelo Run e código só da versão atual
+
+**O Flow da WABA muda:** colar o novo `flows/etapa1-vestibular.json` no editor da Meta e publicar.
+
+- **Documentos de inscrição (Transferência, Portador, ENEM):** o "Enviar" do último documento volta ao status do portal, como no site: Inscrição Concluída · [ENEM] Checando as notas Validando · **Documentos inscrição Em análise**. É a tela final (`INSC_DOCS_FIM`, terminal): o envio já está agendado no Run, então "Concluir" ou fechar o Flow finaliza.
+- **Reenvio pelo LOGIN:** documento recusado aparece como "Recusado na análise: envie de novo." e é obrigatório (antes podia aparecer como opcional).
+- **"Atualizar" (mapa abaixo):** o toque agora espera, dentro do prazo da Meta (até 7,5 s, `ETAPA2_ESPERA_STATUS_MS`), o status que o Run já está lendo em segundo plano; um toque basta. Status salvo vencido (mais de 6 h) também agenda a releitura.
+- **Limpeza (só a 2.13+ vale):** saíram o Flow antigo (`flow-waba.json`), o motor de jobs com "Verificar andamento" (`api/jobs.js`), o endpoint `/api/flow/etapa1` e o caminho antigo `ETAPA1_FILA` (telas `ESCOLHA_PROCESSO`, `DADOS_BASICOS`... vindas do Flow). Entrada única em `/api/flow`: ping, INIT (link da redação ou tela inicial), `MATR_*`/`CONTR_*` e `INSC_*`; tela de Flow antigo recebe um fim com orientação; tarefa antiga sem tipo é descartada. As telas internas do motor continuam só para o worker gravar no Rubeus. A imagem do Cloud Run deixa de levar testes, documentação e o JSON do Flow.
+- 173 testes (os que só testavam o Flow antigo saíram; novos: entrada única criptografada, status final, reenvio obrigatório, "Atualizar" em um toque). Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.14.0`.
+
+### Mapa do "Atualizar" (onde ainda pode aparecer)
+
+| Momento | Por quê | O que o Run faz |
+|---|---|---|
+| 1º LOGIN de quem ainda não tem status salvo, com o portal passando de 6,5 s | O portal do Rubeus leva de 7 a 16 s; a Meta dá 10 s | Agenda `etapa2_status` (lê e salva o status); o toque em "Atualizar" espera esse resultado (até 7,5 s) e abre a lista |
+| LOGIN com status salvo há mais de 6 h e portal lento | Status velho não é mostrado | Igual ao de cima |
+| Toque numa etapa da lista sem status salvo válido | Mesmo motivo | Agenda a releitura e o "Atualizar" espera |
+
+Quem se inscreveu pelo Flow já tem o status salvo (V1: depois dos documentos de inscrição e da redação), então não vê o "Atualizar". As telas "Verificar andamento" e "Atualizar situação" eram do Flow antigo e saíram do caminho do candidato.
+
 # Versão 2.13.0 — Transferência, Portador e Nota do ENEM igual ao site (etapa 1 com documentos de inscrição)
 
 Projeto e mapeamento: `ENGENHARIA-FLOW-INSCRICAO-DIRETA.md` (e as engenharias reversas de cada processo). **O Flow da WABA muda:** colar o novo `flows/etapa1-vestibular.json` no editor da Meta.

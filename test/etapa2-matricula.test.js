@@ -408,21 +408,23 @@ test('Etapa 3: contrato liberado abre a tela do site com link exclusivo; o link 
   await assert.rejects(E.baixarContrato('xyz', '1.1.1.1'), /inválido/);
 });
 
-test('Portal lento no login: mostra "Atualizar", busca o status em segundo plano e depois leva à etapa certa', async () => {
+test('Portal lento no login: mostra "Atualizar", o Cloud Run lê o status em segundo plano e um toque já leva à etapa certa', async () => {
   const store = memoria(); const fila = [];
   const r = rubeusContrato();
   const lento = { ...r.matricula, portal: async () => { throw new Error('lento'); } };
-  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: lento, validCpf, log: () => {},
-    portalSite: siteContrato().portalSite, urlPublica: 'https://run.example' });
-  const p1 = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const comum = { store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: lento, validCpf, log: () => {}, portalSite: siteContrato().portalSite, urlPublica: 'https://run.example' };
+  const E0 = createEtapa2({ ...comum, esperaStatusMs: 0 });
+  const p1 = await toque(E0, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   assert.equal(p1.data.botao, 'Atualizar'); assert.match(p1.data.resumo, /buscando/);
   assert.equal(fila.at(-1).tipo, 'etapa2_status');
-  const ainda = await continuar(E, p1);
-  assert.equal(ainda.data.botao, 'Atualizar', 'sem status ainda: continua aguardando');
-  // A tarefa em segundo plano lê o portal e guarda o status.
+  const ainda = await continuar(E0, p1);
+  assert.equal(ainda.data.botao, 'Atualizar', 'sem status ainda e sem tempo de espera: continua aguardando');
+  // O toque em "Atualizar" espera (dentro do prazo da Meta) a tarefa em segundo plano guardar o status.
   const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
-  await E2.atualizarStatus(fila.at(-1).id);
+  let esperas = 0;
+  const E = createEtapa2({ ...comum, esperaStatusMs: 5000, sleep: async () => { if (esperas++ === 0) await E2.atualizarStatus(fila.at(-1).id); } });
   const p2 = await continuar(E, ainda);
+  assert.equal(esperas, 1, 'um toque só: o Run esperou o status');
   assert.equal(p2.screen, 'MATR_STATUS'); assert.match(textoStatus(p2), /Contrato: Pendente \[Verificar\]/);
   const termos = await continuar(E, p2);
   assert.equal(termos.screen, 'CONTR_TERMOS');

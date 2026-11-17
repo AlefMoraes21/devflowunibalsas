@@ -1,8 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import {createJobEngine} from '../api/jobs.js';
-import {workerSignature} from '../api/cloud-store.js';
 import {saveDocument,detectType} from '../api/documentos.js';
 process.env.FLOW_PRIVATE_KEY='local-unit-key';
 
@@ -69,22 +67,3 @@ test('inscrição não encontrada e falha de rede na consulta têm mensagens pr�
 function memory(){const map=new Map();return {async create(id,record){if(map.has(id))return false;map.set(id,{record:structuredClone(record),version:1});return true},async get(id){return structuredClone(map.get(id)??null)},async update(id,record,version){const p=map.get(id);if(p.version!==version)return false;map.set(id,{record:structuredClone(record),version:version+1});return true},map}}
 const render=(screen,data)=>({screen,data:{...data,estado:JSON.stringify(data)}});
 const upload=()=>({action:'data_exchange',screen:'DOCUMENTOS_INSCRICAO',flow_token:'t-doc',data:{acao:'enviar_documento',estado:'{}',documento:'25',arquivo:[{cdn_url:'https://cdn.whatsapp.test/f',encryption_metadata:{encryption_key:'segredo'}}]}});
-
-test('envio de documento vai para a fila, não duplica no clique repetido e não guarda as chaves da mídia',async()=>{
- const store=memory();let runs=0;
- const e=createJobEngine({store,enqueue:async()=>{},openState:JSON.parse,render,waitMs:0,run:async()=>{runs++;return {screen:'DOCUMENTOS_INSCRICAO',data:{enviados:'✅ recebido',processando:false}}}});
- const [a,b]=await Promise.all([e.route(upload()),e.route(upload())]);
- assert.equal(a.screen,'DOCUMENTOS_INSCRICAO');assert.equal(a.data.processando,true);assert.equal(a.data.acao_rodape,'consultar_tarefa');
- assert.equal(a.data.job_id,b.data.job_id);assert.equal(runs,0,'a requisição do Flow não executa o envio');
- const id=a.data.job_id;await Promise.all([e.worker(id,workerSignature(id)),e.worker(id,workerSignature(id))]);assert.equal(runs,1);
- assert.ok(!JSON.stringify(store.map.get(id).record).includes('segredo'),'chaves removidas do registro concluído');
- const done=await e.route({action:'data_exchange',screen:'DOCUMENTOS_INSCRICAO',flow_token:'t-doc',data:{acao:'consultar_tarefa',estado:a.data.estado}});
- assert.equal(done.data.enviados,'✅ recebido');
-});
-
-test('enquanto o worker não termina, a tela continua em processamento sem confirmar nada',async()=>{
- const store=memory();const e=createJobEngine({store,enqueue:async()=>{},openState:JSON.parse,render,waitMs:0,run:async()=>({})});
- const first=await e.route(upload());
- const again=await e.route({action:'data_exchange',screen:'DOCUMENTOS_INSCRICAO',flow_token:'t-doc',data:{acao:'consultar_tarefa',estado:first.data.estado}});
- assert.equal(again.data.processando,true);assert.match(again.data.mensagem_processamento,/Estamos recebendo o seu documento/);
-});
