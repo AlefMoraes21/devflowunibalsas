@@ -243,3 +243,13 @@ Consequências para o Run (feitas, sem publicar):
 - O Pix guardado na fila vale **50 min** (antes 12 h); depois disso o reenvio gera um Pix novo.
 - Sem reserva pelo 50901 do passo: o último Pix do portal pode estar expirado ou pago.
 - `payment_link` usa o campo **`link`**, como no artigo do Blip "Enviando Mensagens Ativas com Template order_details".
+
+### Mensagem de pagamento pelo Blip — formato validado (18/11/2026)
+
+`POST {contrato}.http.msging.net/commands`, `uri /campaign/full`, `campaignType Individual`, `channelType WhatsApp`,
+`flowId/stateId/masterstate` do bot, `recipient` sem "+", template **`unibalsas_cobranca_matriculav1`**
+(`messageParams ["nome","valor"]`) e `audience.messageParams["#payment#"]` = JSON (texto) do `order_details`:
+`pix_dynamic_code {code (copia e cola do TOTVS), merchant_name, key (CNPJ), key_type "CNPJ"}` +
+`payment_link {uri}` + `order {status pending, subtotal, tax 0, items}`. Erros vistos: #131008 "'action' cannot be
+null for PAYMENT_REQUEST" com o template sem v1 / `payment_link.link` / `key_type EVP`. O "success" do Blip vem antes
+da validação da Meta: a falha só aparece no relatório da campanha.

@@ -47,14 +47,15 @@ test('Blip: cobrança com o template de pagamento, Pix dinâmico + link do porta
   const r = body.resource;
   assert.equal(r.campaign.campaignType, 'Individual');
   assert.equal(r.audience.recipient, '5599988880001');
-  assert.equal(r.message.messageTemplate, 'unibalsas_cobranca_matricula');
+  assert.equal(r.message.messageTemplate, 'unibalsas_cobranca_matriculav1');
   assert.deepEqual(r.message.messageParams, ['nome', 'valor']);
   assert.equal(r.audience.messageParams.nome, 'Maria'); assert.equal(r.audience.messageParams.valor, '390,00');
   const pedido = JSON.parse(r.audience.messageParams['#payment#']);
   assert.equal(pedido.reference_id, 'mat-544149'); assert.equal(pedido.payment_type, 'br'); assert.equal(pedido.currency, 'BRL');
   assert.deepEqual(pedido.total_amount, { value: 39000, offset: 100 });
   assert.deepEqual(pedido.payment_settings[0], { type: 'pix_dynamic_code', pix_dynamic_code: { code: PIX, merchant_name: 'UNIBALSAS', key: '07344774000189', key_type: 'CNPJ' } });
-  assert.deepEqual(pedido.payment_settings[1], { type: 'payment_link', payment_link: { link: 'https://vestibular.unibalsas.edu.br/presencial' } });
+  assert.deepEqual(pedido.payment_settings[1], { type: 'payment_link', payment_link: { uri: 'https://vestibular.unibalsas.edu.br/presencial' } });
+  assert.equal(r.audience.name, undefined, 'cobrança sem audience.name, como no corpo validado');
   assert.equal(pedido.order.items[0].amount.value, 39000);
   assert.ok(!JSON.stringify(b.logs).includes('99988880001'), 'celular não vai para o log');
 });

@@ -30,7 +30,8 @@ export function telefoneBlip(celular) {
 // BLIP_TEMPLATE_COBRANCA, PIX_RECEBEDOR, PAGAMENTO_LINK, AVISOS_DESLIGADOS=1 (para tudo), AVISOS_SO_PARA (lista de
 // números de teste: só eles recebem), BLIP_FLOW_ID / BLIP_STATE_ID / BLIP_MASTERSTATE (direcionamento da resposta).
 export const TEMPLATE_ATUALIZACAO = 'unibalsas_atualizacao_processo';
-export const TEMPLATE_COBRANCA = 'unibalsas_cobranca_matricula';
+// Template de pagamento validado no Blip em 18/11/2026 (corpo testado no Postman, chegou com os botões).
+export const TEMPLATE_COBRANCA = 'unibalsas_cobranca_matriculav1';
 const primeiro = nome => String(nome ?? '').trim().split(/\s+/)[0] || 'candidato';
 const titulo = s => s.toLowerCase().replace(/(^|\s)\p{L}/gu, m => m.toUpperCase());
 // Variável de template da Meta: sem quebra de linha, tabulação ou mais de 4 espaços seguidos.
@@ -63,7 +64,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
       log({ event: 'blip_aviso', tipo, enviado: false, motivo: 'fora_da_lista_teste' });
       return false;
     }
-    const campaign = { name: `${tipo}-${crypto.randomUUID()}`, campaignType: 'Individual' };
+    const campaign = { name: `${tipo}-${crypto.randomUUID()}`, campaignType: 'Individual', channelType: 'WhatsApp' };
     if (env.BLIP_FLOW_ID) campaign.flowId = env.BLIP_FLOW_ID;
     if (env.BLIP_STATE_ID) campaign.stateId = env.BLIP_STATE_ID;
     if (env.BLIP_MASTERSTATE) campaign.masterstate = env.BLIP_MASTERSTATE;
@@ -73,7 +74,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
       type: 'application/vnd.iris.activecampaign.full-campaign+json',
       resource: {
         campaign,
-        audience: { recipient, name: nome, messageParams: { ...Object.fromEntries(params), ...extras }, ...(contexto ? { contextVariables: contexto } : {}) },
+        audience: { recipient, ...(tipo === 'cobranca' ? {} : { name: nome }), messageParams: { ...Object.fromEntries(params), ...extras }, ...(contexto ? { contextVariables: contexto } : {}) },
         message: { messageTemplate: template, messageTemplateLanguage: 'pt_BR', messageParams: params.map(([k]) => k), channelType: 'WhatsApp' }
       }
     };
@@ -121,9 +122,10 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
       type: 'digital-goods', payment_type: 'br', currency: 'BRL', total_amount: quantia,
       payment_settings: [
         { type: 'pix_dynamic_code', pix_dynamic_code: { code: codigoPix, merchant_name: String(env.PIX_RECEBEDOR || recebedor || 'UniBalsas').slice(0, 25), key: chaveRecebedor.key, key_type: chaveRecebedor.tipo } },
-        { type: 'payment_link', payment_link: { link: env.PAGAMENTO_LINK || 'https://vestibular.unibalsas.edu.br/presencial' } }
+        // "uri" (formato da Meta), como no corpo validado; com "link" o botão não é montado.
+        { type: 'payment_link', payment_link: { uri: env.PAGAMENTO_LINK || 'https://vestibular.unibalsas.edu.br/presencial' } }
       ],
-      order: { status: 'pending', subtotal: quantia, tax: { value: 0, offset: 100 }, items: [{ retailer_id: 'taxa-matricula', name: 'Taxa de matrícula 2027/1', amount: quantia, quantity: 1 }] }
+      order: { status: 'pending', subtotal: quantia, tax: { value: 0, offset: 100 }, items: [{ retailer_id: 'taxa-matricula', name: 'Taxa de matricula 2027/1', amount: quantia, quantity: 1 }] }
     };
     return campanha('cobranca', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['valor', reaisDe(valor)]], { '#payment#': JSON.stringify(pedido) });
   }

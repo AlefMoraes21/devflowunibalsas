@@ -1,3 +1,9 @@
+# Versão 2.16.6 — cobrança no formato validado no Blip (18/11/2026)
+
+- A cobrança segue o corpo testado no Postman que chegou com os botões de pagamento: template
+  `unibalsas_cobranca_matriculav1`, `payment_link.uri` (formato da Meta; com `link` o botão não é montado),
+  chave CNPJ, `order.tax = 0`, `campaign.channelType = WhatsApp`, sem `audience.name`.
+
 # Versão 2.16.5 — botão de pagamento aceito pelo WhatsApp (18/11/2026)
 
 - 1º disparo real da cobrança (Nair, 14:16): o Blip aceitou, mas a Meta recusou com #131008 "'action' cannot be
