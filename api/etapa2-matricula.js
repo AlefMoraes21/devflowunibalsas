@@ -232,6 +232,9 @@ export function createEtapa2({
     if (!avisos?.configurado?.cobranca?.()) return fim('Pagamento', PAGAMENTO_SEM_BLIP);
     const enviada = rec.cobranca_enviada_em && rec.cobranca_enviada_em >= (rec.cobranca_pedida_em ?? 0);
     const pedida = rec.cobranca_pedida_em && !enviada;
+    const falhou = pedida && (rec.cobranca_erro || (rec.cobranca_tentativas ?? 0) >= MAX_TENTATIVAS_AVISO);
+    if (falhou) return render('MATR_PAGAMENTO', { ...base, valor: valorDaTaxa(rec), botao: 'Tentar novamente',
+      mensagem: 'Não conseguimos gerar o Pix da sua taxa agora. A equipe da matrícula já foi avisada. Você pode tentar de novo mais tarde ou pagar pelo Portal do candidato (vestibular.unibalsas.edu.br/presencial).' });
     const mensagem = enviada
       ? `Enviamos a mensagem de pagamento aqui no WhatsApp às ${horaBr(rec.cobranca_enviada_em)}. O Pix vale 1 hora: se ele venceu ou você não achou a mensagem, toque em "Reenviar mensagem".`
       : pedida ? 'Estamos preparando a sua mensagem de pagamento. Ela chega aqui no WhatsApp em instantes.'
@@ -679,7 +682,7 @@ export function createEtapa2({
     // Tarefa de uma corrente antiga (outra conferência já está agendada): sai sem reagendar.
     if (!imediato && correnteAntiga(rec, 'etapa3_vigia')) return 204;
     // Passa a vigiar o pagamento e a matrícula (uma corrente só).
-    const iniciarFinal = atrasoSeg => garantirVigia(id, 'etapa4_vigia', atrasoSeg, { final_vigiando: clock() });
+    const iniciarFinal = atrasoSeg => garantirVigia(id, 'etapa4_vigia', Math.min(atrasoSeg, VIGIA_INTERVALO_S), { final_vigiando: clock() });
     if (await contratoPronto(id)) { await iniciarFinal(VIGIA_LONGO_S); return 204; }
     const ate = rec.vigia_ate ?? clock() + VIGIA_MAX_MS;
     if (!rec.vigia_ate) await salvarFila({ vigia_ate: ate, vigia_desde: clock() }).catch(() => {});
@@ -748,7 +751,8 @@ export function createEtapa2({
     }
     const ate = rec.final_ate ?? clock() + FINAL_MAX_MS;
     if (!rec.final_ate) await salvarFila({ final_ate: ate }).catch(() => {});
-    let proximoEm = VIGIA_LONGO_S;
+    // Ritmo dos outros vigias: 10 min nas 2 primeiras horas depois do contrato, depois de hora em hora.
+    let proximoEm = rec.final_vigiando ? intervaloVigia(rec.final_vigiando) : VIGIA_LONGO_S;
     try {
       const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
       const { stages, processo } = await portalSite.inscricao(sessao);
@@ -853,7 +857,7 @@ export function createEtapa2({
   async function enviarCobranca(id, rec, sessao, processo, passoId) {
     const salvar = salvarFilaDe(id);
     const tentativa = (rec.cobranca_tentativas ?? 0) + 1;
-    let ok = false, motivo = '';
+    let ok = false, motivo = '', pixRecusado = false;
     try {
       const bruto = await portalSite.passoBruto(sessao, passoId, processo);
       const passo = lerPassoPagamento(bruto);
@@ -866,11 +870,15 @@ export function createEtapa2({
           const clique = await portalSite.clicar({ sessao, passo, processo, data: dadosDoPix(passo) });
           const d = clique?.data ?? {};
           if (Number(d.place_type_id) === 6 && d.place_id) codigo = pixDoPopup(await portalSite.popup({ sessao, popupId: d.place_id, stageId: d.stage_id ?? passo.stage_id }));
-        } catch (e) { log({ event: 'etapa_final', id: curto(id), passo: 'pix_erro', message: String(e?.message ?? e).slice(0, 120) }); }
+        } catch (e) {
+          log({ event: 'etapa_final', id: curto(id), passo: 'pix_erro', message: String(e?.message ?? e).slice(0, 120) });
+          // Recusa do portal (ex.: taxa sem valor no TOTVS): não adianta repetir; a equipe é avisada na hora.
+          if (/nao foi possivel realizar o pagamento/.test(norm(e?.message))) pixRecusado = true;
+        }
         // Sem reserva no 50901: o último Pix guardado no portal pode já ter expirado ou sido pago.
         if (codigo) await salvar({ cobranca_pix: codigo, cobranca_pix_em: clock() }).catch(() => {});
       }
-      if (!codigo) motivo = 'sem_pix';
+      if (!codigo) motivo = pixRecusado ? 'pix_recusado' : 'sem_pix';
       else if (!contato?.celular) motivo = 'sem_celular';
       else if (!centavos) motivo = 'sem_valor';
       else if (((r => r?.cobranca_enviada_em && r.cobranca_enviada_em >= (r.cobranca_pedida_em ?? 0))((await store.get(id, FILA))?.record))) { ok = true; motivo = 'ja_enviada'; }
@@ -882,8 +890,9 @@ export function createEtapa2({
       }
     } catch (e) { motivo = String(e?.message ?? e).slice(0, 120); }
     if (motivo === 'ja_enviada') return true;
-    await salvar(ok ? { cobranca_enviada_em: clock() } : { cobranca_tentativas: tentativa }).catch(() => {});
-    if (!ok && tentativa >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: motivo }));
+    await salvar(ok ? { cobranca_enviada_em: clock(), cobranca_erro: null } : motivo === 'pix_recusado' ? { cobranca_tentativas: MAX_TENTATIVAS_AVISO, cobranca_erro: 'pix_recusado' } : { cobranca_tentativas: tentativa }).catch(() => {});
+    if (motivo === 'pix_recusado') console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo }));
+    else if (!ok && tentativa >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: motivo }));
     log({ event: 'etapa_final', id: curto(id), passo: ok ? 'cobranca_enviada' : 'cobranca_falhou', tentativa, motivo: motivo || undefined });
     return ok;
   }
@@ -1190,7 +1199,7 @@ export function createEtapa2({
       const recente = rec.cobranca_pedida_em && agora - rec.cobranca_pedida_em < PEDIDO_REPETIDO_MS && !(rec.cobranca_enviada_em >= rec.cobranca_pedida_em);
       if (!recente) {
         try {
-          await salvarFilaDe(s.fila_id)({ cobranca_pedida_em: agora, cobranca_tentativas: 0, final_vigiando: rec.final_vigiando || agora, final_ate: Math.max(rec.final_ate ?? 0, agora + FINAL_MAX_MS) });
+          await salvarFilaDe(s.fila_id)({ cobranca_pedida_em: agora, cobranca_tentativas: 0, cobranca_erro: null, final_vigiando: rec.final_vigiando || agora, final_ate: Math.max(rec.final_ate ?? 0, agora + FINAL_MAX_MS) });
           await agendarVigia(s.fila_id, 'etapa4_vigia', 0);
           log({ event: 'etapa_final', id: curto(s.fila_id), passo: 'cobranca_pedida', reenvio: Boolean(rec.cobranca_enviada_em) });
         } catch { return render('MATR_PAGAMENTO', { ...telaPagamento(base, rec).data, ...base, valor: valorDaTaxa(rec), mensagem: 'Não conseguimos pedir a mensagem agora. Toque de novo em instantes.', botao: 'Realizar pagamento' }); }

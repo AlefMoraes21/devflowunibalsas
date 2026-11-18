@@ -42,7 +42,7 @@ test('assinatura da Meta obrigatória quando META_APP_SECRET existe; GET mostra 
   assert.equal((await chamar({ action: 'ping' }, { assinar: false })).http, 432);
   const res = resposta();
   await handler({ method: 'GET', url: '/api/flow' }, res);
-  assert.match(res.body, /unibalsas-cloudrun-jornada-2.16.6/);
+  assert.match(res.body, /unibalsas-cloudrun-jornada-2.16.7/);
 });
 
 test('worker: tarefa sem tipo conhecido (Flow antigo) é descartada sem repetir', async () => {

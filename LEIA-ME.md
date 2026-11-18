@@ -1,3 +1,15 @@
+# Versão 2.16.7 — prevenção nos 4 processos (18/11/2026)
+
+Revisão das correções da homologação do Vestibular nos outros processos (Transferência, Portador, ENEM):
+- Documentos de **inscrição** (só Transf./Portador/ENEM): anexo que não abre (Flow em rascunho) agora é descartado,
+  os bons seguem ao portal e a etapa reabre no Flow, sem loop (alerta `etapa1_fila_atencao docs_refazer`).
+- Pix recusado pelo portal (ex.: taxa sem valor no TOTVS, caso da Rosa/Helena): não repete, alerta a equipe na
+  hora (`etapa_aviso_atencao pix_recusado`) e a tela de pagamento orienta "Tentar novamente" ou o Portal.
+- Vigia do pagamento no ritmo dos outros: 10 min nas 2 primeiras horas depois do contrato, depois de hora em hora.
+- Já valiam para os 4 (código comum): lista de status com "end" em todos (2.16.1), documentos de matrícula
+  inválidos (2.16.2), contrato só com documentos aprovados (2.16.3), status guardado pelos vigias (2.16.4),
+  cobrança no formato do Blip validado (2.16.5–2.16.6), passo de pagamento por processo.
+
 # Versão 2.16.6 — cobrança no formato validado no Blip (18/11/2026)
 
 - A cobrança segue o corpo testado no Postman que chegou com os botões de pagamento: template

@@ -611,7 +611,7 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   let rec = (await store.get(id, 'matriculaFila')).record;
   assert.ok(rec.pagamento_liberado_em, 'pagamento liberado registrado (momento da mensagem de pagamento)');
   assert.ok(!rec.matricula_concluida_em);
-  assert.equal(fila.at(-1).tipo, 'etapa4_vigia'); assert.equal(fila.at(-1).atrasoSeg, 3600);
+  assert.equal(fila.at(-1).tipo, 'etapa4_vigia'); assert.equal(fila.at(-1).atrasoSeg, 600, 'nas 2 primeiras horas depois do contrato, confere a cada 10 min');
   // Pago: Pagamento Recebido e Matriculado Parabéns! — a jornada termina.
   fase = 'pago';
   const n = fila.length;
@@ -766,6 +766,31 @@ test('Avisos (Blip): cobrança pedida que falha tenta de novo em 2 min, reaprove
   store.naHora(); await E.vigiarFinal(id);
   assert.equal(enviados.length, 2); assert.equal(pix, 1, 'mesmo Pix na nova tentativa');
   assert.equal(fila.at(-1).atrasoSeg, 120);
+});
+
+test('Pix recusado pelo portal (taxa sem valor no TOTVS): não repete, alerta a equipe na hora e a tela orienta "Tentar novamente"', async () => {
+  const { passoPagamento } = await import('./pagamento-fixture.js');
+  const store = memoria(); const fila = []; const enviados = [];
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao() { return true; }, async cobranca(d) { enviados.push(d); return true; } };
+  const site = siteContrato();
+  site.portalSite.inscricao = async () => ({ processo: '20384', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1 }, cta_link: 'presencial/passo/300685' },
+    { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300686' }] });
+  site.portalSite.passoBruto = async () => passoPagamento();
+  let cliques = 0;
+  site.portalSite.clicar = async () => { cliques++; throw new Error('Portal do candidato recusou button-click (HTTP 200): Não foi possível realizar o pagamento com o PIX!'); };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = filaDe(st);
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_pedida_em: Date.now() }, a.version, 'matriculaFila'); }
+  const erros = []; const original = console.error; console.error = m => erros.push(String(m));
+  try { store.naHora(); await E.vigiarFinal(id); store.naHora(); await E.vigiarFinal(id); } finally { console.error = original; }
+  assert.equal(cliques, 1, 'recusa do portal: não tenta gerar o Pix de novo');
+  assert.equal(enviados.length, 0);
+  assert.ok(erros.some(e => e.includes('pix_recusado')), 'alerta da equipe na hora');
+  const rec = (await store.get(id, 'matriculaFila')).record;
+  assert.equal(rec.cobranca_erro, 'pix_recusado');
 });
 
 test('Vigia da redação: aguarda a correção e avisa "aprovada, matrícula liberada" uma vez só', async () => {

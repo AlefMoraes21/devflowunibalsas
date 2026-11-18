@@ -503,14 +503,17 @@ export function createEtapa1({
     const passo = await portalSite.passoDocumentos(sessao, passoId, processo);
     const naLista = new Map(passo.docs.map(x => [x.codigo, x]));
     for (const codigo of Object.keys(arquivos)) if (!naLista.has(codigo)) console.error(JSON.stringify({ event: 'etapa1_fila_atencao', id: curto(rec.id), motivo: 'documento_fora_da_lista', doc: codigo }));
-    const lote = [];
+    const lote = [], invalidos = [];
     // Na ordem do passo (a mesma do site).
     for (const linha of passo.docs) {
       const codigo = linha.codigo, media = arquivos[codigo];
       if (!media?.length) continue;
       if (jaEnviadoNoPortal(linha)) { enviados[codigo] = 'ja_no_portal'; continue; }
       const m = media[0];
-      const bytes = await baixarMidia(m);
+      // Anexo que não abre (ex.: Flow em rascunho manda mídia simulada): descarta e pede de novo (como na matrícula).
+      let bytes;
+      try { bytes = await baixarMidia(m); }
+      catch (e) { invalidos.push(codigo); log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'documento_inscricao_invalido', doc: codigo, message: String(e?.message ?? e).slice(0, 80) }); continue; }
       if (bytes.length > passo.max_mb * 1024 * 1024) throw new ErroPasso(`Arquivo do documento ${codigo} acima de ${passo.max_mb} MB.`, { final: true, motivo: 'tamanho' });
       lote.push({ codigo, bytes, nome: String(m.file_name || `documento-${codigo}.pdf`).slice(-80), tipo: tipoArquivo(m.file_name) });
     }
@@ -524,10 +527,11 @@ export function createEtapa1({
         enviados[a.codigo] = conferidos.includes(a.codigo) ? 'conferido' : 'enviado';
       }
       // Nenhum conferido: tenta de novo (o que já entrou não é reenviado, pela lista do passo).
-      if (!conferidos.length) throw new ErroPasso('O portal ainda não mostra os documentos de inscrição enviados.', { motivo: 'docs_conferir' });
+      if (!conferidos.length && !invalidos.length) throw new ErroPasso('O portal ainda não mostra os documentos de inscrição enviados.', { motivo: 'docs_conferir' });
       // Status do portal depois do envio (Documentos inscrição: Em análise), para o LOGIN abrir na hora.
       try { stagesFinal = (await portalSite.inscricao(sessao)).stages; } catch {}
     }
+    if (invalidos.length) throw Object.assign(new ErroPasso('Documentos de inscrição que não abriram: o candidato envia de novo pelo Flow.', { motivo: 'docs_refazer' }), { refazer: invalidos });
     return { applyment_id: sessao.applyment_id, processo, stages: stagesFinal, enviados };
   }
 
@@ -695,7 +699,15 @@ export function createEtapa1({
         if (!rec.docs_inscricao?.completo) return salvar({ parar: true });
         const pronta = (rec.inscrita_em ?? 0) + esperaDocsInscricaoMs;
         if (clock() < pronta) return salvar({ parar: true, proxima: pronta });
-        const r = await entregarDocsInscricao(rec);
+        let r;
+        try { r = await entregarDocsInscricao(rec); }
+        catch (e) {
+          if (!e?.refazer) throw e;
+          // Reabre: "Documentos inscrição" continua pendente no portal e o toque no Flow abre as telas de novo.
+          const arq = Object.fromEntries(Object.entries(rec.docs_inscricao?.arquivos ?? {}).filter(([k]) => !e.refazer.includes(k)));
+          console.error(JSON.stringify({ event: 'etapa1_fila_atencao', id: curto(rec.id), motivo: 'docs_refazer', docs: e.refazer }));
+          return salvar({ docs_inscricao: { ...rec.docs_inscricao, arquivos: arq, completo: false }, docs_refazer: e.refazer, parar: true });
+        }
         // Entregue: as referências dos arquivos (com as chaves de criptografia) e o login não ficam guardados.
         await salvar({ passo: 'fim', status: 'concluida', applyment_id: r.applyment_id || rec.applyment_id || '', docs_inscricao: { completo: true, enviados: r.enviados, enviado_em: clock() }, via_login: null, contato: null });
         try {

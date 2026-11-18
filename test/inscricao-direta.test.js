@@ -104,7 +104,7 @@ function montar(processo, opcoes = {}) {
     ehEnem: id => String(id) === '20386', anosEnem: [{ id: '2025', title: '2025' }],
     validateEnem: d => { if (!/^\d{12,15}$/.test(String(d.numero_inscricao_enem ?? ''))) throw new Error('A inscrição do ENEM deve ter de 12 a 15 números.'); },
     mediaEnem: d => (['nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'].reduce((s, k) => s + Number(d[k]), 0) / 5).toFixed(2),
-    docsInscricao, portalSite: portal.portalSite, baixarMidia: async m => Buffer.from('%PDF ' + m.media_id), esperaDocsInscricaoMs: 0,
+    docsInscricao, portalSite: portal.portalSite, baixarMidia: async m => { if ((opcoes.midiaRuim ?? []).includes(m.media_id)) throw new Error('Arquivo inválido. Envie novamente.'); return Buffer.from('%PDF ' + m.media_id); }, esperaDocsInscricaoMs: 0,
     aoEnviarDocsInscricao: dados => ref.e2.iniciarVigiaInscricao(dados)
   });
   const e2 = createEtapa2({
@@ -223,6 +223,25 @@ test('Worker: repetição segura (documento já em análise no portal não é re
   await toque(M, 'INSC_DOC_C', 'enviar_documento_inscricao', c.data.estado, { arquivo: [] });
   await M.e1.worker(M.fila[0].id);
   assert.deepEqual(M.portal.estado.lotes.map(l => l.codigos), [['17']]);
+});
+
+test('Docs de inscrição com anexo que não abre (Flow em rascunho): envia os bons, descarta o ruim e reabre a etapa sem loop', async () => {
+  const M = montar('20385', { midiaRuim: ['m28'] });
+  await cache(M.store, '20385');
+  const { status } = await inscrever(M, '20385');
+  const a = await toque(M, 'INSC_STATUS', 'verificar_documentos', status.data.estado);
+  const b = await toque(M, 'INSC_DOC_A', 'enviar_documento_inscricao', a.data.estado, { arquivo: MIDIA(28) });
+  const c = await toque(M, 'INSC_DOC_B', 'enviar_documento_inscricao', b.data.estado, { arquivo: [] });
+  await toque(M, 'INSC_DOC_C', 'enviar_documento_inscricao', c.data.estado, { arquivo: MIDIA(27) });
+  const id = M.fila[0].id;
+  const erros = []; const original = console.error; console.error = m => erros.push(String(m));
+  try { await M.e1.worker(id); } finally { console.error = original; }
+  assert.deepEqual(M.portal.estado.lotes.map(l => l.codigos), [['27']], 'o anexo bom vai ao portal');
+  const rec = (await M.store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.docs_inscricao.completo, false, 'reabre: o toque em Documentos inscrição abre as telas de novo');
+  assert.ok(!rec.docs_inscricao.arquivos['28']); assert.deepEqual(rec.docs_refazer, ['28']);
+  assert.notEqual(rec.status, 'falhou'); assert.ok(!rec.tentativas, 'não conta como erro do sistema');
+  assert.ok(erros.some(e => e.includes('docs_refazer')), 'a equipe vê o alerta no log');
 });
 
 test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim) e volta ao status com as notas', async () => {
