@@ -26,7 +26,7 @@ export function telefoneBlip(celular) {
 //   unibalsas_atualizacao_processo  {{1}} nome · {{2}} processo · {{3}} o que aconteceu · {{4}} próximo passo (+ botão do Flow)
 //   unibalsas_cobranca_matricula    {{1}} nome · {{2}} valor sem "R$" (+ Copiar código Pix / Abrir link de pagamento)
 // A cobrança leva o order_details (Pix dinâmico do TOTVS + link do portal) em audience.messageParams["#payment#"].
-// Variáveis: BLIP_API_URL, BLIP_BOT_KEY, PIX_CHAVE (chave Pix do recebedor: aleatória/EVP, CNPJ, CPF, e-mail ou +55 telefone); opcionais BLIP_TEMPLATE_ATUALIZACAO,
+// Variáveis: BLIP_API_URL, BLIP_BOT_KEY, PIX_CHAVE (chave Pix do recebedor aceita pelo Blip: CNPJ, CPF, e-mail ou +55 telefone; usada quando a da cobrança é aleatória/EVP); opcionais BLIP_TEMPLATE_ATUALIZACAO,
 // BLIP_TEMPLATE_COBRANCA, PIX_RECEBEDOR, PAGAMENTO_LINK, AVISOS_DESLIGADOS=1 (para tudo), AVISOS_SO_PARA (lista de
 // números de teste: só eles recebem), BLIP_FLOW_ID / BLIP_STATE_ID / BLIP_MASTERSTATE (direcionamento da resposta).
 export const TEMPLATE_ATUALIZACAO = 'unibalsas_atualizacao_processo';
@@ -108,7 +108,12 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
     if (!recipient) { log({ event: 'blip_aviso', tipo: 'cobranca', enviado: false, motivo: 'telefone_invalido' }); return false; }
     const valor = Math.round(Number(centavos));
     if (!(valor > 0) || !codigoPix) { log({ event: 'blip_aviso', tipo: 'cobranca', enviado: false, motivo: 'sem_valor_ou_pix' }); return false; }
-    const chaveRecebedor = chavePixDe(chave || await chaveDaCobrancaPix(codigoPix, fetcher)) ?? chavePix();
+    // O Blip só aceita key_type CNPJ, CPF, EMAIL ou PHONE ("Tipos de Chave PIX" do artigo order_details): com
+    // "EVP" (chave aleatória) o botão de pagamento chega vazio à Meta (#131008 "'action' cannot be null").
+    // A chave da cobrança vale se for de um desses tipos; senão, a do recebedor em PIX_CHAVE (CNPJ da UniBalsas).
+    // O pagamento segue pelo código Pix dinâmico do TOTVS (mesma conta).
+    const daCobranca = chavePixDe(chave || await chaveDaCobrancaPix(codigoPix, fetcher));
+    const chaveRecebedor = daCobranca && daCobranca.tipo !== 'EVP' ? daCobranca : chavePix() ?? daCobranca;
     if (!chaveRecebedor) { log({ event: 'blip_aviso', tipo: 'cobranca', enviado: false, motivo: 'sem_chave_pix' }); return false; }
     const quantia = { value: valor, offset: 100 };
     const pedido = {
@@ -118,7 +123,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
         { type: 'pix_dynamic_code', pix_dynamic_code: { code: codigoPix, merchant_name: String(env.PIX_RECEBEDOR || recebedor || 'UniBalsas').slice(0, 25), key: chaveRecebedor.key, key_type: chaveRecebedor.tipo } },
         { type: 'payment_link', payment_link: { link: env.PAGAMENTO_LINK || 'https://vestibular.unibalsas.edu.br/presencial' } }
       ],
-      order: { status: 'pending', subtotal: quantia, items: [{ retailer_id: 'taxa-matricula', name: 'Taxa de matrícula 2027/1', amount: quantia, quantity: 1 }] }
+      order: { status: 'pending', subtotal: quantia, tax: { value: 0, offset: 100 }, items: [{ retailer_id: 'taxa-matricula', name: 'Taxa de matrícula 2027/1', amount: quantia, quantity: 1 }] }
     };
     return campanha('cobranca', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['valor', reaisDe(valor)]], { '#payment#': JSON.stringify(pedido) });
   }

@@ -91,13 +91,18 @@ test('Chave Pix: aleatória (EVP) da UniBalsas, CNPJ, CPF, e-mail e telefone; in
 
 test('Cobrança: a chave Pix vem da cobrança do próprio Pix (sistema); só o número de teste recebe com AVISOS_SO_PARA', async () => {
   const b = blipFalso();
-  const blip = createAvisosBlip({ env: { ...ENV, PIX_CHAVE: '', AVISOS_SO_PARA: '5599988880001' }, fetcher: b.fetcher, log: b.log });
+  const blip = createAvisosBlip({ env: { ...ENV, AVISOS_SO_PARA: '5599988880001' }, fetcher: b.fetcher, log: b.log });
   assert.equal(await blip.cobranca({ celular: '99988880001', nome: 'MARIA', centavos: 100, codigoPix: PIX, chave: '86aee95c-2f75-4364-b44d-d595946644c2' }), true);
   const pedido = JSON.parse(b.enviados.at(-1).body.resource.audience.messageParams['#payment#']);
-  assert.deepEqual(pedido.payment_settings[0].pix_dynamic_code, { code: PIX, merchant_name: 'UniBalsas', key: '86aee95c-2f75-4364-b44d-d595946644c2', key_type: 'EVP' });
+  // Chave aleatória (EVP) não é aceita pelo Blip: vai a do recebedor (CNPJ); o pagamento segue pelo código dinâmico.
+  assert.deepEqual(pedido.payment_settings[0].pix_dynamic_code, { code: PIX, merchant_name: 'UniBalsas', key: '07344774000189', key_type: 'CNPJ' });
+  assert.deepEqual(pedido.order.tax, { value: 0, offset: 100 });
+  const comCpfDaCobranca = createAvisosBlip({ env: ENV, fetcher: b.fetcher, log: b.log });
+  await comCpfDaCobranca.cobranca({ celular: '99988880001', nome: 'MARIA', centavos: 100, codigoPix: PIX, chave: 'pix@unibalsas.edu.br' });
+  assert.equal(JSON.parse(b.enviados.at(-1).body.resource.audience.messageParams['#payment#']).payment_settings[0].pix_dynamic_code.key_type, 'EMAIL', 'chave da cobrança de tipo aceito vale');
   assert.deepEqual(pedido.total_amount, { value: 100, offset: 100 });
   const n = b.enviados.length;
-  assert.equal(await blip.cobranca({ celular: '99911112222', nome: 'JOSE', centavos: 100, codigoPix: PIX, chave: '86aee95c-2f75-4364-b44d-d595946644c2' }), false);
+  assert.equal(await createAvisosBlip({ env: { ...ENV, AVISOS_SO_PARA: '5599988880001' }, fetcher: b.fetcher, log: b.log }).cobranca({ celular: '99911112222', nome: 'JOSE', centavos: 100, codigoPix: PIX, chave: '86aee95c-2f75-4364-b44d-d595946644c2' }), false);
   assert.equal(b.enviados.length, n, 'fora da lista de teste: nada sai');
   assert.ok(b.logs.some(l => l.motivo === 'fora_da_lista_teste'));
 });

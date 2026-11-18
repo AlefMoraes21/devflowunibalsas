@@ -1,3 +1,12 @@
+# Versão 2.16.5 — botão de pagamento aceito pelo WhatsApp (18/11/2026)
+
+- 1º disparo real da cobrança (Nair, 14:16): o Blip aceitou, mas a Meta recusou com #131008 "'action' cannot be
+  null for PAYMENT_REQUEST button type" (botão de pagamento vazio). Causas prováveis no #payment#: key_type "EVP"
+  (o Blip só aceita CNPJ, CPF, EMAIL, PHONE) e order.tax ausente (o exemplo do Blip sempre manda).
+- Agora: chave da cobrança se for de tipo aceito; se for aleatória, a do recebedor em PIX_CHAVE (CNPJ
+  07344774000189); `order.tax = 0`. O pagamento continua pelo código Pix dinâmico do TOTVS.
+- Cloud Run: PIX_CHAVE=07344774000189.
+
 # Versão 2.16.4 — LOGIN já abre com o que foi avisado (18/11/2026)
 
 - Homologação (Nair): depois do aviso "documentos aprovados", o 1º LOGIN ainda mostrava a etapa pendente (status
