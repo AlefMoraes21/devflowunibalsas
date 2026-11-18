@@ -307,7 +307,7 @@ export function createEtapa2({
       if (atual.record.flow !== hash(flowToken ?? '')) throw new Error('matrícula de outra sessão');
       const prev = atual.record.blocos?.documentos ?? {};
       const documentos = { ...prev, arquivos: { ...prev.arquivos, ...(media.length ? { [docId]: media } : {}) }, completo: Boolean(completo || prev.completo) };
-      const rec = { ...atual.record, blocos: { ...atual.record.blocos, documentos }, status: ['concluida', 'falhou'].includes(atual.record.status) ? 'pendente' : atual.record.status };
+      const rec = { ...atual.record, blocos: { ...atual.record.blocos, documentos }, status: ['concluida', 'falhou'].includes(atual.record.status) ? 'pendente' : atual.record.status, ...(completo ? { docs_refazer: null } : {}) };
       if (await store.update(s.fila_id, rec, atual.version, FILA)) {
         if (completo) {
           log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'documentos_recebidos', quantidade: Object.keys(documentos.arquivos).length });
@@ -435,6 +435,14 @@ export function createEtapa2({
     if (destino === 'MATR_RESP_DADOS' && s.menor) {
       try { await gravarBloco(s, flowToken, 'responsavel', { responsavel: 'Outro' }); }
       catch { return render('MATR_RESPONSAVEL', { ...base, erro: ERRO_GRAVAR }); }
+    }
+    // Documentos que não abriram (anexo inválido): avisa na 1ª tela quais enviar de novo.
+    if (destino === DOCS[0].tela) {
+      const refazer = (await store.get(s.fila_id, FILA))?.record?.docs_refazer ?? [];
+      if (refazer.length) {
+        const nomes = DOCS.filter(d => refazer.includes(d.id)).map(d => d.titulo).join(', ');
+        return render(destino, { ...base, erro: `Não conseguimos abrir alguns arquivos (${nomes}). Envie de novo; os que já chegaram não precisam ser reenviados.`.slice(0, 300) });
+      }
     }
     return render(destino, { ...base, erro: '' });
   }
@@ -1323,7 +1331,10 @@ export function createEtapa2({
     async function salvar(patch) {
       for (let i = 0; i < 5; i++) {
         const atual = i === 0 ? { record: rec, version } : await store.get(id, FILA);
-        const novo = { ...atual.record, ...patch, blocos: patch.limpar_docs ? { ...atual.record.blocos, documentos: { completo: true } } : atual.record.blocos };
+        const novo = { ...atual.record, ...patch, blocos: patch.limpar_docs ? { ...atual.record.blocos, documentos: { completo: true } }
+          : patch.reabrir_docs ? { ...atual.record.blocos, documentos: { ...atual.record.blocos?.documentos, arquivos: Object.fromEntries(Object.entries(atual.record.blocos?.documentos?.arquivos ?? {}).filter(([k]) => !patch.reabrir_docs.includes(k))), completo: false } }
+          : atual.record.blocos };
+        delete novo.reabrir_docs;
         delete novo.limpar_docs;
         if (await store.update(id, novo, atual.version, FILA)) { const l = await store.get(id, FILA); rec = l.record; version = l.version; return; }
         if (i === 0) { const l = await store.get(id, FILA); rec = l.record; version = l.version; }
@@ -1340,7 +1351,7 @@ export function createEtapa2({
       if (!processo) throw new ErroPasso('Processo seletivo da inscrição não encontrado no portal.', { motivo: 'processo' });
       const passo = await portalSite.passoDocumentos(sessao, passoId, processo);
       const naLista = new Map(passo.docs.map(d => [d.codigo, d]));
-      const arquivos = [], jaNoPortal = [];
+      const arquivos = [], jaNoPortal = [], invalidos = [];
       for (const doc of DOCS) {
         const media = docsB.arquivos?.[doc.id];
         if (!media?.length || rec.enviados_docs?.[doc.id]) continue;
@@ -1349,7 +1360,10 @@ export function createEtapa2({
         if (jaEnviado(linha)) { jaNoPortal.push(doc.id); continue; } // já enviado (ex.: pelo site): não reenvia
         const m = media[0];
         const tipo = tipoDoArquivo(m.file_name) ?? 'application/pdf';
-        const bytes = await baixarMidia(m);
+        // Anexo que não abre (ex.: Flow em rascunho manda mídia de mentira; link vencido): descarta e pede de novo.
+        let bytes;
+        try { bytes = await baixarMidia(m); }
+        catch (e) { invalidos.push(doc.id); log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_invalido', doc: doc.id, message: String(e?.message ?? e).slice(0, 80) }); continue; }
         if (bytes.length > passo.max_mb * 1024 * 1024) throw new ErroPasso(`Arquivo do documento ${doc.id} acima de ${passo.max_mb} MB.`, { final: true, motivo: 'tamanho' });
         arquivos.push({ codigo: doc.id, bytes, nome: String(m.file_name || `documento-${doc.id}.pdf`).slice(-80), tipo });
       }
@@ -1363,6 +1377,11 @@ export function createEtapa2({
       }
       for (const c of jaNoPortal) log({ event: 'etapa2_fila', id: curto(id), passo: 'documento_ja_no_portal', doc: c });
       await salvar({ enviados_docs: { ...rec.enviados_docs, ...marcados } });
+      if (invalidos.length) {
+        // Reabre as telas de documento no Flow (blocos.documentos incompleto) só para os que falharam.
+        await salvar({ reabrir_docs: invalidos, docs_refazer: invalidos, passo: 'aguardando_documentos' });
+        throw Object.assign(new ErroPasso('Arquivos que não abriram: o candidato envia de novo pelo Flow.', { motivo: 'docs_refazer' }), { refazer: true });
+      }
     }
     try {
       await runCtx(async () => {
@@ -1423,6 +1442,7 @@ export function createEtapa2({
       await salvar({ rodando_ate: 0 });
       log({ event: 'etapa2_fila', id: curto(id), passo: rec.passo, status: rec.status });
     } catch (e) {
+      if (e?.refazer) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documentos_refazer' }); await salvar({ rodando_ate: 0 }).catch(() => {}); return; }
       const tentativas = (rec.tentativas ?? 0) + 1;
       const rm = ehRecusaRm(e?.message);
       const final = (e instanceof ErroPasso && e.final) || rm;

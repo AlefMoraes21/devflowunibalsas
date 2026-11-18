@@ -321,6 +321,31 @@ test('Documentos pelo caminho do site: fila que falhou reabre ao entrar de novo;
   assert.deepEqual(Object.keys(rec.enviados_docs).sort(), ['46', '5', '8']);
 });
 
+test('Documento com anexo que não abre (ex.: Flow em rascunho): envia os bons, descarta o ruim e reabre as telas de documento sem erro', async () => {
+  const store = memoria(); const fila = []; const logs = [];
+  const site = siteFalso();
+  const r = rubeusFalso();
+  const baixarMidia = async m => { if (m.media_id.includes('8')) throw new Error('Arquivo inválido. Envie novamente.'); return Buffer.from('PDF ' + m.media_id); };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: e => logs.push(e),
+    portalSite: site.portalSite, baixarMidia, esperaDocsMs: 0 });
+  const portal = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const resp = await continuar(E, portal);
+  const end = await toque(E, 'MATR_RESPONSAVEL', 'enviar_responsavel', resp.data.estado, { responsavel: 'Eu' });
+  const ident = await toque(E, 'MATR_ENDERECO', 'enviar_endereco', end.data.estado, END);
+  let tela = await toque(E, 'MATR_IDENTIDADE', 'enviar_identidade', ident.data.estado, IDENT);
+  for (const d of DOCS) tela = await toque(E, d.tela, 'enviar_documento', tela.data.estado, { arquivo: d.obrigatorio ? MEDIA(d.id) : [] });
+  const id = fila[0].id;
+  await E.worker(id);
+  assert.deepEqual(site.lotes.map(l => l.codigos), [['5', '46']], 'os anexos bons vão ao portal');
+  const rec = (await store.get(id, 'matriculaFila')).record;
+  assert.equal(rec.blocos.documentos.completo, false, 'reabre as telas de documento no Flow');
+  assert.deepEqual(rec.docs_refazer, ['8']);
+  assert.ok(!rec.blocos.documentos.arquivos['8'], 'o anexo ruim é descartado');
+  assert.notEqual(rec.status, 'falhou'); assert.ok(!rec.tentativas, 'não conta como erro do sistema');
+  assert.ok(logs.some(l => l.passo === 'documento_invalido' && l.doc === '8'));
+  assert.ok(!logs.some(l => l.event === 'etapa2_fila_erro'), 'sem loop de erro');
+});
+
 test('Passo de documentos do site: leitura da estrutura real e corpo do "Enviar" igual ao do site', async () => {
   const { lerPassoDocumentos, montarEnvio } = await import('../api/portal-site.js');
   const linha = (c, d, o) => ({ CODTIPODOCUMENTO: c, DESCRICAODOCUMENTO: d, OBRIGATORIO: o, CHAVERM: `1;80;27.1.9;${c}`, STATUS: null });

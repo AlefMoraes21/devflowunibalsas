@@ -1,3 +1,11 @@
+# Versão 2.16.2 — documento que não abre é pedido de novo (18/11/2026)
+
+- Homologação do zero: anexos enviados pelo Flow em rascunho (prévia da WABA) chegam como mídia de mentira
+  (cdn_url sem link, chaves de 2 bytes). O worker repetia "Arquivo inválido" sem fim e o Flow dizia "enviados".
+- Agora o worker envia os anexos bons, descarta os que não abrem (log `documento_invalido`), reabre as telas de
+  documento no Flow (com aviso de quais reenviar) e não conta como erro do sistema. JSON do Flow sem mudança.
+- Teste com anexos: sempre pelo Flow PUBLICADO, aberto no app do WhatsApp (não pela prévia do editor).
+
 # Versão 2.16.1 — lista de etapas aceita pelo WhatsApp (18/11/2026)
 
 - Correção (homologação do zero): a Meta recusava a lista de status no LOGIN ("NavigationList cannot have only
