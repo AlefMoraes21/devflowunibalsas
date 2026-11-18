@@ -491,6 +491,10 @@ export function createEtapa2({
       if (await store.update(filaId, { ...a.record, contrato_gerando_ate: 0 }, a.version, FILA)) return;
     }
   }
+  const docsMatriculaAprovados = stages => {
+    const docs = (stages ?? []).find(x => /document/.test(norm(x.title)) && /matric/.test(norm(x.title)));
+    return !docs || Number(docs.feedback?.conclusive) === 1;
+  };
   async function gerarContrato(filaId, rec, ip = '', opcoes = {}) {
     if (!(await travar(filaId))) throw new ErroContrato('Estamos gerando o seu contrato. Esta página atualiza sozinha em alguns segundos.', 'gerando');
     try { return await gerarContratoAgora(filaId, rec, ip, opcoes); }
@@ -508,6 +512,11 @@ export function createEtapa2({
       passoId = passoDe(insc.stages);
       const etapaContrato = (insc.stages ?? []).find(x => /contrato/.test(norm(x.title)));
       if (Number(etapaContrato?.feedback?.conclusive) === 1) throw new ErroContrato('O contrato já foi assinado.', 'concluido');
+      // O passo do contrato existe no portal mesmo antes da análise (o bloqueio do site é só visual): liberado
+      // é quando a equipe aprova os documentos de matrícula ("Entregues", conclusive).
+      if (!docsMatriculaAprovados(insc.stages)) throw new ErroContrato('O contrato é liberado depois que a equipe aprova os documentos de matrícula.', 'nao_liberado');
+    } else if (!docsMatriculaAprovados(rec.ultimo_status?.stages)) {
+      throw new ErroContrato('O contrato é liberado depois que a equipe aprova os documentos de matrícula.', 'nao_liberado');
     }
     if (!processo || !passoId) throw new ErroContrato('O contrato ainda não está liberado no Portal do candidato.', 'nao_liberado');
     // Calma (vigia): o portal acabou de liberar o contrato; espera o Rubeus terminar de processar antes de gerar.
@@ -635,6 +644,16 @@ export function createEtapa2({
       if (matriculado?.conclusive) return;
       const antes = docs ? s2.rows.slice(0, s2.rows.indexOf(docs)) : [];
       const emAnalise = docs && !docs.conclusive && !aberta(docs) && antes.every(r => r.conclusive);
+      // Contrato gerado/avisado antes da aprovação dos documentos (regra antiga): desfaz e volta a vigiar a análise.
+      if (docs && !docs.conclusive && (rec.contrato_liberado_em || rec.avisos?.contrato_liberado) && rec.status === 'concluida') {
+        const { contrato_liberado: _x, ...avisosSem } = rec.avisos ?? {};
+        await salvarFilaDe(id)({ contrato_liberado_em: null, avisos: avisosSem, final_vigiando: null, vigia_ate: null, vigia_desde: null,
+          vigia_proxima: { ...(rec.vigia_proxima ?? {}), etapa3_vigia: 0, etapa4_vigia: 0 } });
+        try { const c = await store.get(id, CONTRATOS); if (c) await store.update(id, { ...c.record, pdf: null, expires: 0 }, c.version, CONTRATOS); } catch {}
+        await agendarVigia(id, 'etapa3_vigia', VIGIA_INTERVALO_S);
+        log({ event: 'etapa3_contrato', id: curto(id), passo: 'contrato_cedo_desfeito' });
+        return;
+      }
       const docsOk = docs ? Boolean(docs.conclusive) : true;
       const contratoPendente = Boolean(contrato) && !contrato.conclusive && docsOk;
       const pagamentoPendente = Boolean(pagamento) && !pagamento.conclusive && docsOk && (!contrato || contrato.conclusive);
@@ -1442,7 +1461,7 @@ export function createEtapa2({
       await salvar({ rodando_ate: 0 });
       log({ event: 'etapa2_fila', id: curto(id), passo: rec.passo, status: rec.status });
     } catch (e) {
-      if (e?.refazer) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documentos_refazer' }); await salvar({ rodando_ate: 0 }).catch(() => {}); return; }
+      if (e?.refazer) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documentos_refazer' }); await salvar({ rodando_ate: 0 }).catch(() => {}); return 204; }
       const tentativas = (rec.tentativas ?? 0) + 1;
       const rm = ehRecusaRm(e?.message);
       const final = (e instanceof ErroPasso && e.final) || rm;

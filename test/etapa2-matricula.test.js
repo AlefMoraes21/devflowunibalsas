@@ -624,6 +624,50 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   assert.equal(st.screen, 'MATR_STATUS');
 });
 
+test('Contrato: com os documentos de matrícula em análise ("Pendente [Verificar]") o vigia NÃO gera nem avisa; com "Entregues" gera e avisa', async () => {
+  const store = memoria(); const fila = []; const enviados = [];
+  let agora = Date.UTC(2026, 10, 18, 16);
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao(d) { enviados.push(d); return true; }, async cobranca() { return true; } };
+  const site = siteContrato();
+  site.passoResp.data.steps.currentStep.applicantData = [{ field_id: 38544, value: 'NAIR JULIA' }, { field_id: 38546, value: '99988880001' }];
+  let aprovado = false;
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: [
+    { title: 'Documentos matrícula', feedback: aprovado ? { complementary_text: 'Entregues', conclusive: 1 } : { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300671' },
+    { title: 'Contrato', feedback: aprovado ? { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' } : { complementary_text: 'Aguardando documentação', conclusive: 0, cta_text: 'null' }, cta_link: 'presencial/passo/300669' }] });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora, avisos });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  { const a = await store.get(id, 'matriculaFila'); delete a.record.avisos; await store.update(id, a.record, a.version, 'matriculaFila'); }
+  for (let i = 0; i < 3; i++) { store.naHora(agora); await E.vigiarContrato(id); agora += 10 * 60000; }
+  assert.equal(site.cliques.length, 0, 'documentos em análise: o contrato não é gerado');
+  assert.equal(enviados.length, 0, 'documentos em análise: nenhum aviso');
+  assert.ok(!(await store.get(id, 'matriculaFila')).record.contrato_liberado_em);
+  aprovado = true;
+  store.naHora(agora); await E.vigiarContrato(id);
+  agora += 3 * 60000;
+  store.naHora(agora); await E.vigiarContrato(id);
+  assert.equal(site.cliques.length, 1, 'aprovado: gera o contrato');
+  assert.match(enviados.at(-1).situacao, /documentos .* aprovados/);
+});
+
+test('Contrato gerado antes da aprovação (regra antiga): o login desfaz o aviso e o contrato e volta a vigiar a análise', async () => {
+  const store = memoria(); const fila = []; const logs = [];
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+    { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
+    { title: 'Documentos matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300671' },
+    { title: 'Contrato', feedback: { complementary_text: 'Aguardando documentação', conclusive: 0, cta_text: 'null' }, cta_link: 'presencial/passo/300669' }] });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: e => logs.push(e) });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, status: 'concluida', contrato_liberado_em: Date.now() - 3600000, avisos: { contrato_liberado: Date.now() - 3000000 }, final_vigiando: Date.now() }, a.version, 'matriculaFila'); }
+  await store.create(id, { pdf: Buffer.from('%PDF-1.4').toString('base64'), expires: Date.now() + 86400000 }, 'contratos').catch(() => {});
+  await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const rec = (await store.get(id, 'matriculaFila')).record;
+  assert.ok(!rec.contrato_liberado_em && !rec.avisos?.contrato_liberado && !rec.final_vigiando, 'aviso e liberação desfeitos');
+  assert.ok(logs.some(l => l.passo === 'contrato_cedo_desfeito'));
+  assert.equal(fila.at(-1).tipo, 'etapa3_vigia', 'volta a vigiar a análise dos documentos');
+});
+
 test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado avisa e guarda o valor; a cobrança sai só a pedido (botão do Flow); matrícula concluída avisa', async () => {
   const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
   const store = memoria(); const fila = [];

@@ -1,3 +1,13 @@
+# Versão 2.16.3 — contrato só depois da aprovação dos documentos (18/11/2026)
+
+- Homologação do zero (Nair): o vigia do contrato gerou o contrato e avisou "documentos aprovados" 10 min depois
+  do envio, com os documentos ainda em análise. Causa: o passo do contrato existe no portal antes da aprovação
+  (o bloqueio do site é só visual). Agora o contrato só é liberado com "Documentos matrícula" concluído
+  ("Entregues"); antes disso o vigia segue aguardando (`contrato_aguardando`).
+- Auto-correção: quem recebeu o aviso cedo tem o aviso e o contrato desfeitos no próximo login/atualização
+  (`contrato_cedo_desfeito`) e volta a ser avisado quando a equipe aprovar.
+- Worker: retorno 204 ao reabrir documentos inválidos (antes, status HTTP indefinido).
+
 # Versão 2.16.2 — documento que não abre é pedido de novo (18/11/2026)
 
 - Homologação do zero: anexos enviados pelo Flow em rascunho (prévia da WABA) chegam como mídia de mentira
