@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.15.1** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.15.1`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.16.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.16.0`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -40,9 +40,11 @@ Com status guardado, o LOGIN abre em ~2 s com o último status e o Run relê o p
 
 1. Responsável financeiro → pré-matrícula (endereço, identidade) → documentos de matrícula → análise da equipe.
 2. Contrato: o Run gera o PDF (link exclusivo de 24 h); o candidato assina no GOV.BR e envia por e-mail → baixa da equipe.
-3. Pagamento: liberado com o contrato assinado. Na Transferência e no Portador o portal não mostra botão; o Run usa o
-   passo do processo (`passoPagamento`: 300670, 300701, 300686, 300716) e o Flow mostra "Pendente [Pagar]". A cobrança
-   Pix vai por mensagem (Blip); cartão pelo portal.
+3. Pagamento: liberado com o contrato assinado (o vigia avisa e guarda o valor). No Flow, a tela **Pagamento**
+   mostra o valor e o botão **"Realizar pagamento"**; o pagamento NÃO é feito no Flow. O toque pede ao Run a mensagem
+   do Blip (template de pagamento `order_details`): o Run gera o Pix no portal como o site (passo do processo:
+   300670, 300701, 300686, 300716) e manda o copia e cola + o link do cartão. Tudo vem do sistema: Pix do TOTVS,
+   valor (38658), recebedor e chave Pix lidos da própria cobrança. O Pix vale 1 h; "Reenviar mensagem" gera outro.
 4. "Recebido" → "Aguardando confirmação da equipe" → a equipe libera o Matriculado **à mão** → aviso final.
 
 Sem cupom em nenhuma tela do Flow (o passo de cupom do portal do Vestibular é pulado pelo worker). Recusa do RM
@@ -92,7 +94,7 @@ Variáveis de ambiente (no Cloud Run; nunca no código):
 | `FLOW_PRIVATE_KEY` / `FLOW_PASSPHRASE` | Chave privada do endpoint do Flow; também deriva as chaves do estado e da fila |
 | `META_APP_SECRET` | Segredo do app Meta (confere a assinatura de cada requisição) |
 | `FLOW_PROJECT_ID`, `FLOW_DATABASE_ID`, `FLOW_TASKS_REGION`, `FLOW_TASKS_QUEUE`, `FLOW_WORKER_ORIGIN` | Firestore e Cloud Tasks (preenchidas por `implantar.sh`) |
-| `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_TEMPLATE_REDACAO`, `PIX_CHAVE` | Avisos e cobrança pelo Blip (sem elas, nada é enviado) |
+| `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_TEMPLATE_REDACAO`, `PIX_CHAVE`, `AVISOS_SO_PARA` | Avisos e cobrança pelo Blip (sem elas, nada é enviado). `BLIP_API_URL` sem `/commands`; `PIX_CHAVE` é só reserva (a chave vem da cobrança do Pix); `AVISOS_SO_PARA` = números de teste (só eles recebem) |
 | `PORT` | Opcional. Padrão `8080` |
 
 ## Testes

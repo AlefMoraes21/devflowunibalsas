@@ -222,6 +222,39 @@ export function pixDoPopup(resp) {
   if (!c) throw new Error("O portal não devolveu o código Pix.");
   return c;
 }
+// Campos do BR Code (TLV): tag de 2 dígitos + tamanho de 2 dígitos + valor.
+function tlvPix(texto) {
+  const c = str(texto), out = {};
+  for (let i = 0; i + 4 <= c.length;) {
+    const tag = c.slice(i, i + 2), n = Number(c.slice(i + 2, i + 4));
+    if (!Number.isFinite(n)) break;
+    out[tag] = c.slice(i + 4, i + 4 + n);
+    i += 4 + n;
+  }
+  return out;
+}
+// URL da cobrança do Pix dinâmico (campo 26, subcampo 25), ex.: api.rendimento.com.br/q/v2/{id}.
+export function urlDaCobrancaPix(codigo) {
+  const u = tlvPix(tlvPix(codigo)["26"] ?? "")["25"] ?? "";
+  return /^[\w.-]+\.[a-z]{2,}\/[\x21-\x7e]+$/i.test(u) ? "https://" + u : "";
+}
+// Chave Pix do recebedor, lida da própria cobrança (o JWS que o app do banco lê na URL do Pix). Vem do sistema,
+// nunca fixa no código: a da UniBalsas no Banco Rendimento é aleatória (EVP). Sem resposta, devolve "".
+export async function chaveDaCobrancaPix(codigo, fetcher = fetch) {
+  const url = urlDaCobrancaPix(codigo);
+  if (!url) return "";
+  try {
+    const r = await fetcher(url, { signal: AbortSignal.timeout(8000) });
+    const corpo = await r.text();
+    for (const m of corpo.matchAll(/eyJ[\w-]+\.(eyJ[\w-]+)\.[\w-]+/g)) {
+      try {
+        const j = JSON.parse(Buffer.from(m[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+        if (typeof j?.chave === "string" && j.chave.trim()) return j.chave.trim();
+      } catch {}
+    }
+  } catch {}
+  return "";
+}
 // Nome do recebedor dentro do BR Code (campo 59).
 export function recebedorDoPix(codigo) {
   const c = str(codigo);

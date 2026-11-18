@@ -195,3 +195,51 @@ Tabela atualizada: **Pagamento da Transferência = 300701; Pagamento do Portador
   - Login rápido: com status guardado, espera o portal só 2 s (`ETAPA2_ESPERA_CACHE_MS`) e abre com o guardado; o Run relê o portal em 2º plano (`etapa2_status`) e religa os vigias. Run continua com mínimo 0 (Cloud Tasks).
 - `api/flow.js`: o erro do Rubeus agora carrega a mensagem (`json.message`) para reconhecer a recusa do RM.
 - Verificado localmente (`.claude/skills/verify/final.mjs`): Rebeca → Pagamento Recebido / Matriculado "Aguardando confirmação da equipe", `pagamento_recebido`; Rosa → Pagamento "Pendente [Pagar]", vigia `pagamento_liberado` pelo passo 300686; 2º login ~4,5 s com o status guardado. Sem Blip, nenhum Pix gerado.
+
+## Pagamento do ENEM — captura (18/11/2026, Juan, applyment 14320206)
+
+- Portal: Contrato **Assinado [Verificar]** (feedback 920330) · **Pagamento Pendente [Verificar]** (stage 261045, feedback 920332, `cta_link presencial/passo/300716`) · Matriculado "Existem pendências" (feedback 920340, sem botão).
+- **Passo do pagamento do ENEM = 300716 (confirmado).** No ENEM o portal mostra o botão (na Transferência e no Portador não).
+- Regras do portal: a etapa aparece com 38635 = true (aceite) e 38651; o feedback "Pendente" vale enquanto **38657 = "0"**.
+- Chamadas ao abrir o passo: `getApplymentDataByStep/300716` (1,4 s) → `validate-access` → `settings/selective-process` → `check-login` → `stage-steps`.
+- Tela: "Estamos finalizando! Para concluir a sua matrícula, realize o seu pagamento", **Valor a pagar R$ 1,00** (valor de teste), rádio 38702 (Cartão marcado / Pix).
+- Campos do TOTVS (`FLANMATRICULA`): 38656 IDBOLETO `544259`, 53443 valor Pix `1.00`, 38661 `R$ 1,00`, 38658 `100` (centavos).
+- Botões: **3940845** "Realizar pagamento" Pix (`38702=P`, related 226402) · **3940846** cartão (`C`, related 226386) · 3940847 "Gerar boleto" (`B`, nunca aparece) · 3940844 Portal do candidato.
+- Mesma estrutura do Vestibular (3940437/38/39) e da Transferência (3940710/11/12): o `lerPassoPagamento` atual acha o Pix pela lógica `P`, sem ID fixo.
+
+### Pagamento real de teste — ponta a ponta (18/11/2026, Juan, R$ 1,00 por Pix)
+
+O usuário clicou e pagou; a automação só observou.
+
+| Hora (BRT) | Evento | Detalhe |
+|---|---|---|
+| 09:12:02 | `button-click` **3940845** (Pix, `38702=P`), FormData | **5,5 s** → `success:true`, `place_type_id 6`, `place_id 1016`, stage 261045, redirect 76128 |
+| 09:12:07 | `popup` `{popup_id:1016, stage:{stage_id:261045}}` | 0,2 s; "Realize o pagamento!"; `data.applicantData`: **50900** QR (PNG base64, 2,2 KB) e **50901** copia e cola |
+| — | passo 300716 | só 50900 e 50901 preenchidos; **38657 continua `0`** |
+| 09:16 | pagamento pelo copia e cola no app do banco | — |
+| 09:16:57 | portal: **Pagamento "Recebido"** (feedback 920333, `conclusive 1`, sem botão) | **< 1 min** depois do pagamento; passo: **38657 `0` → `1`** |
+| depois | Matriculado "Existem pendências" (feedback 920340) | regra **38669 = "F"**; liberação manual da equipe |
+
+- **Código Pix:** dinâmico (`01=12`), 171 caracteres, CRC16 válido, GUI `br.gov.bcb.pix`, **URL de cobrança do Banco Rendimento** (26.25), sem valor no código (o valor fica na cobrança), nome "UNIBALSAS EDUCACIONA", cidade Balsas, MCC 0000, BRL.
+- **Regras do portal:** Pagamento "Pendente [Verificar]" (920332) quando 38657 = "0"; "Recebido" (920333) quando **38657 = "1"**; Matriculado "Existem pendências" (920340) quando **38669 = "F"**. O 38651 é o RA no RM (`27.1.xxxxx`), não o gatilho do Matriculado.
+- **Depois de pago, o passo continua mostrando "Realizar pagamento"** (Pix marcado, mesmo valor). O site não impede uma 2ª cobrança. O Run nunca deve gerar ou enviar cobrança com Pagamento "Recebido" (38657 = 1) — `pagamentoLiberado` já devolve `null` com `conclusive`.
+- `register-portal-data` levou ~13 s nas leituras: o Flow não deve consultá-lo ao vivo (o vigia em 2º plano sim).
+
+**Para o Run e o Blip (igual nos 4 processos):**
+1. Gatilho: o candidato toca em "Realizar pagamento" na tela do Flow (valor de 38661/38658) → o Flow grava e responde na hora.
+2. Worker: `button-click` do botão com lógica `38702=P` → `popup` 1016 → lê 50901 (e 50900 se precisar do QR) → guarda o Pix na fila.
+3. Blip: template `unibalsas_cobranca_matricula` com `order_details` (`pix_dynamic_code` = 50901, valor = 38658 centavos, `payment_link` = portal para cartão).
+4. Vigia: confere a cada ~1 min nos primeiros minutos (o "Recebido" saiu em < 1 min) e depois espaça; com 38657 = 1 → aviso `pagamento_recebido` → espera a equipe (38669) → `matricula_concluida`.
+
+### Chave Pix do recebedor e validade do Pix (lidas da cobrança, 18/11/2026)
+
+O copia e cola do TOTVS é um Pix dinâmico com URL (`26.25 = api.rendimento.com.br/q/v2/{id}`). O `GET` nessa URL
+(o mesmo que o app do banco faz) devolve o JWS da cobrança. No Pix do Juan (já pago, HTTP 410):
+- **chave `86aee95c-2f75-4364-b44d-d595946644c2`** — chave **aleatória (EVP)** da conta do Banco Rendimento, não CNPJ.
+- `status CONCLUIDA`, `valor.original 1.00`, `calendario.criacao` 09:12:06 BRT, **`expiracao 3598` s (≈ 1 h)**.
+
+Consequências para o Run (feitas, sem publicar):
+- `PIX_CHAVE` aceita EVP (`key_type: EVP`), além de CNPJ, CPF, e-mail e telefone (`chavePixDe` em `api/blip.js`).
+- O Pix guardado na fila vale **50 min** (antes 12 h); depois disso o reenvio gera um Pix novo.
+- Sem reserva pelo 50901 do passo: o último Pix do portal pode estar expirado ou pago.
+- `payment_link` usa o campo **`link`**, como no artigo do Blip "Enviando Mensagens Ativas com Template order_details".

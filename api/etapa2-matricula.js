@@ -196,6 +196,7 @@ export function createEtapa2({
     MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
     MATR_PORTAL: ['estado', 'resumo', 'botao'],
     CONTR_TERMOS: ['link_contrato'],
+    MATR_PAGAMENTO: ['estado', 'valor', 'mensagem', 'botao'],
     MATR_STATUS: ['etapas'],
     MATR_RESPONSAVEL: ['estado', 'erro', 'tem_erro', ...valor('responsavel')],
     MATR_RESP_DADOS: ['estado', 'erro', 'tem_erro', ...valor('nome', 'email', 'cpf', 'data_nascimento', 'celular', ...END)],
@@ -218,6 +219,25 @@ export function createEtapa2({
     return { screen, data: out };
   }
   const fim = (titulo, mensagem) => render('MATR_FIM', { titulo, mensagem });
+  // Fim da etapa 1 (INSC_FIM) aberto pela lista de status vira o fim da etapa 2 (mesmos dados): a Meta aceita no
+  // máximo 10 caminhos por tela, e a MATR_STATUS já tem 10.
+  const semFimE1 = r => (r?.screen === 'INSC_FIM' ? fim(r.data?.titulo ?? '', r.data?.mensagem ?? '') : r);
+  // Tela de pagamento (MATR_PAGAMENTO): valor lido pelo vigia (cobranca_centavos) e o estado da mensagem do Blip.
+  const PAGAMENTO_SEM_BLIP = 'A cobrança da taxa de matrícula será enviada por mensagem aqui no WhatsApp. Para pagar agora, acesse o Portal do candidato. Dúvidas: WhatsApp da central de matrícula, (99) 99131-1684.';
+  const PEDIDO_REPETIDO_MS = 60000;
+  const valorDaTaxa = rec => Number(rec?.cobranca_centavos) > 0 ? 'R$ ' + (Number(rec.cobranca_centavos) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Informado na mensagem';
+  const horaBr = ms => new Date(ms).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+  function telaPagamento(base, rec) {
+    if (rec.pagamento_recebido_em || rec.matricula_concluida_em) return fim('Pagamento recebido ✅', 'O pagamento da sua taxa de matrícula já foi recebido. Agora a equipe confere e confirma a sua matrícula; avisaremos por aqui.');
+    if (!avisos?.configurado?.cobranca?.()) return fim('Pagamento', PAGAMENTO_SEM_BLIP);
+    const enviada = rec.cobranca_enviada_em && rec.cobranca_enviada_em >= (rec.cobranca_pedida_em ?? 0);
+    const pedida = rec.cobranca_pedida_em && !enviada;
+    const mensagem = enviada
+      ? `Enviamos a mensagem de pagamento aqui no WhatsApp às ${horaBr(rec.cobranca_enviada_em)}. O Pix vale 1 hora: se ele venceu ou você não achou a mensagem, toque em "Reenviar mensagem".`
+      : pedida ? 'Estamos preparando a sua mensagem de pagamento. Ela chega aqui no WhatsApp em instantes.'
+        : 'Ao tocar em "Realizar pagamento", você recebe aqui no WhatsApp uma mensagem com o Pix (copia e cola) e o link para pagar com cartão de crédito.';
+    return render('MATR_PAGAMENTO', { ...base, valor: valorDaTaxa(rec), mensagem, botao: enviada ? 'Reenviar mensagem' : 'Realizar pagamento' });
+  }
   const pick = (d, nomes) => Object.fromEntries(nomes.filter(n => d?.[n] !== undefined).map(n => [n, typeof d[n] === 'string' ? d[n].trim() : d[n]]));
 
   async function gravarBloco(s, flowToken, bloco, dados) {
@@ -396,7 +416,7 @@ export function createEtapa2({
     if (!s2) return render('MATR_PORTAL', { m2: true, fila_id: id, menor, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
     // Prova liberada: segue para o "Portal do candidato" da etapa 1 (Realizar prova → redação), sem mudar a etapa 1.
     if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva && rec) {
-      return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken });
+      return semFimE1(await entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken }));
     }
     log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: 'status', proxima: s2.next?.title ?? 'nenhuma',
       etapas: (s2.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(blocos ?? {}).join(',') });
@@ -672,6 +692,8 @@ export function createEtapa2({
   // conclui — são os momentos dos avisos ao candidato.
   const FINAL_MAX_MS = 30 * DIA;
   const MAX_TENTATIVAS_AVISO = 5;
+  const VIGIA_PAGAMENTO_S = Number(process.env.VIGIA_PAGAMENTO_S) || 120;
+  const PIX_JANELA_MS = 70 * 60000;
   async function vigiarFinal(id) {
     const antes = await store.get(id, FILA);
     if (!antes) return 204;
@@ -731,10 +753,24 @@ export function createEtapa2({
           await salvarFila({ pagamento_liberado_em: clock() });
           log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_liberado' });
         }
-        if (!rec.cobranca_enviada_em && avisos?.configurado?.cobranca?.() && (rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
-          const ok = await enviarCobranca(id, rec, sessao, processo, pagamentoAberto.step);
-          if (!ok) proximoEm = VIGIA_INTERVALO_S; // tenta de novo em 10 min
+        // Valor da taxa para a tela de pagamento do Flow (lido uma vez, em segundo plano).
+        if (!(Number(rec.cobranca_centavos) > 0)) {
+          try {
+            const c = centavosDoPagamento(lerPassoPagamento(await portalSite.passoBruto(sessao, pagamentoAberto.step, processo)));
+            if (c > 0) await salvarFila({ cobranca_centavos: c });
+          } catch {}
         }
+        // Aviso: pagamento liberado → abrir o Flow e tocar em "Realizar pagamento".
+        if (!rec.cobranca_pedida_em && avisoPendente(rec, 'pagamento_liberado')) await avisar(id, 'pagamento_liberado', { sessao, processo }).catch(() => false);
+        // A mensagem de pagamento sai só a pedido do candidato (botão do Flow), uma vez por pedido.
+        const pedida = rec.cobranca_pedida_em && !(rec.cobranca_enviada_em >= rec.cobranca_pedida_em);
+        if (pedida && avisos?.configurado?.cobranca?.() && (rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
+          const ok = await enviarCobranca(id, rec, sessao, processo, pagamentoAberto.step);
+          if (!ok) proximoEm = VIGIA_PAGAMENTO_S; // o candidato está esperando: tenta de novo logo
+        }
+        // Depois da mensagem, o "Recebido" sai em menos de 1 min: confere a cada 2 min enquanto o Pix vale.
+        const enviadaEm = (await store.get(id, FILA))?.record?.cobranca_enviada_em ?? 0;
+        if (enviadaEm && clock() - enviadaEm < PIX_JANELA_MS) proximoEm = Math.min(proximoEm, VIGIA_PAGAMENTO_S);
       } else {
         log({ event: 'etapa_final', id: curto(id), passo: 'aguardando', pagamento: pagamento?.status ?? '', matriculado: matriculado?.status ?? '' });
       }
@@ -751,6 +787,7 @@ export function createEtapa2({
   // próprio portal (applicantData dos passos do contrato/pagamento ou "Meus dados", página 432) e ficam na fila
   // (criptografada). Nada de celular nos logs.
   const AVISOS = {
+    pagamento_liberado: { processo: 'matrícula', situacao: 'Recebemos o seu contrato assinado. A taxa de matrícula já pode ser paga.', proximo: 'toque no botão abaixo, abra Pagamento e toque em "Realizar pagamento" para receber o Pix e o link do cartão.' },
     contrato_liberado: { processo: 'matrícula', situacao: 'Seus documentos de matrícula foram analisados e aprovados.', proximo: 'acesse a sua inscrição pelo botão abaixo e baixe o contrato da sua matrícula.' },
     pagamento_recebido: { processo: 'matrícula', situacao: 'Recebemos o pagamento da sua taxa de matrícula. ✅', proximo: 'agora a equipe confere e confirma a sua matrícula. Avisaremos por aqui.' },
     matricula_concluida: { processo: 'matrícula', situacao: 'Sua matrícula foi confirmada pela equipe. Você está matriculado(a)! 🎉', proximo: 'acompanhe as orientações da UniBalsas para o início das aulas.' }
@@ -779,8 +816,9 @@ export function createEtapa2({
   }
 
   // Cobrança da taxa (template de pagamento): gera o Pix como o botão "Realizar pagamento" do site (Pix) e manda o
-  // copia e cola + link do portal (cartão). O Pix gerado fica na fila (12 h) para as novas tentativas não gerarem outro.
-  const PIX_VALIDO_MS = 12 * 3600000;
+  // copia e cola + link do portal (cartão). O Pix do TOTVS (Banco Rendimento) expira em 1 h (expiracao 3598 s): o
+  // gerado fica na fila por 50 min para as novas tentativas não gerarem outro; depois disso gera um novo.
+  const PIX_VALIDO_MS = 50 * 60000;
   async function enviarCobranca(id, rec, sessao, processo, passoId) {
     const salvar = salvarFilaDe(id);
     const tentativa = (rec.cobranca_tentativas ?? 0) + 1;
@@ -798,15 +836,15 @@ export function createEtapa2({
           const d = clique?.data ?? {};
           if (Number(d.place_type_id) === 6 && d.place_id) codigo = pixDoPopup(await portalSite.popup({ sessao, popupId: d.place_id, stageId: d.stage_id ?? passo.stage_id }));
         } catch (e) { log({ event: 'etapa_final', id: curto(id), passo: 'pix_erro', message: String(e?.message ?? e).slice(0, 120) }); }
-        // Reserva: o último Pix que o portal guardou (campo 50901).
-        if (!codigo) codigo = pixValido(passo.valores[CAMPOS_PAGAMENTO.pixCodigo]);
+        // Sem reserva no 50901: o último Pix guardado no portal pode já ter expirado ou sido pago.
         if (codigo) await salvar({ cobranca_pix: codigo, cobranca_pix_em: clock() }).catch(() => {});
       }
       if (!codigo) motivo = 'sem_pix';
       else if (!contato?.celular) motivo = 'sem_celular';
       else if (!centavos) motivo = 'sem_valor';
-      else if ((await store.get(id, FILA))?.record?.cobranca_enviada_em) { ok = true; motivo = 'ja_enviada'; }
+      else if (((r => r?.cobranca_enviada_em && r.cobranca_enviada_em >= (r.cobranca_pedida_em ?? 0))((await store.get(id, FILA))?.record))) { ok = true; motivo = 'ja_enviada'; }
       else {
+        // Tudo do sistema: Pix do TOTVS, valor (38658), recebedor do próprio Pix, nome do portal (a chave, o Blip lê da cobrança).
         ok = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
           referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) });
         if (!ok) motivo = 'blip';
@@ -1111,6 +1149,24 @@ export function createEtapa2({
       catch { return render('MATR_PORTAL', { ...s, resumo: 'Não conseguimos abrir esta etapa agora. Toque de novo em instantes.' }); }
     }
 
+    // Pagamento: "Realizar pagamento" / "Reenviar mensagem" pede a mensagem do Blip ao vigia final (Cloud Tasks).
+    if (screen === 'MATR_PAGAMENTO' && acao === 'pagar') {
+      const rec = (await store.get(s.fila_id, FILA))?.record;
+      if (!rec) return fim('Sessão expirada', 'Abra a mensagem de novo e entre com seu CPF e data de nascimento.');
+      if (rec.pagamento_recebido_em || rec.matricula_concluida_em) return fim('Pagamento recebido ✅', 'O pagamento da sua taxa de matrícula já foi recebido. Agora a equipe confere e confirma a sua matrícula; avisaremos por aqui.');
+      if (!avisos?.configurado?.cobranca?.()) return fim('Pagamento', PAGAMENTO_SEM_BLIP);
+      const agora = clock();
+      const recente = rec.cobranca_pedida_em && agora - rec.cobranca_pedida_em < PEDIDO_REPETIDO_MS && !(rec.cobranca_enviada_em >= rec.cobranca_pedida_em);
+      if (!recente) {
+        try {
+          await salvarFilaDe(s.fila_id)({ cobranca_pedida_em: agora, cobranca_tentativas: 0, final_vigiando: rec.final_vigiando || agora, final_ate: Math.max(rec.final_ate ?? 0, agora + FINAL_MAX_MS) });
+          await agendarVigia(s.fila_id, 'etapa4_vigia', 0);
+          log({ event: 'etapa_final', id: curto(s.fila_id), passo: 'cobranca_pedida', reenvio: Boolean(rec.cobranca_enviada_em) });
+        } catch { return render('MATR_PAGAMENTO', { ...telaPagamento(base, rec).data, ...base, valor: valorDaTaxa(rec), mensagem: 'Não conseguimos pedir a mensagem agora. Toque de novo em instantes.', botao: 'Realizar pagamento' }); }
+      }
+      return fim('Mensagem a caminho ✅', 'Em instantes você recebe aqui no WhatsApp a mensagem de pagamento da taxa de matrícula, com o Pix (copia e cola) e o link para pagar com cartão de crédito.\n\nO Pix vale 1 hora. Depois de pago, a confirmação também chega por aqui.');
+    }
+
     // Lista de status: toque numa etapa.
     if (screen === 'MATR_STATUS' && acao === 'abrir_etapa') {
       const rec = (await store.get(s.fila_id, FILA))?.record;
@@ -1127,29 +1183,21 @@ export function createEtapa2({
       // Documentos de inscrição (Transferência, Portador, ENEM): telas da etapa 1; se a equipe recusou algum,
       // pede só os recusados (lidos pelo vigia).
       if (ehDocsInscricao(e.title) && entrarNosDocsInscricao && rec) {
-        return entrarNosDocsInscricao({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token, codigos: rec.docs_inscricao_recusados ?? [] });
+        return semFimE1(await entrarNosDocsInscricao({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token, codigos: rec.docs_inscricao_recusados ?? [] }));
       }
       if (/prova|avaliacao|redacao/.test(t) && entrarNaProva && rec) {
-        return entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token });
+        return semFimE1(await entrarNaProva({ applyment_id: rec.applyment_id, processo: rec.ultimo_status?.processo, login: rec.login, data_nascimento: rec.data_nascimento, flowToken: req.flow_token }));
       }
       const destino = proximaTela({ next: { title: e.title, action: e.action }, rows: st?.rows ?? [] }, rec?.blocos ?? {}, s.menor).tela;
       if (destino) {
         try { return await abrirDestino(destino, s, base, req.flow_token); } catch { return voltar(); }
       }
       if (/resp|pre.?matric|document/.test(t)) return fim(e.title, 'Recebemos tudo desta etapa. A equipe vai conferir; acompanhe a situação por aqui.');
-      // Pagamento: a cobrança Pix vai por mensagem no WhatsApp (o Pix leva ~20 s para sair, não é gerado na tela).
-      if (/pagamento|taxa/.test(t) && rec && avisos?.configurado?.cobranca?.()) {
-        if (rec.cobranca_enviada_em) return fim('Pagamento', 'Enviamos o Pix da taxa de matrícula por mensagem aqui no WhatsApp. Para pagar com cartão, acesse o Portal do candidato.');
-        if ((rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
-          try {
-            if (!rec.final_vigiando) await salvarFilaDe(s.fila_id)({ final_vigiando: clock() }).catch(() => {});
-            await agendarVigia(s.fila_id, 'etapa4_vigia', 5);
-            return fim('Pagamento', 'Você vai receber o Pix da taxa de matrícula por mensagem em instantes. Para pagar com cartão, acesse o Portal do candidato.');
-          } catch {}
-        }
-      }
-      // Pagamento sem botão no portal (Transferência, Portador): não há "Verificar" no site para indicar.
-      if (/pagamento|taxa/.test(t) && e.sem_botao) return fim('Pagamento', 'A cobrança da taxa de matrícula será enviada por mensagem aqui no WhatsApp. Dúvidas: WhatsApp da central de matrícula, (99) 99131-1684.');
+      // Pagamento (igual nos 4 processos): tela com o valor e o botão "Realizar pagamento". O pagamento é feito
+      // fora do Flow, pela mensagem do Blip (Pix copia e cola + link do cartão) que o toque pede ao Cloud Run.
+      if (/pagamento|taxa/.test(t) && rec && (rec.pagamento_recebido_em || avisos?.configurado?.cobranca?.())) return telaPagamento(base, rec);
+      // Sem Blip: orientação do site; sem botão no portal (Transferência, Portador), a cobrança vem por mensagem.
+      if (/pagamento|taxa/.test(t) && e.sem_botao) return fim('Pagamento', PAGAMENTO_SEM_BLIP);
       // Etapa ainda fora do Flow: orientação do site.
       const info = portalScreenData(e.title);
       return fim(info.titulo, String(info.mensagem).split('\n\nEntre com')[0]);

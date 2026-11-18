@@ -47,13 +47,14 @@ export const routing = {
   MATR_LOGIN: ['MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
   MATR_PORTAL: ['MATR_STATUS', 'MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
   // "Documentos inscrição: Pendentes [Verificar]" (Transferência, Portador, ENEM) abre as telas da etapa 1.
-  MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL', 'INSC_DOC_A', 'INSC_FIM'],
+  MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_PAGAMENTO', 'MATR_FIM', 'INSC_PORTAL', 'INSC_DOC_A'],
   MATR_RESPONSAVEL: ['MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_FIM'],
   MATR_RESP_DADOS: ['MATR_ENDERECO', 'MATR_FIM'],
   MATR_ENDERECO: ['MATR_IDENTIDADE', 'MATR_FIM'],
   MATR_IDENTIDADE: [DOCS[0].tela, 'MATR_FIM'],
   ...docRotas,
   CONTR_TERMOS: [],
+  MATR_PAGAMENTO: ['MATR_FIM'],
   MATR_FIM: []
 };
 
@@ -185,6 +186,22 @@ export const screens = [
       { type: 'TextCaption', text: 'O contrato é gerado na hora e pode levar alguns segundos para abrir. O link vale por 24 horas.' },
       { type: 'TextBody', text: 'Prezado(a) candidato(a),\n\nPara dar continuidade ao processo de inscrição, solicitamos que realize o download do seu contrato e efetue a assinatura digital por meio da plataforma GOV.BR.\n\nApós a assinatura, encaminhe o contrato assinado para o seguinte endereço de e-mail:\n\nE-mail: centraldematriculaub@unibalsas.edu.br\n\nAssim que recebermos o documento devidamente assinado, daremos prosseguimento ao processo de matrícula.\n\nEm caso de dúvidas ou necessidade de auxílio, entre em contato com nossa equipe pelo WhatsApp: (99) 99131-1684' },
       { type: 'Footer', label: 'Fechar', 'on-click-action': { name: 'complete', payload: {} } }
+    ] }
+  },
+  {
+    // Etapa 4 — Pagamento da taxa de matrícula (igual nos 4 processos). O pagamento NÃO é feito no Flow: o toque em
+    // "Realizar pagamento" pede ao Cloud Run a mensagem do Blip com o Pix (copia e cola) e o link do cartão.
+    id: 'MATR_PAGAMENTO', title: 'Pagamento',
+    data: { estado: str(), valor: str('R$ 390,00'), mensagem: str('Ao tocar em "Realizar pagamento", você recebe aqui no WhatsApp uma mensagem com o Pix e o link para pagar com cartão.'), botao: str('Realizar pagamento') },
+    layout: { type: 'SingleColumnLayout', children: [
+      imagem(LOGO_MATRICULA),
+      { type: 'TextHeading', text: 'Estamos finalizando!' },
+      { type: 'TextBody', text: 'Para concluir a sua matrícula, realize o pagamento da taxa de matrícula.' },
+      { type: 'TextCaption', text: 'Valor a pagar' },
+      { type: 'TextSubheading', text: '${data.valor}' },
+      { type: 'TextBody', text: '${data.mensagem}' },
+      { type: 'TextCaption', text: 'Formas de pagamento: Pix (copia e cola) ou cartão de crédito. Dúvidas: WhatsApp da central de matrícula, (99) 99131-1684.' },
+      { type: 'Footer', label: '${data.botao}', 'on-click-action': troca('pagar') }
     ] }
   },
   {

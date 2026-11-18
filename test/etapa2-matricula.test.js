@@ -596,7 +596,7 @@ test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluí
   assert.equal(st.screen, 'MATR_STATUS');
 });
 
-test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o Pix e manda a cobrança; matrícula concluída avisa', async () => {
+test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado avisa e guarda o valor; a cobrança sai só a pedido (botão do Flow); matrícula concluída avisa', async () => {
   const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
   const store = memoria(); const fila = [];
   let agora = Date.UTC(2026, 10, 16, 12);
@@ -637,8 +637,14 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(enviados.length, 1, 'aviso do contrato sai uma vez só');
 
-  // Contrato assinado e Pagamento com "Verificar": gera o Pix como o site e manda a cobrança.
+  // Contrato assinado e Pagamento com "Verificar": avisa que o pagamento liberou e guarda o valor (sem gerar Pix).
   fase = 'pagamento';
+  store.naHora(agora); await E.vigiarFinal(id);
+  assert.equal(cliquesPix.length, 0, 'sem pedido do candidato, não gera Pix');
+  assert.match(enviados.at(-1).situacao, /taxa de matrícula já pode ser paga/);
+  assert.equal((await store.get(id, 'matriculaFila')).record.cobranca_centavos, 39000);
+  // O candidato toca em "Realizar pagamento": gera o Pix como o site e manda a cobrança.
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_pedida_em: agora }, a.version, 'matriculaFila'); }
   store.naHora(agora); await E.vigiarFinal(id);
   assert.equal(cliquesPix.length, 1);
   assert.equal(cliquesPix[0].passo.botao, 3940437);
@@ -650,6 +656,7 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   store.naHora(agora); await E.vigiarFinal(id);
   assert.equal(enviados.filter(e => e.tipo === 'cobranca').length, 1, 'cobrança sai uma vez só');
   assert.equal(cliquesPix.length, 1, 'não gera outro Pix');
+  assert.equal(fila.at(-1).atrasoSeg, 120, 'depois da mensagem, confere a cada 2 min enquanto o Pix vale');
 
   // Pago: matrícula concluída → aviso final, e o vigia para.
   fase = 'pago';
@@ -661,7 +668,7 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   assert.equal(enviados.filter(e => /confirmada pela equipe/.test(e.situacao ?? '')).length, 1);
 });
 
-test('Avisos (Blip): cobrança que falha tenta de novo em 10 min, reaproveitando o mesmo Pix', async () => {
+test('Avisos (Blip): cobrança pedida que falha tenta de novo em 2 min, reaproveitando o mesmo Pix', async () => {
   const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
   const store = memoria(); const fila = [];
   let falhar = true; const enviados = [];
@@ -678,12 +685,13 @@ test('Avisos (Blip): cobrança que falha tenta de novo em 10 min, reaproveitando
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
   const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_pedida_em: Date.now() }, a.version, 'matriculaFila'); }
   store.naHora(); await E.vigiarFinal(id);
-  assert.equal(fila.at(-1).atrasoSeg, 600);
+  assert.equal(fila.at(-1).atrasoSeg, 120);
   falhar = false;
   store.naHora(); await E.vigiarFinal(id);
   assert.equal(enviados.length, 2); assert.equal(pix, 1, 'mesmo Pix na nova tentativa');
-  assert.equal(fila.at(-1).atrasoSeg, 3600);
+  assert.equal(fila.at(-1).atrasoSeg, 120);
 });
 
 test('Vigia da redação: aguarda a correção e avisa "aprovada, matrícula liberada" uma vez só', async () => {
@@ -909,6 +917,7 @@ test('C5: aviso ou cobrança que esgota as tentativas gera alerta etapa_aviso_at
     const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
       portalSite: site.portalSite, urlPublica: 'https://run.example', clock: () => agora, avisos });
     const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+    { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_pedida_em: agora }, a.version, 'matriculaFila'); }
     for (let i = 0; i < 6; i++) { store.naHora(agora); await E.vigiarFinal(id); agora += 3600000; }
     const alertas = erros.filter(e => e.includes('etapa_aviso_atencao'));
     assert.equal(alertas.length, 1, 'um alerta, na 5ª falha');
@@ -917,7 +926,7 @@ test('C5: aviso ou cobrança que esgota as tentativas gera alerta etapa_aviso_at
   } finally { console.error = erroOriginal; }
 });
 
-test('C10: toque em "Pagamento" com a cobrança pelo WhatsApp: agenda o Pix em 5 s; depois de enviado, avisa que foi por mensagem', async () => {
+test('C10: Pagamento abre a tela com o valor e "Realizar pagamento"; o toque pede a mensagem do Blip (Pix + cartão) ao vigia; depois mostra "Reenviar mensagem"', async () => {
   const store = memoria(); const fila = [];
   const r = rubeusFalso();
   r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
@@ -929,13 +938,28 @@ test('C10: toque em "Pagamento" com a cobrança pelo WhatsApp: agenda o Pix em 5
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, avisos });
   const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   const id = filaDe(st);
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_centavos: 100 }, a.version, 'matriculaFila'); }
   const n = fila.length;
   const pag = await continuar(E, st);
-  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /Pix .*em instantes/);
-  assert.deepEqual(fila.slice(n).map(f => [f.tipo, f.atrasoSeg]), [['etapa4_vigia', 5]]);
+  assert.equal(pag.screen, 'MATR_PAGAMENTO');
+  assert.equal(pag.data.valor, 'R$ 1,00'); assert.equal(pag.data.botao, 'Realizar pagamento');
+  assert.match(pag.data.mensagem, /Pix \(copia e cola\) e o link para pagar com cartão/);
+  assert.equal(fila.length, n, 'abrir a tela não dispara nada');
+  const ok = await toque(E, 'MATR_PAGAMENTO', 'pagar', pag.data.estado);
+  assert.equal(ok.screen, 'MATR_FIM'); assert.match(ok.data.mensagem, /Em instantes .*Pix .*cartão/s);
+  assert.deepEqual(fila.slice(n).map(f => [f.tipo, f.atrasoSeg]), [['etapa4_vigia', 0]]);
+  assert.ok((await store.get(id, 'matriculaFila')).record.cobranca_pedida_em);
+  await toque(E, 'MATR_PAGAMENTO', 'pagar', pag.data.estado);
+  assert.equal(fila.length, n + 1, 'toque repetido em menos de 1 min não pede de novo');
   const a = await store.get(id, 'matriculaFila');
-  await store.update(id, { ...a.record, cobranca_enviada_em: Date.now() }, a.version, 'matriculaFila');
+  await store.update(id, { ...a.record, cobranca_enviada_em: Date.now() + 1 }, a.version, 'matriculaFila');
   const depois = await continuar(E, st);
-  assert.match(depois.data.mensagem, /Enviamos o Pix .*por mensagem/);
-  assert.equal(fila.length, n + 1, 'não agenda de novo');
+  assert.equal(depois.screen, 'MATR_PAGAMENTO'); assert.equal(depois.data.botao, 'Reenviar mensagem');
+  assert.match(depois.data.mensagem, /Enviamos a mensagem de pagamento .* às \d\d:\d\d/);
+  const b = await store.get(id, 'matriculaFila');
+  await store.update(id, { ...b.record, pagamento_recebido_em: Date.now() }, b.version, 'matriculaFila');
+  const pago = await toque(E, 'MATR_PAGAMENTO', 'pagar', depois.data.estado);
+  assert.match(pago.data.titulo, /Pagamento recebido/);
+  assert.equal(fila.length, n + 1, 'pago: não cobra de novo');
 });
+

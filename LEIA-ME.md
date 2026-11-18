@@ -1,3 +1,14 @@
+# Versão 2.16.0 — pagamento pelo Blip (18/11/2026)
+
+- Tela nova **MATR_PAGAMENTO** no Flow (cole o JSON novo na Meta): valor da taxa + "Realizar pagamento". O
+  pagamento é feito fora do Flow, pela mensagem do Blip com Pix (copia e cola) e link do cartão.
+- A cobrança sai só a pedido do candidato (antes saía sozinha quando o contrato era assinado). O vigia avisa
+  "pagamento liberado", guarda o valor e, depois do envio, confere o "Recebido" a cada 2 min por 70 min.
+- Dados do sistema: Pix gerado no TOTVS, valor do 38658, recebedor e chave Pix lidos da cobrança do próprio Pix
+  (Banco Rendimento; chave aleatória/EVP). Pix vale 1 h (o Run guarda 50 min).
+- `payment_link.link` (formato do Blip); `AVISOS_SO_PARA` para testar só com números liberados.
+- Pix e matrícula: "Recebido" = 38657 = 1 (< 1 min após o pagamento); Matriculado pendente = 38669 = "F" (liberação manual).
+
 # Versão 2.15.1 — relatório de uso (log `flow_tela`)
 
 - Uma linha de log por toque no Flow: sessão anônima (8 caracteres do hash do flow_token), tela de origem, ação, tela de destino e tempo de resposta. Sem CPF, nome ou celular. Comandos de leitura no README.

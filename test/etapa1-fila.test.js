@@ -248,7 +248,7 @@ test('Blip: sem configuração não envia; com configuração monta a campanha i
   const logs = [];
   assert.equal(await avisarRedacaoLiberada({ celular: '99999990000', nome: 'Ana', flowToken: 't' }, { env: {}, log: e => logs.push(e) }), false);
   assert.equal(logs[0].motivo, 'nao_configurado');
-  assert.equal(telefoneBlip('(99) 99999-0000'), '+5599999990000');
+  assert.equal(telefoneBlip('(99) 99999-0000'), '5599999990000');
   let enviado;
   const ok = await avisarRedacaoLiberada({ celular: '99999990000', nome: 'Ana Clara Teste', flowToken: 'tok-123' }, {
     env: { BLIP_API_URL: 'https://contrato.http.msging.net/', BLIP_BOT_KEY: 'k', BLIP_TEMPLATE_REDACAO: 'redacao_liberada' },
@@ -260,7 +260,7 @@ test('Blip: sem configuração não envia; com configuração monta a campanha i
   assert.equal(enviado.o.headers.Authorization, 'Key k');
   assert.equal(enviado.body.uri, '/campaign/full');
   assert.equal(enviado.body.resource.campaign.campaignType, 'Individual');
-  assert.equal(enviado.body.resource.audience.recipient, '+5599999990000');
+  assert.equal(enviado.body.resource.audience.recipient, '5599999990000');
   assert.equal(enviado.body.resource.audience.contextVariables.flow_token, 'tok-123');
   assert.doesNotMatch(JSON.stringify(logs), /99999990000|tok-123/);
 });
