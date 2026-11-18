@@ -648,6 +648,8 @@ test('Contrato: com os documentos de matrícula em análise ("Pendente [Verifica
   store.naHora(agora); await E.vigiarContrato(id);
   assert.equal(site.cliques.length, 1, 'aprovado: gera o contrato');
   assert.match(enviados.at(-1).situacao, /documentos .* aprovados/);
+  const salvo = (await store.get(id, 'matriculaFila')).record.ultimo_status;
+  assert.ok(salvo.stages.some(x => /Documentos/.test(x.title) && Number(x.feedback?.conclusive) === 1), 'o status guardado já mostra os documentos aprovados (LOGIN seguinte abre atualizado)');
 });
 
 test('Contrato gerado antes da aprovação (regra antiga): o login desfaz o aviso e o contrato e volta a vigiar a análise', async () => {

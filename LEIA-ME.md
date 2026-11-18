@@ -1,3 +1,9 @@
+# Versão 2.16.4 — LOGIN já abre com o que foi avisado (18/11/2026)
+
+- Homologação (Nair): depois do aviso "documentos aprovados", o 1º LOGIN ainda mostrava a etapa pendente (status
+  guardado das 13:34; o portal é lento e o LOGIN abre com o guardado). O vigia do contrato agora guarda o status
+  que leu, como os vigias da redação, da inscrição e do pagamento já faziam.
+
 # Versão 2.16.3 — contrato só depois da aprovação dos documentos (18/11/2026)
 
 - Homologação do zero (Nair): o vigia do contrato gerou o contrato e avisou "documentos aprovados" 10 min depois

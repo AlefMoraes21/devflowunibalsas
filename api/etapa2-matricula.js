@@ -510,6 +510,8 @@ export function createEtapa2({
       const insc = await portalSite.inscricao(sessao);
       processo = processo || insc.processo;
       passoId = passoDe(insc.stages);
+      // Guarda o status lido: o próximo LOGIN (que abre com o status guardado) já mostra a mudança avisada.
+      await salvarStatus(filaId, insc.stages, processo).catch(() => {});
       const etapaContrato = (insc.stages ?? []).find(x => /contrato/.test(norm(x.title)));
       if (Number(etapaContrato?.feedback?.conclusive) === 1) throw new ErroContrato('O contrato já foi assinado.', 'concluido');
       // O passo do contrato existe no portal mesmo antes da análise (o bloqueio do site é só visual): liberado
