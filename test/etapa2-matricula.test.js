@@ -105,16 +105,18 @@ const toque = (E, screen, acao, estado, user = {}) => {
   return flowContext.run({ request: req, deadline: Date.now() + 9500 }, async () => confere(screen, await E.route(req)));
 };
 // Tela de status (lista de etapas, igual ao portal): toca na primeira etapa aberta (ou na que bate com o título).
+// Item com botão de ação (a Meta exige "end" em todos: concluída = OK, sem ação = Aguarde).
+const temAcao = i => Boolean(i.end) && !['OK', 'Aguarde'].includes(i.end.title);
 const continuar = (E, tela, re = null) => {
   if (tela.screen === 'MATR_PORTAL') return toque(E, 'MATR_PORTAL', 'continuar', tela.data.estado);
-  const it = tela.data.etapas.find(i => (re ? re.test(i['main-content'].title) : i.end));
+  const it = tela.data.etapas.find(i => (re ? re.test(i['main-content'].title) : temAcao(i)));
   assert.ok(it, 'etapa na lista');
   return toque(E, 'MATR_STATUS', it['on-click-action'].payload.acao, it['on-click-action'].payload.estado);
 };
 const filaDe = tela => openState(tela.screen === 'MATR_PORTAL' ? tela.data.estado : tela.data.etapas[0]['on-click-action'].payload.estado, tela.screen).fila_id;
 // O status vem ilustrado pelo ícone da linha (start.image): ✅ concluída; ❗ as demais (pendente, em análise, recusada).
 const marca = i => !i.start ? '' : i.start.image === ICONES.ok ? '✅ ' : '❗ ';
-const textoStatus = tela => tela.data.etapas.map(i => `${marca(i)}${i['main-content'].title}: ${i['main-content'].metadata}${i.end ? ' [' + i.end.title + ']' : ''}`).join('\n');
+const textoStatus = tela => tela.data.etapas.map(i => `${marca(i)}${i['main-content'].title}: ${i['main-content'].metadata}${temAcao(i) ? ' [' + i.end.title + ']' : ''}`).join('\n');
 const END = { cep: '65800000', rua: 'Rua A', numero: '10', bairro: 'Centro', cidade: 'Balsas', uf: 'MA', estado_natal: 'MA', cidade_natal: 'Balsas' };
 const IDENT = { rg: 'MA-123456', orgao_emissor: 'ssp', uf_rg: 'MA', cor_raca: 'parda', estado_civil: 'solteiro_a', ano_conclusao: '', busca_escola: '', escola: '' };
 
@@ -148,7 +150,8 @@ test('Login: CPF + nascimento abre o portal; dados errados não seguem; prova em
   const espera = await toque(c.E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
   // Aguardando correção: a tela inicial é o status do portal; o botão só fecha o Flow.
   assert.equal(espera.screen, 'MATR_STATUS'); assert.match(textoStatus(espera), /❗ Prova online: Aguardando correção$/m);
-  assert.ok(!espera.data.etapas.some(i => i.end), 'nenhuma etapa aberta: sem botão, como no site');
+  assert.ok(!espera.data.etapas.some(temAcao), 'nenhuma etapa aberta: sem botão, como no site');
+  assert.ok(espera.data.etapas.every(i => i.end), 'a Meta exige end em todos os itens da lista');
   const mesma = await continuar(c.E, espera, /Prova/);
   assert.equal(mesma.screen, 'MATR_STATUS', 'tocar numa etapa sem ação só mostra o status');
 });

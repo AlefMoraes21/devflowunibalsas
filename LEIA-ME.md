@@ -1,3 +1,11 @@
+# Versão 2.16.1 — lista de etapas aceita pelo WhatsApp (18/11/2026)
+
+- Correção (homologação do zero): a Meta recusava a lista de status no LOGIN ("NavigationList cannot have only
+  some items with end") e o WhatsApp mostrava "ocorreu um erro". Agora todos os itens têm o botão à direita:
+  a etapa aberta mostra a ação do site, a concluída "OK" e as demais "Aguarde". JSON do Flow sem mudança.
+- Aviso de "redação liberada" (etapa 1) passa a usar o template unibalsas_atualizacao_processo, com a trava
+  AVISOS_SO_PARA (antes usava um template antigo de 2 parâmetros e não respeitava a trava).
+
 # Versão 2.16.0 — pagamento pelo Blip (18/11/2026)
 
 - Tela nova **MATR_PAGAMENTO** no Flow (cole o JSON novo na Meta): valor da taxa + "Realizar pagamento". O

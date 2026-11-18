@@ -408,7 +408,9 @@ export function createEtapa2({
         'main-content': { title: (icone ? r.title : `${r.conclusive ? '✅' : '❗'} ${r.title}`).slice(0, 30), metadata: String(status || '—').slice(0, 80) },
         'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: sealState('MATR_STATUS', { m2: true, fila_id: id, menor, etapa: { title: r.title, action: acao, aberta: abre, ...(pagSemBotao(r) ? { sem_botao: true } : {}) } }) } }
       };
-      if (abre) item.end = { title: String(acao).slice(0, 10) };
+      // A Meta exige o "end" em TODOS os itens da NavigationList ou em nenhum ("cannot have only some items
+      // with end"): a etapa aberta mostra a ação do site; concluída, "OK"; as demais, "Aguarde".
+      item.end = { title: abre ? String(acao).slice(0, 10) : r.conclusive ? 'OK' : 'Aguarde' };
       return item;
     });
   }

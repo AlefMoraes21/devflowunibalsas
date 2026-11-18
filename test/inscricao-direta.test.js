@@ -259,7 +259,7 @@ test('LOGIN: status com ícones; "Documentos inscrição: Pendentes [Verificar]"
   // Em análise: o próximo LOGIN mostra o relógio e liga o vigia (sem botão).
   M.portal.estado.fase = 'analise';
   const st2 = await toque(M, 'MATR_LOGIN', 'entrar', null, { login: FINAL.cpf, data_nascimento: BASICOS.data_nascimento });
-  assert.equal(st2.data.etapas[1].start.image, ICONES.analise); assert.equal(st2.data.etapas[1].end, undefined);
+  assert.equal(st2.data.etapas[1].start.image, ICONES.analise); assert.equal(st2.data.etapas[1].end.title, 'Aguarde');
   const vista = await toque(M, 'MATR_STATUS', 'abrir_etapa', st2.data.etapas[1]['on-click-action'].payload.estado);
   assert.equal(vista.screen, 'MATR_STATUS', 'aguardando a equipe: só o status, como no site');
 });

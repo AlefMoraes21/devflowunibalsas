@@ -5,14 +5,13 @@ import { chaveDaCobrancaPix } from './portal-site.js';
 // Variáveis no Cloud Run:
 //   BLIP_API_URL            ex.: https://<contrato>.http.msging.net
 //   BLIP_BOT_KEY            chave do bot roteador (só a chave, sem "Key ")
-//   BLIP_TEMPLATE_REDACAO   nome do template aprovado com o botão do Flow da redação
 //   BLIP_FLOW_ID, BLIP_STATE_ID, BLIP_MASTERSTATE   (opcionais) para onde o bot leva a resposta
 // O link de acesso (flow_token) vai em contextVariables.flow_token e como parâmetro "2" do template;
 // o template/bot do Blip precisa usá-lo como flow_token do botão do Flow.
 import crypto from 'node:crypto';
 
 export function blipConfigurado(env = process.env) {
-  return Boolean(env.BLIP_API_URL && env.BLIP_BOT_KEY && env.BLIP_TEMPLATE_REDACAO);
+  return env.AVISOS_DESLIGADOS !== '1' && Boolean(env.BLIP_API_URL && env.BLIP_BOT_KEY);
 }
 
 export function telefoneBlip(celular) {
@@ -57,7 +56,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
   // A chave Pix vem da cobrança de cada Pix (sistema); PIX_CHAVE é só a reserva se a cobrança não responder.
   const configurado = { atualizacao: () => ligado(), cobranca: () => ligado() };
 
-  async function campanha(tipo, recipient, nome, params, extras = {}) {
+  async function campanha(tipo, recipient, nome, params, extras = {}, contexto = null) {
     // Fase de teste: AVISOS_SO_PARA="5599...,5511..." manda só para esses números (o resto fica no log).
     const soPara = String(env.AVISOS_SO_PARA ?? '').split(',').map(n => n.replace(/\D/g, '')).filter(Boolean);
     if (soPara.length && !soPara.includes(String(recipient).replace(/\D/g, ''))) {
@@ -74,7 +73,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
       type: 'application/vnd.iris.activecampaign.full-campaign+json',
       resource: {
         campaign,
-        audience: { recipient, name: nome, messageParams: { ...Object.fromEntries(params), ...extras } },
+        audience: { recipient, name: nome, messageParams: { ...Object.fromEntries(params), ...extras }, ...(contexto ? { contextVariables: contexto } : {}) },
         message: { messageTemplate: template, messageTemplateLanguage: 'pt_BR', messageParams: params.map(([k]) => k), channelType: 'WhatsApp' }
       }
     };
@@ -95,11 +94,11 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
   }
 
   // Aviso de etapa (template genérico). Devolve true só se o Blip aceitou.
-  async function atualizacao({ celular, nome, processo, situacao, proximo }) {
+  async function atualizacao({ celular, nome, processo, situacao, proximo }, contexto = null) {
     if (!configurado.atualizacao()) { log({ event: 'blip_aviso', tipo: 'atualizacao', enviado: false, motivo: 'nao_configurado' }); return false; }
     const recipient = telefoneBlip(celular);
     if (!recipient) { log({ event: 'blip_aviso', tipo: 'atualizacao', enviado: false, motivo: 'telefone_invalido' }); return false; }
-    return campanha('atualizacao', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['processo', variavel(processo)], ['situacao', variavel(situacao)], ['proximo', variavel(proximo)]]);
+    return campanha('atualizacao', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['processo', variavel(processo)], ['situacao', variavel(situacao)], ['proximo', variavel(proximo)]], {}, contexto);
   }
 
   // Cobrança da taxa de matrícula: Pix dinâmico gerado no TOTVS + link do portal (cartão).
@@ -127,40 +126,11 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
   return { atualizacao, cobranca, configurado };
 }
 
+// Aviso da etapa 1 (inscrição concluída, redação liberada): o mesmo template das outras etapas
+// (unibalsas_atualizacao_processo: nome, processo, o que aconteceu, próximo passo + botão do Flow), com a trava
+// AVISOS_SO_PARA. O flow_token vai em contextVariables para o bot do Blip abrir o Flow já na redação.
 export async function avisarRedacaoLiberada({ celular, nome, flowToken }, { env = process.env, fetcher = fetch, log = e => console.info(JSON.stringify(e)) } = {}) {
-  if (!blipConfigurado(env)) { log({ event: 'blip_aviso', enviado: false, motivo: 'nao_configurado' }); return false; }
-  const recipient = telefoneBlip(celular);
-  if (!recipient) { log({ event: 'blip_aviso', enviado: false, motivo: 'telefone_invalido' }); return false; }
-  const primeiroNome = String(nome ?? '').trim().split(/\s+/)[0] || 'candidato';
-  const campaign = { name: `redacao-${crypto.randomUUID()}`, campaignType: 'Individual' };
-  if (env.BLIP_FLOW_ID) campaign.flowId = env.BLIP_FLOW_ID;
-  if (env.BLIP_STATE_ID) campaign.stateId = env.BLIP_STATE_ID;
-  if (env.BLIP_MASTERSTATE) campaign.masterstate = env.BLIP_MASTERSTATE;
-  const body = {
-    id: crypto.randomUUID(),
-    to: 'postmaster@activecampaign.msging.net',
-    method: 'set',
-    uri: '/campaign/full',
-    type: 'application/vnd.iris.activecampaign.full-campaign+json',
-    resource: {
-      campaign,
-      audience: { recipient, messageParams: { '1': primeiroNome, '2': flowToken }, contextVariables: { flow_token: flowToken } },
-      message: { messageTemplate: env.BLIP_TEMPLATE_REDACAO, messageParams: ['1', '2'], channelType: 'WhatsApp' }
-    }
-  };
-  try {
-    const r = await fetcher(String(env.BLIP_API_URL).replace(/\/+$/, '') + '/commands', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Key ' + String(env.BLIP_BOT_KEY).replace(/^Key\s+/i, '') },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000)
-    });
-    let j = {}; try { j = await r.json(); } catch {}
-    const ok = r.ok && (j.status === undefined || j.status === 'success');
-    log({ event: 'blip_aviso', enviado: ok, http: r.status, status: j.status ?? null });
-    return ok;
-  } catch (e) {
-    log({ event: 'blip_aviso', enviado: false, motivo: e.name });
-    return false;
-  }
+  return createAvisosBlip({ env, fetcher, log }).atualizacao({ celular, nome, processo: 'inscrição',
+    situacao: 'Sua inscrição foi concluída e a prova de redação já está liberada.',
+    proximo: 'toque no botão abaixo e faça a sua redação aqui pelo WhatsApp.' }, { flow_token: flowToken });
 }
