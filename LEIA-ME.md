@@ -1,3 +1,8 @@
+# Versão 2.15.1 — relatório de uso (log `flow_tela`)
+
+- Uma linha de log por toque no Flow: sessão anônima (8 caracteres do hash do flow_token), tela de origem, ação, tela de destino e tempo de resposta. Sem CPF, nome ou celular. Comandos de leitura no README.
+- README atualizado com a etapa 2 dos 4 processos. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.15.1`.
+
 # Versão 2.15.0 — etapa final dos 4 processos (pagamento sem botão, "Recebido" → equipe, recusa do RM, login rápido)
 
 - **Pagamento por processo** (`passoPagamento` em `api/processes.js`): Vestibular 300670, Transferência 300701, Portador 300686, ENEM 300716 (provisório). Na Transferência e no Portador o portal mostra "Pagamento" sem botão; o Run usa o passo do processo para a cobrança e a lista mostra "Pendente [Pagar]".

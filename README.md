@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.14.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.14.0`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.15.1** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.15.1`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -34,6 +34,19 @@ O estado de cada tela vai selado (AES-GCM) no campo `estado`, nunca vindo do cli
 
 Quem já se inscreveu entra por **Já sou inscrito (LOGIN)** e vê a lista de etapas do portal, com o botão da etapa liberada
 (documentos de inscrição, responsável financeiro, pré-matrícula, documentos de matrícula, contrato, pagamento).
+Com status guardado, o LOGIN abre em ~2 s com o último status e o Run relê o portal em segundo plano.
+
+**Etapa 2 — igual nos 4 processos** (só mudam os IDs de passo; mapa em `ENGENHARIA-REVERSA-ETAPA2-TRANSF-PORTADOR-ENEM.md`):
+
+1. Responsável financeiro → pré-matrícula (endereço, identidade) → documentos de matrícula → análise da equipe.
+2. Contrato: o Run gera o PDF (link exclusivo de 24 h); o candidato assina no GOV.BR e envia por e-mail → baixa da equipe.
+3. Pagamento: liberado com o contrato assinado. Na Transferência e no Portador o portal não mostra botão; o Run usa o
+   passo do processo (`passoPagamento`: 300670, 300701, 300686, 300716) e o Flow mostra "Pendente [Pagar]". A cobrança
+   Pix vai por mensagem (Blip); cartão pelo portal.
+4. "Recebido" → "Aguardando confirmação da equipe" → a equipe libera o Matriculado **à mão** → aviso final.
+
+Sem cupom em nenhuma tela do Flow (o passo de cupom do portal do Vestibular é pulado pelo worker). Recusa do RM
+("Não foi possível fazer a matrícula!") vai para conferência da equipe e é retomada depois de 30 min.
 
 ## Estrutura
 
@@ -66,6 +79,7 @@ A imagem do Cloud Run leva só `server.js`, `package.json`, `api/` e os ícones 
 | `ENGENHARIA-REVERSA-VESTIBULAR-2027.md` | O site, passo a passo: inscrição, prova, matrícula, contrato e pagamento |
 | `ENGENHARIA-REVERSA-VESTIBULAR-DOCUMENTOS-MATRICULA.md` | Documentos de matrícula (passo 300671) |
 | `ENGENHARIA-REVERSA-TRANSFERENCIA-DOCUMENTOS.md`, `…-PORTADOR-DIPLOMA.md`, `…-NOTA-ENEM.md` | Etapa 1 de cada processo no site |
+| `ENGENHARIA-REVERSA-ETAPA2-TRANSF-PORTADOR-ENEM.md` | Etapa 2 (matrícula → contrato → pagamento → Matriculado) da Transferência, do Portador e do ENEM |
 | `.claude/skills/verify/SKILL.md` | Como rodar a API localmente e percorrer as telas como a Meta |
 
 ## Configuração
@@ -96,6 +110,19 @@ curl -sS https://devflowunibalsas-git-83531798597.southamerica-east1.run.app/api
 ```
 
 Se o Flow mudou, gere (`node flows/gerar-etapa1.mjs`), cole `flows/etapa1-vestibular.json` no editor da Meta e publique.
+
+## Acompanhar o uso (logs)
+
+Cada toque gera uma linha `flow_tela` (sessão anônima, tela de origem, ação, tela de destino, `ms`). Falhas usam
+eventos `*_atencao`, `flow_client_error` e `rubeus_rejected`.
+
+```bash
+gcloud logging read 'resource.labels.service_name="devflowunibalsas-git" AND jsonPayload.event="flow_tela"' --project=talks-servidor --freshness=1h --order=asc --format="table(timestamp.date('%H:%M:%S'), jsonPayload.sessao, jsonPayload.de, jsonPayload.acao, jsonPayload.para, jsonPayload.ms)"
+```
+
+```bash
+gcloud logging read 'resource.labels.service_name="devflowunibalsas-git" AND (jsonPayload.event=~"atencao" OR jsonPayload.event="flow_client_error" OR jsonPayload.event="rubeus_rejected")' --project=talks-servidor --freshness=1d --format="table(timestamp.date('%d/%m %H:%M'), jsonPayload.event, jsonPayload.motivo, jsonPayload.screen, jsonPayload.message)"
+```
 
 ## Cuidados
 

@@ -1613,7 +1613,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.15.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.15.1" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");
@@ -1642,6 +1642,7 @@ export default async function handler(req, res) {
   }
 
   let aesKey, iv, requestData;
+  const inicioTela = Date.now();
   try {
     requirePrivateKey();
     const privateKey = process.env.FLOW_PRIVATE_KEY.replace(/\\n/g, "\n");
@@ -1655,6 +1656,11 @@ export default async function handler(req, res) {
       async () => rotear(requestData)
     );
 
+    // Uma linha por toque (relatório de uso): tela de origem → ação → tela de destino, tempo de resposta e sessão
+    // anônima (hash curto do flow_token). Sem CPF, nome ou celular.
+    if (requestData?.action !== "ping") console.info(JSON.stringify({ event: "flow_tela", sessao: crypto.createHash("sha256").update(String(requestData?.flow_token ?? "")).digest("hex").slice(0, 8),
+      de: String(requestData?.screen ?? requestData?.action ?? "").slice(0, 40), acao: String(requestData?.data?.acao ?? requestData?.action ?? "").slice(0, 30),
+      para: String(payload?.screen ?? (payload?.data?.acknowledged ? "ack" : "")).slice(0, 40), ms: Date.now() - inicioTela }));
     const enc = encryptResponse(payload, aesKey, iv);
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(enc);
