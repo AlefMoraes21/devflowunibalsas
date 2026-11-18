@@ -21,3 +21,9 @@ const INSCRICAO_DIRETA={
 export const docsInscricao=id=>INSCRICAO_DIRETA[String(id)]?.docs??[];
 export const temDocsInscricao=id=>docsInscricao(id).length>0;
 export const tituloProcesso=id=>INSCRICAO_DIRETA[String(id)]?.titulo??(processes[String(id)]?processes[String(id)].name+" 2027/1":"processo seletivo 2027/1");
+
+// Passo da tela de Pagamento de cada processo (conferido ao vivo em 17-18/11/2026). Na Transferência e no Portador
+// a etapa "Pagamento" aparece no portal SEM botão (sem cta_link): o Run abre o passo direto, como o site faz depois
+// do aceite do contrato (38635 = true). ENEM: 300716 ainda não visto na tela (segue o padrão contrato+1).
+const PASSO_PAGAMENTO={"20383":300670,"20385":300701,"20384":300686,"20386":300716};
+export const passoPagamento=id=>PASSO_PAGAMENTO[String(id)]??null;

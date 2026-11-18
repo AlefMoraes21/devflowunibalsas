@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js';
 import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
 import { ICONES } from './icones.js';
+import { passoPagamento } from './processes.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
@@ -29,6 +30,26 @@ export const norm = v => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, ''
 export const ehDocsInscricao = t => /document/.test(norm(t)) && /inscri/.test(norm(t));
 const ehDocsMatricula = t => /document/.test(norm(t)) && !/inscri/.test(norm(t));
 export const ehNotasEnem = t => /checando.*nota|nota.*enem/.test(norm(t));
+
+// Etapa final, igual nos 4 processos. Pagamento liberado = contrato concluído (ou sem contrato) e o Pagamento
+// pendente. O passo vem do botão do portal ou, quando o portal não mostra botão (Transferência, Portador), da
+// tabela do processo (passoPagamento). Depois do "Recebido", a matrícula é confirmada À MÃO pela equipe
+// (Matriculado: "Existem pendências" até a equipe liberar).
+const linhaDe = (rows, re) => (rows ?? []).find(r => re.test(norm(r.title)));
+export function pagamentoLiberado(rows, processo) {
+  const contrato = linhaDe(rows, /contrato/), pagamento = linhaDe(rows, /pagamento|taxa/);
+  if (!pagamento || pagamento.conclusive || (contrato && !contrato.conclusive)) return null;
+  const step = pagamento.step || passoPagamento(processo);
+  return step ? { ...pagamento, step } : null;
+}
+export function aguardandoEquipe(rows) {
+  const pagamento = linhaDe(rows, /pagamento|taxa/), matriculado = linhaDe(rows, /matriculad/);
+  return Boolean(pagamento?.conclusive && matriculado && !matriculado.conclusive);
+}
+// Recusa do RM ao gravar a pré-matrícula (visto no ENEM em 17/11/2026: button-click success:false, sem mensagem
+// no site). Não adianta repetir: a equipe corrige o cadastro no RM e o Run tenta de novo depois.
+export const ehRecusaRm = m => /possivel fazer a matricula/.test(norm(m));
+const RM_REABRIR_MS = 30 * 60000;
 
 // Resultado da análise da inscrição direta, pela situação do portal (summarizeStages) e, no ENEM, pelo campo
 // 38623 "Status da opção" do passo "Checando as notas" (3 = desclassificado; 4 a 8 = aprovado; 0 = validando).
@@ -158,6 +179,8 @@ export function createEtapa2({
   urlPublica = String(process.env.FLOW_WORKER_ORIGIN ?? '').replace(/\/+$/, ''),
   // Espera máxima pelo status do portal no login (o WhatsApp corta a resposta em ~10 s, contando o login).
   esperaPortalMs = Number(process.env.ETAPA2_ESPERA_PORTAL_MS) || 6500,
+  // Com status guardado, espera o portal só isto antes de abrir com o guardado.
+  esperaCacheMs = Number(process.env.ETAPA2_ESPERA_CACHE_MS) || 2000,
   // Toque em "Atualizar": quanto o Cloud Run espera o status que está sendo lido em segundo plano (prazo da Meta: 10 s).
   esperaStatusMs = Number(process.env.ETAPA2_ESPERA_STATUS_MS) || 7500,
   sleep = ms => new Promise(r => setTimeout(r, ms)),
@@ -345,17 +368,27 @@ export function createEtapa2({
   // do site (ex.: "Verificar"). Cada linha leva à sua etapa.
   const emCorrecao = r => !r.conclusive && /aguardando.*correc/.test(norm(r.status));
   const aberta = r => !r.conclusive && Boolean(r.step && r.action) && !emCorrecao(r);
-  function itensStatus({ id, menor, s2 }) {
-    return (s2.rows ?? []).slice(0, 20).map((r, i) => {
+  function itensStatus({ id, menor, s2, rec = null }) {
+    const rows = s2.rows ?? [];
+    const pagSemBotao = linha => /pagamento|taxa/.test(norm(linha.title)) && !linha.step && Boolean(pagamentoLiberado(rows, rec?.ultimo_status?.processo ?? ''));
+    const equipe = aguardandoEquipe(rows);
+    const rmConferir = rec?.status === 'conferir' && rec?.motivo === 'rm_recusou';
+    return rows.slice(0, 20).map((r, i) => {
+      const abre = aberta(r) || pagSemBotao(r);
+      const acao = r.action || (abre ? 'Pagar' : '');
+      let status = r.status;
+      if (pagSemBotao(r) && !status) status = 'Pendente';
+      if (equipe && /matriculad/.test(norm(r.title))) status = 'Aguardando confirmação da equipe';
+      if (rmConferir && /pre.?matric/.test(norm(r.title)) && !r.conclusive) status = 'Em conferência pela equipe';
       // Ilustração do status no ícone da linha; sem o arquivo do ícone, volta o emoji no título.
-      const icone = iconeDoStatus(r, aberta(r));
+      const icone = iconeDoStatus({ ...r, status }, abre);
       const item = {
         id: 'etapa_' + i,
         ...(icone ? { start: { image: icone } } : {}),
-        'main-content': { title: (icone ? r.title : `${r.conclusive ? '✅' : '❗'} ${r.title}`).slice(0, 30), metadata: String(r.status || '—').slice(0, 80) },
-        'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: sealState('MATR_STATUS', { m2: true, fila_id: id, menor, etapa: { title: r.title, action: r.action, aberta: aberta(r) } }) } }
+        'main-content': { title: (icone ? r.title : `${r.conclusive ? '✅' : '❗'} ${r.title}`).slice(0, 30), metadata: String(status || '—').slice(0, 80) },
+        'on-click-action': { name: 'data_exchange', payload: { acao: 'abrir_etapa', estado: sealState('MATR_STATUS', { m2: true, fila_id: id, menor, etapa: { title: r.title, action: acao, aberta: abre, ...(pagSemBotao(r) ? { sem_botao: true } : {}) } }) } }
       };
-      if (aberta(r)) item.end = { title: String(r.action).slice(0, 10) };
+      if (abre) item.end = { title: String(acao).slice(0, 10) };
       return item;
     });
   }
@@ -367,7 +400,7 @@ export function createEtapa2({
     }
     log({ event: 'etapa2_fila', id: curto(id), passo: 'portal_destino', destino: 'status', proxima: s2.next?.title ?? 'nenhuma',
       etapas: (s2.rows ?? []).map(r => `${r.title}|${r.conclusive ? 'C' : '-'}|${r.step ? 'P' : '-'}|${r.action ? 'A' : '-'}`).join(' ; ').slice(0, 400), blocos: Object.keys(blocos ?? {}).join(',') });
-    return render('MATR_STATUS', { etapas: itensStatus({ id, menor, s2 }) });
+    return render('MATR_STATUS', { etapas: itensStatus({ id, menor, s2, rec }) });
   }
   // Abre a tela de uma etapa (vale para a lista de status e para o botão da tela de espera).
   async function abrirDestino(destino, s, base, flowToken) {
@@ -553,6 +586,12 @@ export function createEtapa2({
     try {
       const rec = (await store.get(id, FILA))?.record;
       if (!rec || !s2?.rows?.length || rec.matricula_concluida_em) return;
+      // Recusa do RM (a equipe corrige o cadastro): depois de 30 min, o próximo login ou atualização tenta de novo.
+      if (rec.status === 'conferir' && rec.motivo === 'rm_recusou' && clock() - (rec.conferir_em ?? 0) > RM_REABRIR_MS) {
+        await salvarFilaDe(id)({ status: 'pendente', tentativas: 0, rodando_ate: 0, motivo: null });
+        await enqueue(id, { tipo: 'etapa2' }).catch(() => {});
+        log({ event: 'etapa2_fila', id: curto(id), passo: 'rm_retomada' });
+      }
       const linha = re => s2.rows.find(r => re.test(norm(r.title)));
       // Inscrição direta (Transferência, Portador, ENEM) aguardando a equipe: vigia da análise e do resultado.
       const docsInsc = s2.rows.find(r => ehDocsInscricao(r.title)), notas = s2.rows.find(r => ehNotasEnem(r.title));
@@ -569,7 +608,7 @@ export function createEtapa2({
       const docsOk = docs ? Boolean(docs.conclusive) : true;
       const contratoPendente = Boolean(contrato) && !contrato.conclusive && docsOk;
       const pagamentoPendente = Boolean(pagamento) && !pagamento.conclusive && docsOk && (!contrato || contrato.conclusive);
-      if (pagamentoPendente || rec.final_vigiando) {
+      if (pagamentoPendente || aguardandoEquipe(s2.rows) || rec.final_vigiando) {
         if (await garantirVigia(id, 'etapa4_vigia', 60, rec.final_vigiando ? null : { final_vigiando: clock() })) log({ event: 'etapa_final', id: curto(id), passo: 'vigia_ligado' });
       } else if (emAnalise || contratoPendente) {
         // Contrato já aberto na tela de status: o candidato está vendo agora, não precisa do aviso.
@@ -677,15 +716,23 @@ export function createEtapa2({
       if (contrato && !contrato.conclusive && avisoPendente(rec, 'contrato_liberado') && (rec.avisos_tentativas?.contrato_liberado ?? 0) > 0) {
         await avisar(id, 'contrato_liberado', { sessao, processo }).catch(() => {});
       }
-      // Pagamento liberado = contrato concluído (ou sem etapa de contrato) e o Pagamento com o botão do site.
-      const pagamentoAberto = pagamento && !pagamento.conclusive && pagamento.step && pagamento.action && (!contrato || contrato.conclusive);
+      // Pagamento "Recebido" e Matriculado pendente: a equipe confere a baixa e libera à mão. Avisa uma vez.
+      if (aguardandoEquipe(st.rows)) {
+        if (!rec.pagamento_recebido_em) {
+          await salvarFila({ pagamento_recebido_em: clock() });
+          log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_recebido' });
+        }
+        if (rec.pagamento_liberado_em && avisoPendente(rec, 'pagamento_recebido')) await avisar(id, 'pagamento_recebido', { sessao, processo }).catch(() => false);
+      }
+      // Pagamento liberado: passo do botão do site ou, sem botão (Transferência, Portador), o do processo.
+      const pagamentoAberto = pagamentoLiberado(st.rows, processo || rec.ultimo_status?.processo);
       if (pagamentoAberto) {
         if (!rec.pagamento_liberado_em) {
           await salvarFila({ pagamento_liberado_em: clock() });
           log({ event: 'etapa_final', id: curto(id), passo: 'pagamento_liberado' });
         }
         if (!rec.cobranca_enviada_em && avisos?.configurado?.cobranca?.() && (rec.cobranca_tentativas ?? 0) < MAX_TENTATIVAS_AVISO) {
-          const ok = await enviarCobranca(id, rec, sessao, processo, pagamento.step);
+          const ok = await enviarCobranca(id, rec, sessao, processo, pagamentoAberto.step);
           if (!ok) proximoEm = VIGIA_INTERVALO_S; // tenta de novo em 10 min
         }
       } else {
@@ -705,7 +752,8 @@ export function createEtapa2({
   // (criptografada). Nada de celular nos logs.
   const AVISOS = {
     contrato_liberado: { processo: 'matrícula', situacao: 'Seus documentos de matrícula foram analisados e aprovados.', proximo: 'acesse a sua inscrição pelo botão abaixo e baixe o contrato da sua matrícula.' },
-    matricula_concluida: { processo: 'matrícula', situacao: 'Pagamento recebido. Sua matrícula está concluída! 🎉', proximo: 'acompanhe as orientações da UniBalsas para o início das aulas.' }
+    pagamento_recebido: { processo: 'matrícula', situacao: 'Recebemos o pagamento da sua taxa de matrícula. ✅', proximo: 'agora a equipe confere e confirma a sua matrícula. Avisaremos por aqui.' },
+    matricula_concluida: { processo: 'matrícula', situacao: 'Sua matrícula foi confirmada pela equipe. Você está matriculado(a)! 🎉', proximo: 'acompanhe as orientações da UniBalsas para o início das aulas.' }
   };
   const avisoPendente = (rec, chave) => Boolean(avisos?.configurado?.atualizacao?.()) && Boolean(rec) && !rec.avisos?.[chave] && (rec.avisos_tentativas?.[chave] ?? 0) < MAX_TENTATIVAS_AVISO;
   async function guardarContato(id, rec, contato) {
@@ -998,11 +1046,16 @@ export function createEtapa2({
       if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esses dados.');
       const id = hash('matr:' + sessao.applyment_id);
       const flow = hash(req.flow_token ?? '');
+      // Abertura rápida: com um status guardado (último login, worker ou vigia), espera o portal só um pouco; se
+      // ele demorar, abre com o guardado e o Run relê o portal em segundo plano (etapa2_status).
+      const portalP = matricula.portal(sessao); portalP.catch(() => {});
+      const temGuardado = Boolean(statusSalvo((await store.get(id, FILA).catch(() => null))?.record));
       // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
       // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
       let s2 = null, stLido = null;
       try {
-        const st = stLido = await Promise.race([matricula.portal(sessao), new Promise((_, r) => setTimeout(() => r(new Error('lento')), Math.max(1500, esperaPortalMs - (clock() - t0))))]);
+        const espera = temGuardado ? esperaCacheMs : Math.max(1500, esperaPortalMs - (clock() - t0));
+        const st = stLido = await Promise.race([portalP, new Promise((_, r) => setTimeout(() => r(new Error('lento')), espera))]);
         s2 = summarizeStages(st.stages ?? []);
         // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
         if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
@@ -1064,7 +1117,7 @@ export function createEtapa2({
       const st = statusSalvo(rec);
       // Status salvo vencido (mais de 6 h): o Cloud Run relê o portal em segundo plano e o "Atualizar" espera por ele.
       const voltar = async () => {
-        if (st) return render('MATR_STATUS', { etapas: itensStatus({ id: s.fila_id, menor: s.menor, s2: st }) });
+        if (st) return render('MATR_STATUS', { etapas: itensStatus({ id: s.fila_id, menor: s.menor, s2: st, rec }) });
         try { await enqueue(s.fila_id, { tipo: 'etapa2_status' }); } catch {}
         return render('MATR_PORTAL', { ...base, destino: 'atualizar', botao: 'Atualizar', resumo: BUSCANDO });
       };
@@ -1095,7 +1148,9 @@ export function createEtapa2({
           } catch {}
         }
       }
-      // Etapa ainda fora do Flow (ex.: pagamento): orientação do site.
+      // Pagamento sem botão no portal (Transferência, Portador): não há "Verificar" no site para indicar.
+      if (/pagamento|taxa/.test(t) && e.sem_botao) return fim('Pagamento', 'A cobrança da taxa de matrícula será enviada por mensagem aqui no WhatsApp. Dúvidas: WhatsApp da central de matrícula, (99) 99131-1684.');
+      // Etapa ainda fora do Flow: orientação do site.
       const info = portalScreenData(e.title);
       return fim(info.titulo, String(info.mensagem).split('\n\nEntre com')[0]);
     }
@@ -1319,10 +1374,12 @@ export function createEtapa2({
       log({ event: 'etapa2_fila', id: curto(id), passo: rec.passo, status: rec.status });
     } catch (e) {
       const tentativas = (rec.tentativas ?? 0) + 1;
-      const final = e instanceof ErroPasso && e.final;
+      const rm = ehRecusaRm(e?.message);
+      const final = (e instanceof ErroPasso && e.final) || rm;
       const status = final ? 'conferir' : tentativas >= MAX_TENTATIVAS ? 'falhou' : rec.status;
-      await salvar({ status, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0 });
-      const ev = { event: FINAIS.has(status) ? 'etapa2_fila_atencao' : 'etapa2_fila_erro', id: curto(id), passo: rec.passo, status, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
+      await salvar({ status, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0, ...(rm ? { motivo: 'rm_recusou', conferir_em: clock() } : {}) });
+      // Recusa do RM: alerta para a equipe (log de atenção); o candidato vê "Em conferência pela equipe".
+      const ev = { event: FINAIS.has(status) ? 'etapa2_fila_atencao' : 'etapa2_fila_erro', id: curto(id), passo: rec.passo, status, motivo: rm ? 'rm_recusou' : e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
       FINAIS.has(status) ? console.error(JSON.stringify(ev)) : log(ev);
       if (!FINAIS.has(status)) await enqueue(id, { tipo: 'etapa2', atrasoSeg: Math.min(600, 30 * 2 ** tentativas) }).catch(() => {});
     }

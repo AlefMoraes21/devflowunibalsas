@@ -465,7 +465,7 @@ async function rubeusRequest(path, { method = "GET", body, timeoutMs = RUBEUS_TI
       if (mutation && context && (response.status===422||(response.status===403&&isDirectRegistration(context.request?.data?.processo_seletivo_id)))) {
         context.write = null;
       }
-      throw new Error(`[RUBEUS_ERRO] ${path.split("?")[0]} não confirmou a operação (HTTP ${response.status}). ${response.status===422?explanation:""}`);
+      throw new Error(`[RUBEUS_ERRO] ${path.split("?")[0]} não confirmou a operação (HTTP ${response.status}). ${response.status===422?explanation:""}${json?.message?" "+String(json.message).slice(0,120):""}`);
     }
     if (mutation && context) {
       context.write = { status: "received", path, result: json };
@@ -1613,7 +1613,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.14.0" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.15.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

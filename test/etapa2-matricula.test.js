@@ -535,6 +535,28 @@ test('Status igual ao portal: uma linha por etapa, botão só nas abertas; etapa
   assert.equal(nada.screen, 'MATR_STATUS');
 });
 
+test('Etapa final sem botão (Transferência/Portador): Pagamento "Pendente [Pagar]" pelo passo do processo; "Recebido" vira "Aguardando confirmação da equipe"', async () => {
+  const { pagamentoLiberado, aguardandoEquipe, ehRecusaRm } = await import('../api/etapa2-matricula.js');
+  const semBotao = [{ title: 'Contrato', conclusive: true }, { title: 'Pagamento', conclusive: false, step: null }];
+  assert.equal(pagamentoLiberado(semBotao, '20385').step, 300701);
+  assert.equal(pagamentoLiberado(semBotao, '20384').step, 300686);
+  assert.equal(pagamentoLiberado([{ title: 'Contrato', conclusive: false }, ...semBotao.slice(1)], '20385'), null, 'contrato pendente');
+  assert.ok(aguardandoEquipe([{ title: 'Pagamento', conclusive: true }, { title: 'Matriculado', conclusive: false }]));
+  assert.ok(ehRecusaRm('[RUBEUS_ERRO] /submit não confirmou a operação (HTTP 200). Não foi possível fazer a matrícula!'));
+  const store = memoria();
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20385', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1 } },
+    { title: 'Pagamento', feedback: { complementary_text: null, conclusive: 0 } },
+    { title: 'Matriculado', feedback: { complementary_text: 'Existem pendências', conclusive: 0 } }
+  ] });
+  const E = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula: r.matricula, validCpf, log: () => {} });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  assert.equal(textoStatus(st), '✅ Contrato: Assinado\n❗ Pagamento: Pendente [Pagar]\n❗ Matriculado: Existem pendências');
+  const pag = await continuar(E, st, /Pagamento/);
+  assert.equal(pag.screen, 'MATR_FIM'); assert.match(pag.data.mensagem, /cobrança da taxa de matrícula será enviada/);
+});
+
 test('Etapa final: o vigia registra o pagamento liberado e a matrícula concluída (Pagamento Recebido / Matriculado Parabéns!)', async () => {
   const store = memoria(); const fila = [];
   let fase = 'pendente';
@@ -633,10 +655,10 @@ test('Avisos (Blip): contrato liberado avisa uma vez; pagamento liberado gera o 
   fase = 'pago';
   const n = fila.length;
   store.naHora(agora); await E.vigiarFinal(id);
-  assert.match(enviados.at(-1).situacao, /matrícula está concluída/);
+  assert.match(enviados.at(-1).situacao, /matrícula foi confirmada pela equipe/);
   assert.equal(fila.length, n, 'concluída: o vigia para');
   store.naHora(agora); await E.vigiarFinal(id);
-  assert.equal(enviados.filter(e => /concluída/.test(e.situacao ?? '')).length, 1);
+  assert.equal(enviados.filter(e => /confirmada pela equipe/.test(e.situacao ?? '')).length, 1);
 });
 
 test('Avisos (Blip): cobrança que falha tenta de novo em 10 min, reaproveitando o mesmo Pix', async () => {

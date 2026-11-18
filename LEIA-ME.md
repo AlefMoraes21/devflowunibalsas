@@ -1,3 +1,11 @@
+# Versão 2.15.0 — etapa final dos 4 processos (pagamento sem botão, "Recebido" → equipe, recusa do RM, login rápido)
+
+- **Pagamento por processo** (`passoPagamento` em `api/processes.js`): Vestibular 300670, Transferência 300701, Portador 300686, ENEM 300716 (provisório). Na Transferência e no Portador o portal mostra "Pagamento" sem botão; o Run usa o passo do processo para a cobrança e a lista mostra "Pendente [Pagar]".
+- **"Recebido" → equipe:** Pagamento recebido com Matriculado pendente mostra "Aguardando confirmação da equipe" e manda o aviso `pagamento_recebido` uma vez. A liberação do Matriculado continua manual; o aviso final diz "confirmada pela equipe".
+- **Recusa do RM** ("Não foi possível fazer a matrícula!"): a fila vai para `conferir` (`rm_recusou`, alerta `etapa2_fila_atencao`), a Pré-matrícula mostra "Em conferência pela equipe" e o próximo login/atualização depois de 30 min retoma.
+- **Login rápido:** com status guardado, espera o portal só 2 s (`ETAPA2_ESPERA_CACHE_MS`) e relê em 2º plano. Flow (JSON) sem mudança.
+- 174 testes. Versão esperada no `GET /api/flow`: `unibalsas-cloudrun-jornada-2.15.0`.
+
 # Versão 2.14.0 — status depois do Enviar, "Atualizar" resolvido pelo Run e código só da versão atual
 
 **O Flow da WABA muda:** colar o novo `flows/etapa1-vestibular.json` no editor da Meta e publicar.
