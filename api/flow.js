@@ -1613,7 +1613,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.16.10" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.16.11" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

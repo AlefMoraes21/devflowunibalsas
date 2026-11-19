@@ -1,3 +1,10 @@
+# Versão 2.16.11 — turno em tela própria: curso e turno funcionam no WhatsApp Web (19/11/2026) — COLAR O JSON NOVO NA META
+
+- **Causa:** no WhatsApp Web, a tela de curso voltava para a 1ª tela ao tocar em Avançar, sem chamar o servidor. O turno ficava dentro de um If ainda não exibido, mas o init-values e o payload do Avançar já citavam turno_id. O app tolera isso; o Web não. Antes (2.16.8) o mesmo acontecia com on-select-action.
+- **Agora:** INSC_CURSO só tem o curso (no ENEM, INSC_CURSO_ENEM tem curso + dados do ENEM, validados nesse Avançar). O Avançar abre a tela nova **INSC_TURNO** (nome do curso + lista de turnos; turno único já marcado), e o Avançar dela grava curso + turno (+ notas e média no ENEM) e segue para INSC_QUASE_LA. Sem If e sem on-select nessas telas.
+- Vale para os 4 processos (Vestibular, Transferência, Portador, ENEM). Rotas: INSC_CURSO e INSC_CURSO_ENEM → INSC_TURNO → INSC_QUASE_LA.
+- Colar flows/etapa1-vestibular.json na Meta depois do deploy (o servidor antigo não conhece INSC_TURNO).
+
 # Versão 2.16.10 — documentos de inscrição esperam o portal; JSON sem `visible` inválido (19/11/2026)
 
 - **Documentos de inscrição (Transferência, Portador, ENEM):** quando o portal ainda não mostra a etapa "Documentos inscrição", o worker não desiste mais em 6 tentativas (~16 min). Ele tenta de novo a cada 10 min por até ~24 h e entrega assim que a etapa aparece. Na 6ª espera deixa um alerta único (`etapa1_fila_atencao`, motivo `docs_nao_liberado`). Caso real: Fabiana (Transferência, 14375830) enviou 2 documentos às 15:31 e o registro foi para "falhou" às 15:48 sem entregar.

@@ -15,10 +15,14 @@
     ],
     "INSC_PRIVACIDADE": [],
     "INSC_CURSO": [
-      "INSC_QUASE_LA",
+      "INSC_TURNO",
       "INSC_FIM"
     ],
     "INSC_CURSO_ENEM": [
+      "INSC_TURNO",
+      "INSC_FIM"
+    ],
+    "INSC_TURNO": [
       "INSC_QUASE_LA",
       "INSC_FIM"
     ],
@@ -552,30 +556,7 @@
           },
           "__example__": []
         },
-        "turnos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turno_visivel": {
-          "type": "boolean",
-          "__example__": false
-        },
         "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_turno_id": {
           "type": "string",
           "__example__": ""
         }
@@ -587,8 +568,7 @@
             "type": "Form",
             "name": "form_curso",
             "init-values": {
-              "curso_id": "${data.valor_curso_id}",
-              "turno_id": "${data.valor_turno_id}"
+              "curso_id": "${data.valor_curso_id}"
             },
             "children": [
               {
@@ -618,25 +598,6 @@
                 "required": true
               },
               {
-                "type": "If",
-                "condition": "${data.turno_visivel} == true",
-                "then": [
-                  {
-                    "type": "Dropdown",
-                    "name": "turno_id",
-                    "label": "Turno",
-                    "data-source": "${data.turnos}",
-                    "required": true
-                  }
-                ],
-                "else": [
-                  {
-                    "type": "TextCaption",
-                    "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo."
-                  }
-                ]
-              },
-              {
                 "type": "Footer",
                 "label": "Avançar",
                 "on-click-action": {
@@ -644,8 +605,7 @@
                   "payload": {
                     "acao": "escolher_curso",
                     "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}"
+                    "curso_id": "${form.curso_id}"
                   }
                 }
               }
@@ -685,25 +645,6 @@
           },
           "__example__": []
         },
-        "turnos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turno_visivel": {
-          "type": "boolean",
-          "__example__": false
-        },
         "anos_enem": {
           "type": "array",
           "items": {
@@ -720,10 +661,6 @@
           "__example__": []
         },
         "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_turno_id": {
           "type": "string",
           "__example__": ""
         },
@@ -764,7 +701,6 @@
             "name": "form_curso_enem",
             "init-values": {
               "curso_id": "${data.valor_curso_id}",
-              "turno_id": "${data.valor_turno_id}",
               "numero_inscricao_enem": "${data.valor_numero_inscricao_enem}",
               "ano_enem": "${data.valor_ano_enem}",
               "nota_natureza_enem": "${data.valor_nota_natureza_enem}",
@@ -799,25 +735,6 @@
                 "label": "Curso",
                 "data-source": "${data.cursos}",
                 "required": true
-              },
-              {
-                "type": "If",
-                "condition": "${data.turno_visivel} == true",
-                "then": [
-                  {
-                    "type": "Dropdown",
-                    "name": "turno_id",
-                    "label": "Turno",
-                    "data-source": "${data.turnos}",
-                    "required": true
-                  }
-                ],
-                "else": [
-                  {
-                    "type": "TextCaption",
-                    "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo."
-                  }
-                ]
               },
               {
                 "type": "TextSubheading",
@@ -891,7 +808,6 @@
                     "acao": "escolher_curso",
                     "estado": "${data.estado}",
                     "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}",
                     "numero_inscricao_enem": "${form.numero_inscricao_enem}",
                     "ano_enem": "${form.ano_enem}",
                     "nota_natureza_enem": "${form.nota_natureza_enem}",
@@ -899,6 +815,99 @@
                     "nota_matematica_enem": "${form.nota_matematica_enem}",
                     "nota_linguagens_enem": "${form.nota_linguagens_enem}",
                     "nota_redacao_enem": "${form.nota_redacao_enem}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "INSC_TURNO",
+      "title": "Turno",
+      "data": {
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "curso_nome": {
+          "type": "string",
+          "__example__": "Administração"
+        },
+        "turnos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": []
+        },
+        "valor_turno_id": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_turno",
+            "init-values": {
+              "turno_id": "${data.valor_turno_id}"
+            },
+            "children": [
+              {
+                "type": "Image",
+                "src": "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",
+                "height": 40,
+                "scale-type": "contain"
+              },
+              {
+                "type": "TextHeading",
+                "text": "Turno"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.curso_nome}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "turno_id",
+                "label": "Turno",
+                "data-source": "${data.turnos}",
+                "required": true
+              },
+              {
+                "type": "Footer",
+                "label": "Avançar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "escolher_turno",
+                    "estado": "${data.estado}",
+                    "turno_id": "${form.turno_id}"
                   }
                 }
               }

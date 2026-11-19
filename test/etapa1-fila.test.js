@@ -125,9 +125,10 @@ async function etapa1(E, processo = '20383', extra = {}) {
   assert.equal(dados.screen, 'INSC_DADOS');
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
-  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
+  const t = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
+  assert.equal(t.screen, 'INSC_TURNO');
   assert.equal(t.data.valor_turno_id, 'not', 'turno único já vem marcado');
-  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
+  const quase = await e1(E, 'INSC_TURNO', 'escolher_turno', t.data.estado, { turno_id: 'not' });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   return quase;
 }
@@ -187,7 +188,7 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
 
-test('Curso e turno só com o Avançar (sem ação na lista: WhatsApp Web): 1º Avançar traz os turnos, 2º segue — nos 4 processos', async () => {
+test('Curso → Avançar → tela do Turno (sem If, WhatsApp Web) → Avançar segue — nos 4 processos', async () => {
   for (const processo of ['20383', '20385', '20384', '20386']) {
     const { e1: E, store } = montar();
     await store.create('etapa1-' + processo, { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
@@ -195,18 +196,24 @@ test('Curso e turno só com o Avançar (sem ação na lista: WhatsApp Web): 1º 
     const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
     const enem = processo === '20386';
     assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO', processo);
-    assert.equal(curso.data.turno_visivel, false);
     const extra = enem ? ENEM : {};
-    const comTurnos = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'ads', turno_id: '', ...extra });
-    assert.equal(comTurnos.screen, curso.screen, processo + ': 1º Avançar fica na tela e mostra os turnos');
-    assert.equal(comTurnos.data.turno_visivel, true); assert.equal(comTurnos.data.valor_turno_id, 'not', 'turno único já marcado');
-    assert.equal(comTurnos.data.tem_erro, false);
-    if (enem) assert.equal(comTurnos.data.valor_numero_inscricao_enem, ENEM.numero_inscricao_enem, 'as notas digitadas continuam');
-    const quase = await e1(E, curso.screen, 'escolher_curso', comTurnos.data.estado, { curso_id: 'ads', turno_id: 'not', ...extra });
-    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': 2º Avançar segue');
+    const semCurso = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: '', ...extra });
+    assert.equal(semCurso.screen, curso.screen); assert.match(semCurso.data.erro, /curso/);
+    const turno = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'ads', ...extra });
+    assert.equal(turno.screen, 'INSC_TURNO', processo + ': Avançar abre a tela do turno');
+    assert.equal(turno.data.valor_turno_id, 'not', 'turno único já marcado'); assert.equal(turno.data.tem_erro, false);
+    assert.ok(turno.data.curso_nome); assert.equal(turno.data.turnos.length, 1);
+    const semTurno = await e1(E, 'INSC_TURNO', 'escolher_turno', turno.data.estado, { turno_id: '' });
+    assert.equal(semTurno.screen, 'INSC_TURNO'); assert.match(semTurno.data.erro, /turno/);
+    const quase = await e1(E, 'INSC_TURNO', 'escolher_turno', turno.data.estado, { turno_id: 'not' });
+    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': Avançar segue');
+    assert.equal(quase.data.eh_nota_enem, enem);
   }
-  const json = JSON.stringify(FLOW_E1.screens.filter(x => /^INSC_CURSO/.test(x.id)));
+  const json = JSON.stringify(FLOW_E1.screens.filter(x => /^INSC_(CURSO|TURNO)/.test(x.id)));
   assert.doesNotMatch(json, /on-select-action/, 'listas sem ação ao selecionar');
+  assert.doesNotMatch(json, /"type":"If"/, 'sem If nas telas de curso e turno (WhatsApp Web)');
+  assert.deepEqual(FLOW_E1.routing_model.INSC_CURSO, ['INSC_TURNO', 'INSC_FIM']);
+  assert.deepEqual(FLOW_E1.routing_model.INSC_TURNO, ['INSC_QUASE_LA', 'INSC_FIM']);
 });
 
 test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o curso com as notas e conclui sem redação', async () => {
@@ -215,16 +222,16 @@ test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o cur
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO_ENEM'); assert.equal(curso.data.anos_enem.length, 1);
-  // Escolher o curso não apaga o que já foi digitado do ENEM.
-  const t = await e1(E, 'INSC_CURSO_ENEM', 'buscar_turnos', curso.data.estado, { curso_id: 'ads', numero_inscricao_enem: '123456789012' });
-  assert.equal(t.data.valor_turno_id, 'not'); assert.equal(t.data.valor_numero_inscricao_enem, '123456789012');
   const id = fila[0].id;
+  // Nota inválida: fica na tela do curso, com o que já foi digitado.
+  const semNotas = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', curso.data.estado, { curso_id: 'ads', numero_inscricao_enem: '123' });
+  assert.equal(semNotas.screen, 'INSC_CURSO_ENEM'); assert.match(semNotas.data.erro, /ENEM/); assert.equal(semNotas.data.valor_numero_inscricao_enem, '123');
+  const t = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', curso.data.estado, { curso_id: 'ads', ...ENEM });
+  assert.equal(t.screen, 'INSC_TURNO'); assert.equal(t.data.valor_turno_id, 'not');
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'turnos', 'espera curso, turno e notas');
   assert.ok(!rubeus.chamadas.includes('avancar_curso_interesse'));
-  const semNotas = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', numero_inscricao_enem: '123' });
-  assert.equal(semNotas.screen, 'INSC_CURSO_ENEM'); assert.match(semNotas.data.erro, /ENEM/);
-  const quase = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', ...ENEM });
+  const quase = await e1(E, 'INSC_TURNO', 'escolher_turno', t.data.estado, { turno_id: 'not' });
   assert.equal(quase.screen, 'INSC_QUASE_LA'); assert.equal(quase.data.eh_nota_enem, true);
   assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.numero_inscricao_enem, ENEM.numero_inscricao_enem, 'notas guardadas com o curso');
   const okEnem = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
@@ -244,8 +251,8 @@ test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preenc
   const id = fila[0].id;
   await E.worker(id);
   assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos']);
-  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
-  await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
+  const t = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
+  await e1(E, 'INSC_TURNO', 'escolher_turno', t.data.estado, { turno_id: 'not' });
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'final', 'para antes da conclusão, esperando o CPF');
 });
@@ -259,8 +266,8 @@ test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do 
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.deepEqual(curso.data.cursos, CURSOS);
-  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
-  assert.equal(t.data.turnos.length, 2);
+  const t = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'dir' });
+  assert.equal(t.screen, 'INSC_TURNO'); assert.equal(t.data.turnos.length, 2);
   await Promise.all(pend);
   assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null, 'tela que não é INSC_* não é da etapa 1');
 });

@@ -25,7 +25,7 @@ const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nasci
 const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
 // As notas do ENEM ficam na tela do curso, como no site (passo 300708); a "Estamos quase lá" é igual nos 4 processos.
 const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
-const CURSO_ENEM = ['curso_id', 'turno_id', ...ENEM];
+const CURSO_ENEM = ['curso_id', ...ENEM];
 // Documentos de inscrição (Transferência, Portador e ENEM): uma tela por posição, para o seletor de arquivo vir
 // vazio em cada documento. A 1ª é sempre o documento obrigatório. Id de tela só com letras (regra da Meta).
 const DOCS_INSC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
@@ -45,8 +45,9 @@ const flow = {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM', 'MATR_LOGIN'],
     INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_PRIVACIDADE', 'INSC_FIM'],
     INSC_PRIVACIDADE: [],
-    INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
+    INSC_CURSO: ['INSC_TURNO', 'INSC_FIM'],
+    INSC_CURSO_ENEM: ['INSC_TURNO', 'INSC_FIM'],
+    INSC_TURNO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
     INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS', 'INSC_FIM'],
     INSC_STATUS: ['INSC_DOC_A', 'INSC_FIM'],
@@ -130,22 +131,22 @@ const flow = {
     {
       id: 'INSC_CURSO',
       title: 'Curso de interesse',
-      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), valor_curso_id: str(), valor_turno_id: str() },
+      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), valor_curso_id: str() },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso',
-          'init-values': init(['curso_id', 'turno_id']),
+          'init-values': init(['curso_id']),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            // Sem on-select-action: no WhatsApp Web a escolha com ação volta o Flow para a 1ª tela sem chamar o
-            // servidor (19/11). O Avançar traz os turnos (curso novo) e, com o turno escolhido, segue.
+            // Turno em tela própria (INSC_TURNO). No WhatsApp Web, tanto a escolha com on-select-action quanto um
+            // turno dentro de If (campo ainda não exibido no init-values/payload) voltam o Flow para a 1ª tela sem
+            // chamar o servidor (19/11). Aqui só o curso; o Avançar abre a tela do turno.
             { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
-                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [{ type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.' }] },
-            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id', 'turno_id'])) }
+            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id'])) }
           ]
         }]
       }
@@ -156,7 +157,7 @@ const flow = {
       id: 'INSC_CURSO_ENEM',
       title: 'Curso de interesse',
       data: {
-        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), anos_enem: opcoes(),
+        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), anos_enem: opcoes(),
         ...Object.fromEntries(CURSO_ENEM.map(k => ['valor_' + k, str()]))
       },
       layout: {
@@ -170,7 +171,6 @@ const flow = {
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
             { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
-                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [{ type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.' }] },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
             { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
@@ -181,6 +181,27 @@ const flow = {
             notaEnem('nota_redacao_enem', 'Nota da redação'),
             { type: 'TextCaption', text: 'A média das notas é calculada automaticamente.' },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(CURSO_ENEM)) }
+          ]
+        }]
+      }
+    },
+    {
+      // Turno do curso escolhido (todos os processos). Tela própria, sem If: funciona igual no app e no Web.
+      id: 'INSC_TURNO',
+      title: 'Turno',
+      data: { estado: str(), erro: str(), tem_erro: bool(), curso_nome: str('Administração'), turnos: opcoes(), valor_turno_id: str() },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [{
+          type: 'Form', name: 'form_turno',
+          'init-values': init(['turno_id']),
+          children: [
+            imagem(LOGO_INSCRICAO, 40),
+            { type: 'TextHeading', text: 'Turno' },
+            { type: 'TextBody', text: '${data.curso_nome}' },
+            erroTexto,
+            { type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true },
+            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_turno', form(['turno_id'])) }
           ]
         }]
       }
