@@ -1,3 +1,9 @@
+# Versão 2.16.13 — listas do servidor sem valor inicial (WhatsApp Web) e turno na descrição do curso (19/11/2026) — COLAR O JSON NOVO NA META
+
+- **Causa provável do Web voltar à 1ª tela na escolha do curso:** a lista de cursos (opções vindas do servidor) começava com valor inicial vazio (`curso_id: ""`), que não está entre as opções. A lista do processo na 1ª tela, sem valor inicial, funciona no Web. Agora nenhuma lista com opções do servidor tem valor inicial: curso, turno, ano do ENEM, "Como ficou sabendo" (Estamos quase lá) e "Escola" (identidade). Um teste confere isso no Flow inteiro.
+- **Nome do curso até 30 caracteres** (limite da Meta para opção de lista). Com turno único, a opção mostra "Turno: Noturno" na descrição. Nome maior que 30 é cortado com reticências e vai inteiro na descrição.
+- O Avançar continua indo direto para "Estamos quase lá" com o turno único (2.16.12).
+
 # Versão 2.16.12 — turno único no nome do curso, Avançar direto (19/11/2026) — COLAR O JSON NOVO NA META
 
 - Hoje todos os cursos têm um turno só. A lista de cursos já mostra o turno no nome (ex.: "Direito — Noturno") e o Avançar grava curso + turno e vai direto para "Estamos quase lá". Uma tela, sem escolha de turno, sem If e sem on-select (funciona no WhatsApp Web).

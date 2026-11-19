@@ -15,7 +15,7 @@ const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'co
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
 const bool = (ex = false) => ({ type: 'boolean', __example__: ex });
-const opcoes = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } }, __example__: [] });
+const opcoes = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } }, __example__: [] });
 const erroTexto = { type: 'TextBody', text: '${data.erro}', visible: '${data.tem_erro}' };
 const troca = (acao, campos = {}) => ({ name: 'data_exchange', payload: { acao, estado: '${data.estado}', ...campos } });
 const form = names => Object.fromEntries(names.map(n => [n, '${form.' + n + '}']));
@@ -26,6 +26,9 @@ const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_h
 // As notas do ENEM ficam na tela do curso, como no site (passo 300708); a "Estamos quase lá" é igual nos 4 processos.
 const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
 const CURSO_ENEM = ['curso_id', ...ENEM];
+// Valor inicial só nos campos de texto: no WhatsApp Web, lista dinâmica (Dropdown) com valor inicial que não
+// está nas opções ("") volta o Flow para a 1ª tela ao escolher (19/11). A lista do processo, sem valor inicial, funciona.
+const ENEM_TEXTO = ENEM.filter(k => k !== 'ano_enem');
 // Documentos de inscrição (Transferência, Portador e ENEM): uma tela por posição, para o seletor de arquivo vir
 // vazio em cada documento. A 1ª é sempre o documento obrigatório. Id de tela só com letras (regra da Meta).
 const DOCS_INSC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
@@ -131,12 +134,11 @@ const flow = {
     {
       id: 'INSC_CURSO',
       title: 'Curso de interesse',
-      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), valor_curso_id: str() },
+      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes() },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso',
-          'init-values': init(['curso_id']),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
@@ -158,13 +160,13 @@ const flow = {
       title: 'Curso de interesse',
       data: {
         estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), anos_enem: opcoes(),
-        ...Object.fromEntries(CURSO_ENEM.map(k => ['valor_' + k, str()]))
+        ...Object.fromEntries(ENEM_TEXTO.map(k => ['valor_' + k, str()]))
       },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso_enem',
-          'init-values': init(CURSO_ENEM),
+          'init-values': init(ENEM_TEXTO),
           children: [
             imagem(LOGO_ENEM, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
@@ -189,12 +191,11 @@ const flow = {
       // Turno do curso escolhido (todos os processos). Tela própria, sem If: funciona igual no app e no Web.
       id: 'INSC_TURNO',
       title: 'Turno',
-      data: { estado: str(), erro: str(), tem_erro: bool(), curso_nome: str('Administração'), turnos: opcoes(), valor_turno_id: str() },
+      data: { estado: str(), erro: str(), tem_erro: bool(), curso_nome: str('Administração'), turnos: opcoes() },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_turno',
-          'init-values': init(['turno_id']),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Turno' },
@@ -220,7 +221,7 @@ const flow = {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_quase_la',
-          'init-values': init(QUASE),
+          'init-values': init(QUASE.filter(k => k !== 'como_conheceu')), // lista dinâmica sem valor inicial (WhatsApp Web)
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Estamos quase lá!' },

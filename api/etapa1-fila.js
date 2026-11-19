@@ -156,11 +156,11 @@ export function createEtapa1({
   const TELAS_DOC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
   const INSC_KEYS = {
     INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
-    INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', ...valor('curso_id')],
+    INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos'],
     // Nota do ENEM: as notas ficam na tela do curso, como no site (passo 300708).
-    INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'cursos', 'anos_enem', ...valor('curso_id', ...ENEM_CAMPOS)],
+    INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'cursos', 'anos_enem', ...valor(...ENEM_CAMPOS.filter(k => k !== 'ano_enem'))],
     // Turno em tela própria (todos os processos): sem If, funciona igual no app e no WhatsApp Web.
-    INSC_TURNO: ['estado', 'erro', 'tem_erro', 'curso_nome', 'turnos', ...valor('turno_id')],
+    INSC_TURNO: ['estado', 'erro', 'tem_erro', 'curso_nome', 'turnos'],
     INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'resumo_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
     INSC_CONCLUIDA: ['estado'],
     INSC_PORTAL: ['estado'],
@@ -175,7 +175,8 @@ export function createEtapa1({
   };
   const INSC_PADRAO = { tem_erro: false, eh_nota_enem: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [], anos_enem: [] };
   const LISTAS = ['cursos', 'turnos', 'origens', 'anos_enem'];
-  const proj = l => (l ?? []).map(o => ({ id: String(o.id), title: String(o.title) }));
+  // Opção de lista: título até 30 caracteres (limite da Meta; o Web é rígido) e descrição opcional.
+  const proj = l => (l ?? []).map(o => ({ id: String(o.id), title: String(o.title), ...(o.description ? { description: String(o.description).slice(0, 300) } : {}) }));
   function renderE1(screen, data) {
     const { values = {}, ...trusted } = data;
     const out = {};
@@ -282,11 +283,16 @@ export function createEtapa1({
     const processo = s.processo_seletivo_id;
     const base = { e1: true, processo_seletivo_id: processo, eh_nota_enem: Boolean(s.eh_nota_enem), fila_id: s.fila_id };
 
-    // Lista de cursos com o turno no nome quando o curso tem um turno só ("DIREITO — NOTURNO").
+    // Lista de cursos: nome até 30 caracteres (limite da Meta) e, com turno único, "Turno: Noturno" na
+    // descrição da opção. Nome maior que 30 vai inteiro na descrição.
     const cursosComTurno = c => (c?.cursos ?? []).map(x => {
       const t = c?.turnos?.[x.id] ?? [];
-      return t.length === 1 ? { id: x.id, title: `${x.title} — ${t[0].title}` } : x;
+      const nome = String(x.title ?? '').trim();
+      const curto30 = nome.length > 30 ? nome.slice(0, 29).trimEnd() + '…' : nome;
+      const partes = [nome.length > 30 ? nome : '', t.length === 1 ? `Turno: ${titulo(t[0].title)}` : ''].filter(Boolean);
+      return { id: x.id, title: curto30, ...(partes.length ? { description: partes.join(' · ') } : {}) };
     });
+    const titulo = v => String(v ?? '').toLowerCase().replace(/(^|\s)\S/g, m => m.toUpperCase());
     async function gravarCursoTurno(st, rq, { curso, turno, notas, media }) {
       const enem = Boolean(st.eh_nota_enem);
       try { await gravarTela(st.fila_id, processo, rq.flow_token, { curso_id: curso, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
@@ -327,7 +333,8 @@ export function createEtapa1({
         const r = await gravarCursoTurno(s, req, { curso, turno: turnos[0].id, notas, media });
         return r.erro ? renderE1(screen, { ...s, values: { ...notas, curso_id: curso }, erro: r.erro }) : r.tela;
       }
-      return renderE1('INSC_TURNO', { ...base, curso_id: curso, curso_nome: escolhido.title, turnos, notas, media_enem: media, values: { turno_id: '' }, erro: '' });
+      const cheio = (c?.cursos ?? []).find(x => x.id === curso)?.title ?? escolhido.title;
+      return renderE1('INSC_TURNO', { ...base, curso_id: curso, curso_nome: cheio, turnos, notas, media_enem: media, erro: '' });
     }
 
     // Mais de um turno no curso: escolha na tela própria (sem If, funciona no WhatsApp Web).

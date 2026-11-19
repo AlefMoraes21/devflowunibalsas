@@ -553,14 +553,13 @@
               },
               "title": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string"
               }
             }
           },
           "__example__": []
-        },
-        "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
         }
       },
       "layout": {
@@ -569,9 +568,6 @@
           {
             "type": "Form",
             "name": "form_curso",
-            "init-values": {
-              "curso_id": "${data.valor_curso_id}"
-            },
             "children": [
               {
                 "type": "Image",
@@ -642,6 +638,9 @@
               },
               "title": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string"
               }
             }
           },
@@ -657,20 +656,15 @@
               },
               "title": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string"
               }
             }
           },
           "__example__": []
         },
-        "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
-        },
         "valor_numero_inscricao_enem": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_ano_enem": {
           "type": "string",
           "__example__": ""
         },
@@ -702,9 +696,7 @@
             "type": "Form",
             "name": "form_curso_enem",
             "init-values": {
-              "curso_id": "${data.valor_curso_id}",
               "numero_inscricao_enem": "${data.valor_numero_inscricao_enem}",
-              "ano_enem": "${data.valor_ano_enem}",
               "nota_natureza_enem": "${data.valor_nota_natureza_enem}",
               "nota_humanas_enem": "${data.valor_nota_humanas_enem}",
               "nota_matematica_enem": "${data.valor_nota_matematica_enem}",
@@ -855,14 +847,13 @@
               },
               "title": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string"
               }
             }
           },
           "__example__": []
-        },
-        "valor_turno_id": {
-          "type": "string",
-          "__example__": ""
         }
       },
       "layout": {
@@ -871,9 +862,6 @@
           {
             "type": "Form",
             "name": "form_turno",
-            "init-values": {
-              "turno_id": "${data.valor_turno_id}"
-            },
             "children": [
               {
                 "type": "Image",
@@ -944,6 +932,9 @@
               },
               "title": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string"
               }
             }
           },
@@ -1006,7 +997,6 @@
               "possui_deficiencia": "${data.valor_possui_deficiencia}",
               "tipos_deficiencia": "${data.valor_tipos_deficiencia}",
               "deficiencia_outra": "${data.valor_deficiencia_outra}",
-              "como_conheceu": "${data.valor_como_conheceu}",
               "como_conheceu_outro": "${data.valor_como_conheceu_outro}"
             },
             "children": [
@@ -3273,8 +3263,7 @@
               "cor_raca": "${data.valor_cor_raca}",
               "estado_civil": "${data.valor_estado_civil}",
               "ano_conclusao": "${data.valor_ano_conclusao}",
-              "busca_escola": "${data.valor_busca_escola}",
-              "escola": "${data.valor_escola}"
+              "busca_escola": "${data.valor_busca_escola}"
             },
             "children": [
               {

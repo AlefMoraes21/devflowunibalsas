@@ -144,7 +144,7 @@ async function inscrever(M, processo) {
   const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const enem = processo === '20386';
   assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO');
-  assert.equal(curso.data.cursos[0].title, 'Direito — Noturno');
+  assert.deepEqual(curso.data.cursos[0], { id: 'dir', title: 'Direito', description: 'Turno: Noturno' });
   const quase = await toque(M, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'dir', ...(enem ? ENEM : {}) });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   const concl = await toque(M, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);

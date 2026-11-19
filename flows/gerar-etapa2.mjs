@@ -142,7 +142,7 @@ export const screens = [
   },
   {
     id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT, { escolas: ESCOLAS, tem_escolas: bool() }),
-    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT), children: [
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT.filter(k => k !== 'escola')), children: [
       imagem(LOGO_MATRICULA),
       { type: 'TextHeading', text: 'Documento e perfil' },
       { type: 'TextBody', text: 'Precisamos de mais algumas informações suas.' },
