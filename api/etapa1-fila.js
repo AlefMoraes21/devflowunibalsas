@@ -175,8 +175,35 @@ export function createEtapa1({
   };
   const INSC_PADRAO = { tem_erro: false, eh_nota_enem: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [], anos_enem: [] };
   const LISTAS = ['cursos', 'turnos', 'origens', 'anos_enem'];
-  // Opção de lista: título até 30 caracteres (limite da Meta; o Web é rígido) e descrição opcional.
-  const proj = l => (l ?? []).map(o => ({ id: String(o.id), title: String(o.title), ...(o.description ? { description: String(o.description).slice(0, 300) } : {}) }));
+  // Opção de lista no formato que a Meta aceita (o WhatsApp Web é rígido): id e título não vazios, id sem
+  // repetição, título até 30 caracteres, descrição até 300. Opção inválida fica de fora.
+  const corta = (v, n) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
+  const proj = l => {
+    const vistos = new Set(), out = [];
+    for (const o of l ?? []) {
+      const id = String(o?.id ?? '').trim(), title = corta(o?.title, 30);
+      if (!id || !title || vistos.has(id)) continue;
+      vistos.add(id);
+      const description = corta(o?.description, 300);
+      out.push({ id, title, ...(description ? { description } : {}) });
+    }
+    return out;
+  };
+  // Diagnóstico das listas enviadas ao Flow (sem conteúdo): quantidade, descartes e tamanhos.
+  const TELAS_DIAG = new Set(['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_TURNO', 'INSC_QUASE_LA']);
+  function diagnosticoListas(screen, trusted, out) {
+    if (!TELAS_DIAG.has(screen)) return;
+    const listas = {};
+    for (const k of LISTAS) if (k in out) {
+      const orig = trusted[k] ?? [], ids = orig.map(o => String(o?.id ?? '').trim());
+      listas[k] = {
+        n: out[k].length, descartadas: orig.length - out[k].length,
+        ids_repetidos: ids.length - new Set(ids).size, vazias: orig.filter(o => !String(o?.id ?? '').trim() || !String(o?.title ?? '').trim()).length,
+        titulo_max: Math.max(0, ...orig.map(o => String(o?.title ?? '').length)), descricao_max: Math.max(0, ...out[k].map(o => (o.description ?? '').length))
+      };
+    }
+    log({ event: 'flow_lista', tela: screen, estado_len: String(out.estado ?? '').length, bytes: JSON.stringify(out).length, listas });
+  }
   function renderE1(screen, data) {
     const { values = {}, ...trusted } = data;
     const out = {};
@@ -187,6 +214,7 @@ export function createEtapa1({
       else if (LISTAS.includes(k)) out[k] = proj(trusted[k]);
       else out[k] = trusted[k] ?? INSC_PADRAO[k] ?? '';
     }
+    try { diagnosticoListas(screen, trusted, out); } catch {}
     return { screen, data: out };
   }
   const fimE1 = (titulo, mensagem) => renderE1('INSC_FIM', { titulo, mensagem });

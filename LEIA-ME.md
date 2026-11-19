@@ -1,3 +1,9 @@
+# Versão 2.16.14 — listas validadas no servidor e diagnóstico da tela de curso (19/11/2026) — só servidor, JSON igual
+
+- Teste da 2.16.13 no WhatsApp Web: a tela de curso chega (296 ms) e, ~3 s depois, o Flow volta ao início sem nenhum escolher_curso. A falha parece ser do Web ao exibir a tela, não do Avançar.
+- proj() (opções enviadas às telas INSC_*) agora descarta opção sem id ou título e id repetido, corta título em 30 e descrição em 300 caracteres.
+- Log flow_lista nas telas INSC_CURSO, INSC_CURSO_ENEM, INSC_TURNO e INSC_QUASE_LA: quantidade de opções, descartes, ids repetidos, maior título, maior descrição, tamanho do estado e da resposta. Sem conteúdo nem dados pessoais.
+
 # Versão 2.16.13 — listas do servidor sem valor inicial (WhatsApp Web) e turno na descrição do curso (19/11/2026) — COLAR O JSON NOVO NA META
 
 - **Causa provável do Web voltar à 1ª tela na escolha do curso:** a lista de cursos (opções vindas do servidor) começava com valor inicial vazio (`curso_id: ""`), que não está entre as opções. A lista do processo na 1ª tela, sem valor inicial, funciona no Web. Agora nenhuma lista com opções do servidor tem valor inicial: curso, turno, ano do ENEM, "Como ficou sabendo" (Estamos quase lá) e "Escola" (identidade). Um teste confere isso no Flow inteiro.

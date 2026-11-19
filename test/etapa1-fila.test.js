@@ -234,6 +234,16 @@ test('WhatsApp Web: nenhuma lista com opções do servidor tem valor inicial (em
   assert.deepEqual(achados, []);
 });
 
+test('Lista de cursos enviada ao Flow: sem id repetido, sem opção vazia, título até 30 (formato da Meta)', async () => {
+  const { e1: E, store } = montar();
+  const cursos = [{ id: 'ads', title: 'ADS' }, { id: 'ads', title: 'ADS de novo' }, { id: '', title: 'Sem id' }, { id: 'x', title: '  ' }, { id: 'dir', title: 'Direito' }];
+  await store.create('etapa1-20385', { cursos, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
+  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20385' });
+  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+  assert.deepEqual(curso.data.cursos.map(c => c.id), ['ads', 'dir']);
+  for (const c of curso.data.cursos) { assert.ok(c.title && c.title.length <= 30); assert.ok(!('description' in c) || (c.description && c.description.length <= 300)); }
+});
+
 test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e nome inteiro na descrição', async () => {
   const { e1: E, store } = montar();
   const longo = 'TECNOLOGIA EM ANÁLISE E DESENVOLVIMENTO DE SISTEMAS';
