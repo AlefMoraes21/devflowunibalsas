@@ -244,6 +244,15 @@ test('Lista de cursos enviada ao Flow: sem id repetido, sem opção vazia, títu
   for (const c of curso.data.cursos) { assert.ok(c.title && c.title.length <= 30); assert.ok(!('description' in c) || (c.description && c.description.length <= 300)); }
 });
 
+test('WhatsApp Web: depois da 1ª tela, escolha em botões de opção (a lista em tela própria volta o Web para a 1ª tela)', () => {
+  const walk = (c, o = []) => { for (const x of c ?? []) { o.push(x); walk(x.children, o); walk(x.then, o); walk(x.else, o); } return o; };
+  const listas = [];
+  for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'Dropdown') listas.push(s.id + '.' + c.name);
+  // Só a lista do processo (1ª tela) e as de UF (27 estados, acima do limite de 20 dos botões de opção).
+  assert.deepEqual(listas.filter(x => !/\.(uf|estado_natal|uf_rg)$/.test(x)), ['INSC_INICIO.processo_seletivo_id']);
+  for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'RadioButtonsGroup' && Array.isArray(c['data-source'])) assert.ok(c['data-source'].length <= 20, s.id + '.' + c.name);
+});
+
 test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e nome inteiro na descrição', async () => {
   const { e1: E, store } = montar();
   const longo = 'TECNOLOGIA EM ANÁLISE E DESENVOLVIMENTO DE SISTEMAS';

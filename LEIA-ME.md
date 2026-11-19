@@ -1,3 +1,10 @@
+# Versão 2.16.15 — escolhas em botões de opção depois da 1ª tela (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
+
+- **Causa confirmada no WhatsApp Web (Transferência, 19/11 ~18h):** a tela de curso abre certa (11 cursos com "Turno: Noturno"), mas ao escolher o curso na lista (Dropdown abre uma tela própria de seleção) o Web volta mostrando o conteúdo da 1ª tela ("Escolha seu processo…", Iniciar inscrição) debaixo do título "Curso de interesse". O rodapé já aparecia como "Iniciar inscrição" antes da escolha. Não é dado nem processo: a mesma resposta (2.236 bytes) passou uma vez no Vestibular.
+- **Solução:** depois da 1ª tela, as escolhas são botões de opção (RadioButtonsGroup, ficam na própria tela, como Gênero): curso, ano do ENEM, turno, nacionalidade, "Como ficou sabendo", cor/raça e estado civil. Vale para os 4 processos.
+- **Pendente:** as listas de UF (27 estados) da matrícula continuam Dropdown, porque botões de opção aceitam no máximo 20.
+- Log flow_lista marca acima_de_20 quando uma lista do servidor passar de 20 opções. Teste garante que só a lista do processo (1ª tela) e as de UF são Dropdown.
+
 # Versão 2.16.14 — listas validadas no servidor e diagnóstico da tela de curso (19/11/2026) — só servidor, JSON igual
 
 - Teste da 2.16.13 no WhatsApp Web: a tela de curso chega (296 ms) e, ~3 s depois, o Flow volta ao início sem nenhum escolher_curso. A falha parece ser do Web ao exibir a tela, não do Avançar.

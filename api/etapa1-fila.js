@@ -199,7 +199,8 @@ export function createEtapa1({
       listas[k] = {
         n: out[k].length, descartadas: orig.length - out[k].length,
         ids_repetidos: ids.length - new Set(ids).size, vazias: orig.filter(o => !String(o?.id ?? '').trim() || !String(o?.title ?? '').trim()).length,
-        titulo_max: Math.max(0, ...orig.map(o => String(o?.title ?? '').length)), descricao_max: Math.max(0, ...out[k].map(o => (o.description ?? '').length))
+        titulo_max: Math.max(0, ...orig.map(o => String(o?.title ?? '').length)), descricao_max: Math.max(0, ...out[k].map(o => (o.description ?? '').length)),
+        acima_de_20: out[k].length > 20
       };
     }
     log({ event: 'flow_lista', tela: screen, estado_len: String(out.estado ?? '').length, bytes: JSON.stringify(out).length, listas });

@@ -147,7 +147,7 @@ const flow = {
             // Turno em tela própria (INSC_TURNO). No WhatsApp Web, tanto a escolha com on-select-action quanto um
             // turno dentro de If (campo ainda não exibido no init-values/payload) voltam o Flow para a 1ª tela sem
             // chamar o servidor (19/11). Aqui só o curso; o Avançar abre a tela do turno.
-            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
+            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id'])) }
           ]
         }]
@@ -172,10 +172,10 @@ const flow = {
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
+            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
-            { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
+            { type: 'RadioButtonsGroup', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
             notaEnem('nota_natureza_enem', 'Nota de ciências da natureza'),
             notaEnem('nota_humanas_enem', 'Nota de ciências humanas'),
             notaEnem('nota_matematica_enem', 'Nota de matemática'),
@@ -201,7 +201,7 @@ const flow = {
             { type: 'TextHeading', text: 'Turno' },
             { type: 'TextBody', text: '${data.curso_nome}' },
             erroTexto,
-            { type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true },
+            { type: 'RadioButtonsGroup', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_turno', form(['turno_id'])) }
           ]
         }]
@@ -229,14 +229,14 @@ const flow = {
             { type: 'TextCaption', text: '${data.resumo_enem}', visible: '${data.eh_nota_enem}' },
             erroTexto,
             { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
-            { type: 'Dropdown', name: 'nacionalidade', label: 'Nacionalidade', required: true, 'data-source': [{ id: '10', title: 'Brasileira' }, { id: '20', title: 'Naturalizado Brasileiro' }, { id: '50', title: 'Outros' }] },
+            { type: 'RadioButtonsGroup', name: 'nacionalidade', label: 'Nacionalidade', required: true, 'data-source': [{ id: '10', title: 'Brasileira' }, { id: '20', title: 'Naturalizado Brasileiro' }, { id: '50', title: 'Outros' }] },
             { type: 'RadioButtonsGroup', name: 'concluiu_ensino_medio', label: 'Você já concluiu o ensino médio?', required: true, 'data-source': [{ id: 'Sim', title: 'Sim' }, { id: 'Não', title: 'Não' }] },
             { type: 'RadioButtonsGroup', name: 'possui_deficiencia', label: 'Possui alguma deficiência?', required: true, 'data-source': [{ id: 'T', title: 'Sim' }, { id: 'F', title: 'Não' }] },
             { type: 'If', condition: "${form.possui_deficiencia} == 'T'", then: [
               { type: 'CheckboxGroup', name: 'tipos_deficiencia', label: 'Necessidades especiais', required: true, 'data-source': [{ id: 'auditiva', title: 'Auditiva' }, { id: 'fala', title: 'Fala' }, { id: 'fisica', title: 'Física' }, { id: 'intelectual', title: 'Intelectual' }, { id: 'visual', title: 'Visual' }, { id: 'mental', title: 'Mental' }, { id: 'outras', title: 'Outras' }] },
               { type: 'TextInput', name: 'deficiencia_outra', label: 'Se marcou Outras, especifique:', 'input-type': 'text', required: false }
             ], else: [] },
-            { type: 'Dropdown', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
+            { type: 'RadioButtonsGroup', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]

@@ -589,7 +589,7 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
@@ -724,7 +724,7 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
@@ -743,7 +743,7 @@
                 "required": true
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "ano_enem",
                 "label": "Ano de realização do ENEM",
                 "data-source": "${data.anos_enem}",
@@ -883,7 +883,7 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "turno_id",
                 "label": "Turno",
                 "data-source": "${data.turnos}",
@@ -1033,7 +1033,7 @@
                 "required": true
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "nacionalidade",
                 "label": "Nacionalidade",
                 "required": true,
@@ -1135,7 +1135,7 @@
                 "else": []
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "como_conheceu",
                 "label": "Como ficou sabendo do processo?",
                 "required": true,
@@ -3417,7 +3417,7 @@
                 ]
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "cor_raca",
                 "label": "Cor / Raça",
                 "required": true,
@@ -3449,7 +3449,7 @@
                 ]
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "estado_civil",
                 "label": "Estado civil",
                 "required": true,
