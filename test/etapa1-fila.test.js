@@ -253,6 +253,13 @@ test('WhatsApp Web: depois da 1ª tela, escolha em botões de opção (a lista e
   for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'RadioButtonsGroup' && Array.isArray(c['data-source'])) assert.ok(c['data-source'].length <= 20, s.id + '.' + c.name);
 });
 
+test('WhatsApp Web: o rodapé da 1ª tela fica numa posição que nenhuma outra tela usa', () => {
+  const pos = s => { const r = s.layout.children; for (let i = 0; i < r.length; i++) { if (r[i].type === 'Footer') return `${i}`; if (r[i].type === 'Form') { const j = r[i].children.findIndex(c => c.type === 'Footer'); if (j >= 0) return `${i}>${j}`; } } return null; };
+  const inicio = pos(FLOW_E1.screens.find(s => s.id === 'INSC_INICIO'));
+  const iguais = FLOW_E1.screens.filter(s => s.id !== 'INSC_INICIO' && pos(s) === inicio).map(s => s.id);
+  assert.deepEqual(iguais, [], 'rodapé na mesma posição da 1ª tela: ' + inicio);
+});
+
 test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e nome inteiro na descrição', async () => {
   const { e1: E, store } = montar();
   const longo = 'TECNOLOGIA EM ANÁLISE E DESENVOLVIMENTO DE SISTEMAS';

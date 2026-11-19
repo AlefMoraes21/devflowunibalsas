@@ -1,3 +1,8 @@
+# Versão 2.16.16 — rodapé da 1ª tela numa posição única (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
+
+- Visto na tela (Transferência, Web): com os botões de opção a escolha do curso funciona, mas o rodapé da tela de curso aparece como "Iniciar inscrição" e, ao tocar, manda e1_iniciar (volta aos Dados básicos). A tela de curso tinha o rodapé na mesma posição da 1ª tela (6º item do Form); o Web reaproveitava o botão da 1ª tela, que fica embaixo na pilha.
+- INSC_INICIO: logo saiu do Form, e o rodapé foi para uma posição que nenhuma outra tela usa. Aparência igual. Teste garante a posição única.
+
 # Versão 2.16.15 — escolhas em botões de opção depois da 1ª tela (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
 
 - **Causa confirmada no WhatsApp Web (Transferência, 19/11 ~18h):** a tela de curso abre certa (11 cursos com "Turno: Noturno"), mas ao escolher o curso na lista (Dropdown abre uma tela própria de seleção) o Web volta mostrando o conteúdo da 1ª tela ("Escolha seu processo…", Iniciar inscrição) debaixo do título "Curso de interesse". O rodapé já aparecia como "Iniciar inscrição" antes da escolha. Não é dado nem processo: a mesma resposta (2.236 bytes) passou uma vez no Vestibular.

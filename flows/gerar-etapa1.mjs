@@ -72,10 +72,12 @@ const flow = {
       title: 'Inscrição',
       layout: {
         type: 'SingleColumnLayout',
-        children: [{
+        // Logo fora do Form: o rodapé desta 1ª tela fica numa posição que nenhuma outra tela usa (Form>4).
+        // No WhatsApp Web, a tela seguinte com o rodapé na mesma posição herdava o botão "Iniciar inscrição"
+        // (rótulo e ação) e voltava aos Dados básicos (19/11).
+        children: [imagem(LOGO_INSCRICAO, 40), {
           type: 'Form', name: 'form_processo',
           children: [
-            imagem(LOGO_INSCRICAO, 40),
             // Página 1 = porta de entrada: "Iniciar inscrição" (etapa 1) ou "LOGIN" (o servidor leva à etapa em que parou).
             { type: 'TextSubheading', text: 'Escolha seu processo e selecione uma opção' },
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
