@@ -1,3 +1,8 @@
+# Versão 2.16.17 — processo seletivo em botões de opção na 1ª tela (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
+
+- Com a 2.16.16, a Transferência continuou voltando aos Dados básicos no Web, enquanto o Vestibular passa. As telas e a resposta do servidor são iguais nos 4 processos; a diferença está no Web antes do curso: a escolha do processo na lista da 1ª tela (Dropdown abre uma tela própria de seleção, que já se mostrou capaz de bagunçar a navigação do Web).
+- A escolha do processo agora é botão de opção. Na inscrição não sobra nenhuma lista em tela própria; só as de UF (27) da matrícula continuam Dropdown.
+
 # Versão 2.16.16 — rodapé da 1ª tela numa posição única (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
 
 - Visto na tela (Transferência, Web): com os botões de opção a escolha do curso funciona, mas o rodapé da tela de curso aparece como "Iniciar inscrição" e, ao tocar, manda e1_iniciar (volta aos Dados básicos). A tela de curso tinha o rodapé na mesma posição da 1ª tela (6º item do Form); o Web reaproveitava o botão da 1ª tela, que fica embaixo na pilha.

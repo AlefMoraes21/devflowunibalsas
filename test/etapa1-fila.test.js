@@ -248,8 +248,10 @@ test('WhatsApp Web: depois da 1ª tela, escolha em botões de opção (a lista e
   const walk = (c, o = []) => { for (const x of c ?? []) { o.push(x); walk(x.children, o); walk(x.then, o); walk(x.else, o); } return o; };
   const listas = [];
   for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'Dropdown') listas.push(s.id + '.' + c.name);
-  // Só a lista do processo (1ª tela) e as de UF (27 estados, acima do limite de 20 dos botões de opção).
-  assert.deepEqual(listas.filter(x => !/\.(uf|estado_natal|uf_rg)$/.test(x)), ['INSC_INICIO.processo_seletivo_id']);
+  // Nenhuma lista em tela própria na inscrição, nem a do processo (1ª tela): no Web, escolher Transferência
+  // nessa lista fazia a tela de curso herdar o botão "Iniciar inscrição". Só as de UF (27 estados, acima do
+  // limite de 20 dos botões de opção) continuam Dropdown.
+  assert.deepEqual(listas.filter(x => !/\.(uf|estado_natal|uf_rg)$/.test(x)), []);
   for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'RadioButtonsGroup' && Array.isArray(c['data-source'])) assert.ok(c['data-source'].length <= 20, s.id + '.' + c.name);
 });
 

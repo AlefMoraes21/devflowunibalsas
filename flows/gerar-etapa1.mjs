@@ -81,7 +81,7 @@ const flow = {
             // Página 1 = porta de entrada: "Iniciar inscrição" (etapa 1) ou "LOGIN" (o servidor leva à etapa em que parou).
             { type: 'TextSubheading', text: 'Escolha seu processo e selecione uma opção' },
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
-            { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
+            { type: 'RadioButtonsGroup', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
               { id: '20383', title: 'Vestibular Online 2027/1' },
               { id: '20385', title: 'Transferência 2027/1' },
               { id: '20384', title: 'Portador de Diploma 2027/1' },

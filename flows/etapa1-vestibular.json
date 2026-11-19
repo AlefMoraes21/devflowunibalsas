@@ -173,7 +173,7 @@
                 "text": "Escolha seu processo e selecione uma opção"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "processo_seletivo_id",
                 "label": "Escolha o processo seletivo",
                 "required": true,
