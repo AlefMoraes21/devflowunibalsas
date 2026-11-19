@@ -1,3 +1,9 @@
+# Versão 2.16.12 — turno único no nome do curso, Avançar direto (19/11/2026) — COLAR O JSON NOVO NA META
+
+- Hoje todos os cursos têm um turno só. A lista de cursos já mostra o turno no nome (ex.: "Direito — Noturno") e o Avançar grava curso + turno e vai direto para "Estamos quase lá". Uma tela, sem escolha de turno, sem If e sem on-select (funciona no WhatsApp Web).
+- A tela INSC_TURNO (2.16.11) fica só para curso com mais de um turno.
+- Rotas: INSC_CURSO e INSC_CURSO_ENEM → INSC_TURNO, INSC_QUASE_LA. Colar flows/etapa1-vestibular.json na Meta depois do deploy.
+
 # Versão 2.16.11 — turno em tela própria: curso e turno funcionam no WhatsApp Web (19/11/2026) — COLAR O JSON NOVO NA META
 
 - **Causa:** no WhatsApp Web, a tela de curso voltava para a 1ª tela ao tocar em Avançar, sem chamar o servidor. O turno ficava dentro de um If ainda não exibido, mas o init-values e o payload do Avançar já citavam turno_id. O app tolera isso; o Web não. Antes (2.16.8) o mesmo acontecia com on-select-action.

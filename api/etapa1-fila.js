@@ -282,14 +282,28 @@ export function createEtapa1({
     const processo = s.processo_seletivo_id;
     const base = { e1: true, processo_seletivo_id: processo, eh_nota_enem: Boolean(s.eh_nota_enem), fila_id: s.fila_id };
 
+    // Lista de cursos com o turno no nome quando o curso tem um turno só ("DIREITO — NOTURNO").
+    const cursosComTurno = c => (c?.cursos ?? []).map(x => {
+      const t = c?.turnos?.[x.id] ?? [];
+      return t.length === 1 ? { id: x.id, title: `${x.title} — ${t[0].title}` } : x;
+    });
+    async function gravarCursoTurno(st, rq, { curso, turno, notas, media }) {
+      const enem = Boolean(st.eh_nota_enem);
+      try { await gravarTela(st.fila_id, processo, rq.flow_token, { curso_id: curso, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
+      catch (e) { falha('curso', e); return { erro: ERRO_GRAVAR }; }
+      const resumo_enem = enem && media ? `Média das notas do ENEM: ${media.replace('.', ',')}` : '';
+      return { tela: renderE1('INSC_QUASE_LA', { ...base, origens, resumo_enem, erro: '' }) };
+    }
+
     if (screen === 'INSC_DADOS' && acao === 'enviar_dados_basicos') {
       try { validateBasic(u); } catch (e) { return renderE1('INSC_DADOS', { ...s, values: u, erro: e.message }); }
       try { await gravarTela(s.fila_id, processo, req.flow_token, u); }
       catch (e) { falha('dados_basicos', e); return renderE1('INSC_DADOS', { ...s, values: u, erro: ERRO_GRAVAR }); }
       const c = await esperarCache(processo, x => x?.cursos?.length);
       if (!c?.cursos?.length) return renderE1('INSC_DADOS', { ...s, values: u, erro: 'Seus dados foram salvos. Estamos carregando os cursos: toque em Avançar de novo.' });
-      if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, cursos: c.cursos, anos_enem: anosEnem, erro: '' });
-      return renderE1('INSC_CURSO', { ...base, cursos: c.cursos, erro: '' });
+      const cursos = cursosComTurno(c);
+      if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, cursos, anos_enem: anosEnem, erro: '' });
+      return renderE1('INSC_CURSO', { ...base, cursos, erro: '' });
     }
 
     // Curso (e, no ENEM, os dados do exame) → Avançar abre a tela do turno (INSC_TURNO) com os turnos do curso.
@@ -308,18 +322,20 @@ export function createEtapa1({
       const c = await esperarCache(processo, x => x?.turnos?.[curso]?.length);
       const turnos = c?.turnos?.[curso] ?? [];
       if (!turnos.length) return renderE1(screen, { ...s, values: { ...notas, curso_id: curso }, erro: 'Estamos carregando os turnos deste curso. Toque em Avançar de novo em alguns segundos.' });
-      const unico = turnos.length === 1 ? turnos[0].id : '';
-      return renderE1('INSC_TURNO', { ...base, curso_id: curso, curso_nome: escolhido.title, turnos, notas, media_enem: media, values: { turno_id: unico }, erro: '' });
+      // Turno único (hoje, todos os cursos): já aparece no nome do curso e o Avançar segue direto.
+      if (turnos.length === 1) {
+        const r = await gravarCursoTurno(s, req, { curso, turno: turnos[0].id, notas, media });
+        return r.erro ? renderE1(screen, { ...s, values: { ...notas, curso_id: curso }, erro: r.erro }) : r.tela;
+      }
+      return renderE1('INSC_TURNO', { ...base, curso_id: curso, curso_nome: escolhido.title, turnos, notas, media_enem: media, values: { turno_id: '' }, erro: '' });
     }
 
+    // Mais de um turno no curso: escolha na tela própria (sem If, funciona no WhatsApp Web).
     if (screen === 'INSC_TURNO' && acao === 'escolher_turno') {
       const turno = String(u.turno_id ?? '');
       if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1('INSC_TURNO', { ...s, erro: 'Selecione o turno.' });
-      const enem = Boolean(s.eh_nota_enem), notas = s.notas ?? {}, media = String(s.media_enem ?? '');
-      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: s.curso_id, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
-      catch (e) { falha('curso', e); return renderE1('INSC_TURNO', { ...s, values: { turno_id: turno }, erro: ERRO_GRAVAR }); }
-      const resumo_enem = enem && media ? `Média das notas do ENEM: ${media.replace('.', ',')}` : '';
-      return renderE1('INSC_QUASE_LA', { ...base, origens, resumo_enem, erro: '' });
+      const r = await gravarCursoTurno(s, req, { curso: s.curso_id, turno, notas: s.notas ?? {}, media: String(s.media_enem ?? '') });
+      return r.erro ? renderE1('INSC_TURNO', { ...s, values: { turno_id: turno }, erro: r.erro }) : r.tela;
     }
 
     // Concluir: valida, grava no Firestore e agenda o worker. Vestibular: segue para a prova. Transferência,

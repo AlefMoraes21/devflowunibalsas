@@ -16,10 +16,12 @@
     "INSC_PRIVACIDADE": [],
     "INSC_CURSO": [
       "INSC_TURNO",
+      "INSC_QUASE_LA",
       "INSC_FIM"
     ],
     "INSC_CURSO_ENEM": [
       "INSC_TURNO",
+      "INSC_QUASE_LA",
       "INSC_FIM"
     ],
     "INSC_TURNO": [
