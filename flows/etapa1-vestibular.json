@@ -618,11 +618,6 @@
                 "required": true
               },
               {
-                "type": "TextCaption",
-                "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.",
-                "visible": "${data.turno_visivel} == false"
-              },
-              {
                 "type": "If",
                 "condition": "${data.turno_visivel} == true",
                 "then": [
@@ -634,7 +629,12 @@
                     "required": true
                   }
                 ],
-                "else": []
+                "else": [
+                  {
+                    "type": "TextCaption",
+                    "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo."
+                  }
+                ]
               },
               {
                 "type": "Footer",
@@ -801,11 +801,6 @@
                 "required": true
               },
               {
-                "type": "TextCaption",
-                "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.",
-                "visible": "${data.turno_visivel} == false"
-              },
-              {
                 "type": "If",
                 "condition": "${data.turno_visivel} == true",
                 "then": [
@@ -817,7 +812,12 @@
                     "required": true
                   }
                 ],
-                "else": []
+                "else": [
+                  {
+                    "type": "TextCaption",
+                    "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo."
+                  }
+                ]
               },
               {
                 "type": "TextSubheading",

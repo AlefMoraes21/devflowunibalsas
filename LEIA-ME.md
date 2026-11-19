@@ -1,3 +1,10 @@
+# Versão 2.16.10 — documentos de inscrição esperam o portal; JSON sem `visible` inválido (19/11/2026)
+
+- **Documentos de inscrição (Transferência, Portador, ENEM):** quando o portal ainda não mostra a etapa "Documentos inscrição", o worker não desiste mais em 6 tentativas (~16 min). Ele tenta de novo a cada 10 min por até ~24 h e entrega assim que a etapa aparece. Na 6ª espera deixa um alerta único (`etapa1_fila_atencao`, motivo `docs_nao_liberado`). Caso real: Fabiana (Transferência, 14375830) enviou 2 documentos às 15:31 e o registro foi para "falhou" às 15:48 sem entregar.
+- **Diagnóstico:** com a etapa ausente, o log `docs_portal_etapas` registra só os títulos das etapas devolvidas, a inscrição e o processo.
+- **Flow JSON (etapa 1):** a legenda "Escolha o curso e toque em Avançar…" saiu do `visible` (a Meta recusa comparação ali) e foi para o `else` do `If` em INSC_CURSO e INSC_CURSO_ENEM. Colar `flows/etapa1-vestibular.json` na Meta.
+- Registro que já está em "falhou": o candidato reenvia pelo LOGIN → Documentos inscrição → Verificar.
+
 # Versão 2.16.9 — curso e turno funcionam no WhatsApp Web (19/11/2026) — COLAR O JSON NOVO NA META
 
 - No WhatsApp Web, escolher o curso (lista com ação ao selecionar) voltava o Flow para a 1ª tela sem chamar o

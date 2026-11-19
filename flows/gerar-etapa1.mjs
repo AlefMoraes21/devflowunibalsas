@@ -144,8 +144,7 @@ const flow = {
             // Sem on-select-action: no WhatsApp Web a escolha com ação volta o Flow para a 1ª tela sem chamar o
             // servidor (19/11). O Avançar traz os turnos (curso novo) e, com o turno escolhido, segue.
             { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
-            { type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.', visible: '${data.turno_visivel} == false' },
-                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
+                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [{ type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.' }] },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id', 'turno_id'])) }
           ]
         }]
@@ -171,8 +170,7 @@ const flow = {
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
             { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
-            { type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.', visible: '${data.turno_visivel} == false' },
-                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
+                        { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [{ type: 'TextCaption', text: 'Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.' }] },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
             { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },

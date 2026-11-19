@@ -12,6 +12,9 @@ const FILA = 'inscricoesFila';
 const CACHE = 'flowCache';
 const FINAIS = new Set(['concluida', 'duplicada', 'conferir', 'falhou']);
 const MAX_TENTATIVAS = 6;
+// Docs de inscrição recebidos, mas o portal ainda não mostra a etapa "Documentos inscrição": espera com calma
+// (a cada 10 min, por até ~24 h) em vez de desistir em 6 tentativas e deixar os arquivos parados.
+const MAX_TENTATIVAS_DOCS_PORTAL = 150;
 export const DUPLICADA_MSG = 'Você já possui inscrição neste processo seletivo ou no curso selecionado! Acesse o Portal do candidato para acompanhar sua inscrição.';
 const hash = v => crypto.createHash('sha256').update(String(v)).digest('hex');
 const digits = v => String(v ?? '').replace(/\D/g, '');
@@ -500,6 +503,8 @@ export function createEtapa1({
     const enviados = {};
     if (!passoId) {
       // Etapa sem botão = documentos já em análise (ex.: enviados pelo site). Sem a etapa: o portal ainda não liberou.
+      // Diagnóstico: quais etapas o portal devolveu (só títulos) e de qual inscrição/processo.
+      if (!etapa) log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'docs_portal_etapas', applyment_id: sessao.applyment_id ?? '', processo, esperado: String(rec.processo), etapas: (stages ?? []).map(x => x.title).join(' | ').slice(0, 200) });
       if (!etapa) throw new ErroPasso('A etapa Documentos inscrição ainda não apareceu no portal.', { motivo: 'docs_nao_liberado' });
       log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'documentos_inscricao_ja_em_analise' });
       return { applyment_id: sessao.applyment_id, processo, stages, enviados };
@@ -767,13 +772,17 @@ export function createEtapa1({
       const passoAntes = rec.passo;
       const tentativas = (rec.tentativas ?? 0) + 1;
       const final = e instanceof ErroPasso && e.final;
-      const status = final ? (e.motivo === 'duplicada' ? 'duplicada' : 'conferir') : tentativas >= MAX_TENTATIVAS ? 'falhou' : rec.status;
+      const esperaPortal = e?.motivo === 'docs_nao_liberado';
+      const limite = esperaPortal ? MAX_TENTATIVAS_DOCS_PORTAL : MAX_TENTATIVAS;
+      const status = final ? (e.motivo === 'duplicada' ? 'duplicada' : 'conferir') : tentativas >= limite ? 'falhou' : rec.status;
       // Antes da conclusão, uma nova tentativa recomeça numa sessão nova do Rubeus.
       const passo = !final && ['basicos', 'turnos', 'curso', 'final'].includes(rec.passo) ? 'inicio' : rec.passo;
       await salvar({ status, passo, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0 });
-      const evento = { event: FINAIS.has(status) ? 'etapa1_fila_atencao' : 'etapa1_fila_erro', id: curto(id), passo: passoAntes, status, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
-      FINAIS.has(status) ? console.error(JSON.stringify(evento)) : log(evento);
-      if (!FINAIS.has(status)) await disparar(id, Math.min(600, 15 * 2 ** tentativas));
+      // Aviso de atenção na 6ª espera (a equipe confere o portal); depois só o log comum até liberar.
+      const atencao = FINAIS.has(status) || (esperaPortal && tentativas === MAX_TENTATIVAS);
+      const evento = { event: atencao ? 'etapa1_fila_atencao' : 'etapa1_fila_erro', id: curto(id), passo: passoAntes, status, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
+      atencao ? console.error(JSON.stringify(evento)) : log(evento);
+      if (!FINAIS.has(status)) await disparar(id, esperaPortal ? Math.min(600, 60 * tentativas) : Math.min(600, 15 * 2 ** tentativas));
       return 204;
     }
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.

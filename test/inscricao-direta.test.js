@@ -248,6 +248,33 @@ test('Docs de inscrição com anexo que não abre (Flow em rascunho): envia os b
   assert.ok(erros.some(e => e.includes('docs_refazer')), 'a equipe vê o alerta no log');
 });
 
+test('Docs de inscrição recebidos antes de o portal mostrar a etapa: o worker espera (não desiste em 6) e entrega quando aparece', async () => {
+  let liberado = false;
+  const inscricao = { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 }, cta_link: 'presencial/feedback/920259' };
+  const docs = { title: 'Documentos inscrição', feedback: { complementary_text: 'Pendentes', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300696' };
+  const M = montar('20385', { etapas: () => liberado ? [inscricao, docs] : [inscricao] });
+  await cache(M.store, '20385');
+  const { status } = await inscrever(M, '20385');
+  const a = await toque(M, 'INSC_STATUS', 'verificar_documentos', status.data.estado);
+  const b = await toque(M, 'INSC_DOC_A', 'enviar_documento_inscricao', a.data.estado, { arquivo: MIDIA(28) });
+  const c = await toque(M, 'INSC_DOC_B', 'enviar_documento_inscricao', b.data.estado, { arquivo: [] });
+  await toque(M, 'INSC_DOC_C', 'enviar_documento_inscricao', c.data.estado, { arquivo: MIDIA(27) });
+  const id = M.fila[0].id;
+  const erros = []; const original = console.error; console.error = m => erros.push(String(m));
+  try { for (let i = 0; i < 8; i++) await M.e1.worker(id); } finally { console.error = original; }
+  let rec = (await M.store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'inscrita', 'continua esperando o portal'); assert.equal(rec.tentativas, 8);
+  assert.equal(erros.filter(e => e.includes('docs_nao_liberado')).length, 1, 'um alerta só, na 6ª espera');
+  const esperas = M.fila.filter(x => x.id === id && x.atrasoSeg).map(x => x.atrasoSeg);
+  assert.ok(esperas.length && esperas.every(s => s <= 600), 'reagenda em até 10 min');
+  assert.equal(M.portal.estado.lotes.length, 0);
+  liberado = true;
+  await M.e1.worker(id);
+  rec = (await M.store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'concluida');
+  assert.deepEqual(M.portal.estado.lotes.map(l => l.codigos), [['28', '27']]);
+});
+
 test('Cache de turnos sem pré-carga (ENEM/Transf./Portador): o worker lê os turnos na tela de curso do processo e a tela do Flow libera o turno', async () => {
   const M = montar('20386');
   const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
