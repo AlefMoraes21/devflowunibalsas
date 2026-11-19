@@ -42,7 +42,11 @@ function rubeusInscricao() {
     const a = req.data.acao; chamadas.push({ a, data: req.data });
     if (a === 'selecionar_processo') return tela('DADOS_BASICOS', {});
     if (a === 'enviar_dados_basicos') return tela('CURSO_INGRESSO', { cursos: CURSOS, turnos: [] });
-    if (a === 'buscar_turnos') return tela('CURSO_INGRESSO', { cursos: CURSOS, turnos: TURNOS[req.data.curso_id] });
+    if (a === 'buscar_turnos') {
+      // Como o runStep real: o estado só abre na mesma tela em que foi selado (CURSO_INGRESSO / CURSO_ENEM).
+      openState(req.data.estado, req.screen);
+      return tela('CURSO_INGRESSO', { cursos: CURSOS, turnos: TURNOS[req.data.curso_id] });
+    }
     if (a === 'avancar_curso_ingresso' || a === 'avancar_curso_interesse') return tela('QUASE_LA', {});
     if (a === 'enviar_informacoes_complementares') return tela('ACOMPANHAMENTO', { applyment_id: '901' });
     throw new Error('inesperado ' + a);
@@ -242,6 +246,17 @@ test('Docs de inscrição com anexo que não abre (Flow em rascunho): envia os b
   assert.ok(!rec.docs_inscricao.arquivos['28']); assert.deepEqual(rec.docs_refazer, ['28']);
   assert.notEqual(rec.status, 'falhou'); assert.ok(!rec.tentativas, 'não conta como erro do sistema');
   assert.ok(erros.some(e => e.includes('docs_refazer')), 'a equipe vê o alerta no log');
+});
+
+test('Cache de turnos sem pré-carga (ENEM/Transf./Portador): o worker lê os turnos na tela de curso do processo e a tela do Flow libera o turno', async () => {
+  const M = montar('20386');
+  const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
+  await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+  const erros = []; const original = console.error; console.error = m => erros.push(String(m));
+  try { await M.e1.worker(M.fila[0].id); } finally { console.error = original; }
+  const c = (await M.store.get('etapa1-20386', 'flowCache')).record;
+  assert.ok(Object.keys(c.turnos ?? {}).length > 0, 'turnos no cache (antes: com_turno 0, a candidata ficava presa)');
+  assert.ok(!erros.some(e => e.includes('sem_turnos')));
 });
 
 test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim) e volta ao status com as notas', async () => {

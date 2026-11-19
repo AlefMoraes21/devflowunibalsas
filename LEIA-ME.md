@@ -1,3 +1,11 @@
+# Versão 2.16.8 — turnos do ENEM, Transferência e Portador (19/11/2026)
+
+- Homologação ENEM (Fernanda Beatriz Teste, pelo app): presa na tela de curso e notas ("Estamos carregando os
+  turnos…"). O cache de turnos era lido sempre na tela de curso do Vestibular (CURSO_INTERESSE); no ENEM
+  (CURSO_ENEM) e na Transferência/Portador (CURSO_INGRESSO) o estado não abria e nenhum turno vinha
+  (`etapa1_cache com_turno 0`). Agora a consulta usa a tela do próprio processo.
+- Leitura sem nenhum turno não grava o cache e gera alerta `etapa1_cache_atencao sem_turnos`.
+
 # Versão 2.16.7 — prevenção nos 4 processos (18/11/2026)
 
 Revisão das correções da homologação do Vestibular nos outros processos (Transferência, Portador, ENEM):

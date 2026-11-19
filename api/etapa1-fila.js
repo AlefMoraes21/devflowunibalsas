@@ -84,20 +84,24 @@ export function createEtapa1({
     await gravarCache(processo, { tema });
     log({ event: 'etapa1_cache', processo, tema: true });
   }
-  // Busca os turnos de todos os cursos usando a sessão de uma tela CURSO_INTERESSE (só leitura).
-  async function turnosDeTodos(estadoCurso, cursos, processo) {
+  // Busca os turnos de todos os cursos usando a sessão da tela de curso do Rubeus (só leitura). A tela muda por
+  // processo (CURSO_INTERESSE no Vestibular, CURSO_ENEM no ENEM, CURSO_INGRESSO…): a consulta usa a mesma tela do
+  // estado, senão o estado não abre e nenhum turno vem (bug de 19/11: ENEM travado em "carregando os turnos").
+  async function turnosDeTodos(estadoCurso, cursos, processo, telaCurso = 'CURSO_INTERESSE') {
     const turnos = {};
     const fila = [...cursos];
     async function trabalhador() {
       for (let c = fila.shift(); c; c = fila.shift()) {
         try {
-          const r = await runStep({ screen: 'CURSO_INTERESSE', action: 'data_exchange', flow_token: 'etapa1-cache', data: { acao: 'buscar_turnos', estado: estadoCurso, curso_id: c.id } });
+          const r = await runStep({ screen: telaCurso, action: 'data_exchange', flow_token: 'etapa1-cache', data: { acao: 'buscar_turnos', estado: estadoCurso, curso_id: c.id } });
           const st = openState(r.data.estado, r.screen);
           if (!st.erro && st.turnos?.length) turnos[c.id] = st.turnos;
         } catch {}
       }
     }
     await Promise.all([1, 2, 3, 4].map(trabalhador));
+    // Nenhum turno lido (Rubeus fora ou sessão inválida): não apaga os turnos que o cache já tem.
+    if (!Object.keys(turnos).length) { console.error(JSON.stringify({ event: 'etapa1_cache_atencao', processo, motivo: 'sem_turnos', tela: telaCurso })); return; }
     await gravarCache(processo, { cursos, turnos });
     log({ event: 'etapa1_cache', processo, cursos: cursos.length, com_turno: Object.keys(turnos).length });
   }
@@ -109,7 +113,7 @@ export function createEtapa1({
     aquecendo.add(processo);
     try {
       const st = openState(respostaCurso.data.estado, respostaCurso.screen);
-      if (st.cursos?.length) await turnosDeTodos(respostaCurso.data.estado, st.cursos, processo);
+      if (st.cursos?.length) await turnosDeTodos(respostaCurso.data.estado, st.cursos, processo, respostaCurso.screen);
     } finally { aquecendo.delete(processo); }
   }
 
@@ -560,7 +564,7 @@ export function createEtapa1({
           const c = await lerCache(rec.processo, { fresco: true });
           if (!c?.cursos?.length || !cacheCompletoSemTema(c) || clock() - (c.atualizado ?? 0) > 6 * 3600000) {
             await gravarCache(rec.processo, { cursos: st.cursos });
-            try { await turnosDeTodos(r.data.estado, st.cursos, rec.processo); } catch {}
+            try { await turnosDeTodos(r.data.estado, st.cursos, rec.processo, r.screen); } catch {}
           }
         }
         return salvar({ passo: 'turnos', ck: ck(r) });
@@ -575,7 +579,7 @@ export function createEtapa1({
         // Aproveita a sessão para renovar o cache de cursos e turnos (só leitura).
         const c = await lerCache(rec.processo, { fresco: true });
         if (!c?.atualizado || clock() - c.atualizado > 6 * 3600000 || !cacheCompletoSemTema(c)) {
-          try { await turnosDeTodos(rec.ck.estado, st.cursos, rec.processo); } catch {}
+          try { await turnosDeTodos(rec.ck.estado, st.cursos, rec.processo, rec.ck.screen); } catch {}
         }
         return salvar({ passo: 'curso', ck: ck(r) });
       }
