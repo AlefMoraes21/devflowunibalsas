@@ -615,15 +615,12 @@
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
-                "required": true,
-                "on-select-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "buscar_turnos",
-                    "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}"
-                  }
-                }
+                "required": true
+              },
+              {
+                "type": "TextCaption",
+                "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.",
+                "visible": "${data.turno_visivel} == false"
               },
               {
                 "type": "If",
@@ -801,23 +798,12 @@
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
-                "required": true,
-                "on-select-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "buscar_turnos",
-                    "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}",
-                    "numero_inscricao_enem": "${form.numero_inscricao_enem}",
-                    "ano_enem": "${form.ano_enem}",
-                    "nota_natureza_enem": "${form.nota_natureza_enem}",
-                    "nota_humanas_enem": "${form.nota_humanas_enem}",
-                    "nota_matematica_enem": "${form.nota_matematica_enem}",
-                    "nota_linguagens_enem": "${form.nota_linguagens_enem}",
-                    "nota_redacao_enem": "${form.nota_redacao_enem}"
-                  }
-                }
+                "required": true
+              },
+              {
+                "type": "TextCaption",
+                "text": "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo.",
+                "visible": "${data.turno_visivel} == false"
               },
               {
                 "type": "If",

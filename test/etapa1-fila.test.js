@@ -187,6 +187,28 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
 
+test('Curso e turno só com o Avançar (sem ação na lista: WhatsApp Web): 1º Avançar traz os turnos, 2º segue — nos 4 processos', async () => {
+  for (const processo of ['20383', '20385', '20384', '20386']) {
+    const { e1: E, store } = montar();
+    await store.create('etapa1-' + processo, { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
+    const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: processo });
+    const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+    const enem = processo === '20386';
+    assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO', processo);
+    assert.equal(curso.data.turno_visivel, false);
+    const extra = enem ? ENEM : {};
+    const comTurnos = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'ads', turno_id: '', ...extra });
+    assert.equal(comTurnos.screen, curso.screen, processo + ': 1º Avançar fica na tela e mostra os turnos');
+    assert.equal(comTurnos.data.turno_visivel, true); assert.equal(comTurnos.data.valor_turno_id, 'not', 'turno único já marcado');
+    assert.equal(comTurnos.data.tem_erro, false);
+    if (enem) assert.equal(comTurnos.data.valor_numero_inscricao_enem, ENEM.numero_inscricao_enem, 'as notas digitadas continuam');
+    const quase = await e1(E, curso.screen, 'escolher_curso', comTurnos.data.estado, { curso_id: 'ads', turno_id: 'not', ...extra });
+    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': 2º Avançar segue');
+  }
+  const json = JSON.stringify(FLOW_E1.screens.filter(x => /^INSC_CURSO/.test(x.id)));
+  assert.doesNotMatch(json, /on-select-action/, 'listas sem ação ao selecionar');
+});
+
 test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o curso com as notas e conclui sem redação', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
   await store.create('etapa1-20386', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');

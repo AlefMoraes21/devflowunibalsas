@@ -1,3 +1,13 @@
+# Versão 2.16.9 — curso e turno funcionam no WhatsApp Web (19/11/2026) — COLAR O JSON NOVO NA META
+
+- No WhatsApp Web, escolher o curso (lista com ação ao selecionar) voltava o Flow para a 1ª tela sem chamar o
+  servidor; no app funcionava. As listas de curso (INSC_CURSO: Vestibular, Transferência, Portador;
+  INSC_CURSO_ENEM: ENEM) não têm mais ação: o 1º Avançar traz os turnos logo abaixo (turno único já marcado) e o
+  2º segue. Legenda: "Escolha o curso e toque em Avançar: os turnos aparecem logo abaixo."
+- O servidor continua aceitando `buscar_turnos` (quem estiver com o Flow antigo aberto não quebra).
+- Outras limitações só do Web (não do nosso Flow): calendário não rola para anos antigos pela automação; título
+  e rótulo do rodapé às vezes repetem os da tela anterior.
+
 # Versão 2.16.8 — turnos do ENEM, Transferência e Portador (19/11/2026)
 
 - Homologação ENEM (Fernanda Beatriz Teste, pelo app): presa na tela de curso e notas ("Estamos carregando os
