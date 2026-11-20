@@ -78,7 +78,7 @@ const flow = {
             // Página 1 = porta de entrada: "Iniciar inscrição" (etapa 1) ou "LOGIN" (o servidor leva à etapa em que parou).
             { type: 'TextSubheading', text: 'Escolha seu processo e selecione uma opção' },
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
-            { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
+            { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Processo seletivo', required: true, 'data-source': [
               { id: '20383', title: 'Vestibular Online 2027/1' },
               { id: '20385', title: 'Transferência 2027/1' },
               { id: '20384', title: 'Portador de Diploma 2027/1' },
@@ -107,9 +107,12 @@ const flow = {
             erroTexto,
             { type: 'TextInput', name: 'nome', label: 'Nome completo', 'input-type': 'text', required: true },
             { type: 'OptIn', name: 'possui_nome_social', label: 'Possuo nome social', required: false },
-            { type: 'If', condition: '${form.possui_nome_social} == true', then: [{ type: 'TextInput', name: 'nome_social', label: 'Nome social', 'input-type': 'text', required: true }], else: [] },
+            // Sem If (teste do WhatsApp Web, 20/11): o campo fica sempre visível; o Run exige quando a caixa está marcada.
+            { type: 'TextInput', name: 'nome_social', label: 'Nome social (opcional)', 'input-type': 'text', required: false },
             { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
-            { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', 'max-date': '${data.data_maxima_nascimento}', required: true },
+            // DatePicker (seletor clássico) no lugar do CalendarPicker: suspeito de estragar a navegação do WhatsApp Web
+            // na passagem Dados básicos → Curso (20/11). Também devolve AAAA-MM-DD.
+            { type: 'DatePicker', name: 'data_nascimento', label: 'Data de nascimento', 'min-date': '1920-01-01', 'max-date': '${data.data_maxima_nascimento}', required: true },
             { type: 'TextInput', name: 'celular', label: 'Celular', 'helper-text': 'Para facilitar o nosso contato, confirme o seu WhatsApp, de preferência.', 'input-type': 'phone', required: true },
             { type: 'RadioButtonsGroup', name: 'genero', label: 'Gênero', required: true, 'data-source': [{ id: 'M', title: 'Masculino' }, { id: 'F', title: 'Feminino' }] },
             // "Leia mais" abre a página da LGPD. Antes abria a tela INSC_PRIVACIDADE, cujo "Voltar" navegava de novo
@@ -163,7 +166,7 @@ const flow = {
             { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': opcoesCursos(), required: true },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
-            { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
+            { type: 'Dropdown', name: 'ano_enem', label: 'Ano do ENEM', 'data-source': '${data.anos_enem}', required: true },
             notaEnem('nota_natureza_enem', 'Nota de ciências da natureza'),
             notaEnem('nota_humanas_enem', 'Nota de ciências humanas'),
             notaEnem('nota_matematica_enem', 'Nota de matemática'),
@@ -204,7 +207,7 @@ const flow = {
               { type: 'CheckboxGroup', name: 'tipos_deficiencia', label: 'Necessidades especiais', required: true, 'data-source': [{ id: 'auditiva', title: 'Auditiva' }, { id: 'fala', title: 'Fala' }, { id: 'fisica', title: 'Física' }, { id: 'intelectual', title: 'Intelectual' }, { id: 'visual', title: 'Visual' }, { id: 'mental', title: 'Mental' }, { id: 'outras', title: 'Outras' }] },
               { type: 'TextInput', name: 'deficiencia_outra', label: 'Se marcou Outras, especifique:', 'input-type': 'text', required: false }
             ], else: [] },
-            { type: 'Dropdown', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
+            { type: 'Dropdown', name: 'como_conheceu', label: 'Como nos conheceu?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]

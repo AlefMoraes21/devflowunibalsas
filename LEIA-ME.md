@@ -1,3 +1,9 @@
+# Versão 2.16.22 — Dados básicos sem calendário e sem If (teste do WhatsApp Web) (20/11/2026) — COLAR O JSON NOVO NA META
+
+- Teste da 2.16.21 no Web: com a tela de curso sem nada do servidor (lista fixa, sem If, sem on-select), a passagem Dados básicos → Curso continuou falhando na 1ª passada (02:03:50 tela de curso; 02:03:53 e1_iniciar da 1ª tela). As outras passagens funcionam, então o suspeito é a tela de Dados básicos.
+- Dados básicos: CalendarPicker trocado por DatePicker (seletor clássico, AAAA-MM-DD) e o If do nome social removido (campo "Nome social (opcional)" sempre visível; o Run continua exigindo quando a caixa está marcada).
+- Rótulos de lista com até 20 caracteres (aviso da Meta): "Processo seletivo", "Ano do ENEM", "Como nos conheceu?".
+
 # Versão 2.16.21 — cursos fixos no Flow; o worker acha curso e turno no Rubeus (20/11/2026) — COLAR O JSON NOVO NA META
 
 - **Causa do Web confirmada nos logs (20/11):** ao escolher o curso, o Run respondia com a mesma tela (INSC_CURSO) já com os turnos; o WhatsApp Web mostrava a 1ª tela em vez de redesenhar a tela de curso. Tocando de novo, a tela de curso aparecia certa. Só a etapa do curso fazia esse tipo de resposta.

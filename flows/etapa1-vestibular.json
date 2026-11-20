@@ -167,7 +167,7 @@
               {
                 "type": "Dropdown",
                 "name": "processo_seletivo_id",
-                "label": "Escolha o processo seletivo",
+                "label": "Processo seletivo",
                 "required": true,
                 "data-source": [
                   {
@@ -327,18 +327,11 @@
                 "required": false
               },
               {
-                "type": "If",
-                "condition": "${form.possui_nome_social} == true",
-                "then": [
-                  {
-                    "type": "TextInput",
-                    "name": "nome_social",
-                    "label": "Nome social",
-                    "input-type": "text",
-                    "required": true
-                  }
-                ],
-                "else": []
+                "type": "TextInput",
+                "name": "nome_social",
+                "label": "Nome social (opcional)",
+                "input-type": "text",
+                "required": false
               },
               {
                 "type": "TextInput",
@@ -348,10 +341,9 @@
                 "required": true
               },
               {
-                "type": "CalendarPicker",
+                "type": "DatePicker",
                 "name": "data_nascimento",
                 "label": "Data de nascimento",
-                "mode": "single",
                 "min-date": "1920-01-01",
                 "max-date": "${data.data_maxima_nascimento}",
                 "required": true
@@ -689,7 +681,7 @@
               {
                 "type": "Dropdown",
                 "name": "ano_enem",
-                "label": "Ano de realização do ENEM",
+                "label": "Ano do ENEM",
                 "data-source": "${data.anos_enem}",
                 "required": true
               },
@@ -990,7 +982,7 @@
               {
                 "type": "Dropdown",
                 "name": "como_conheceu",
-                "label": "Como ficou sabendo do processo?",
+                "label": "Como nos conheceu?",
                 "required": true,
                 "data-source": "${data.origens}"
               },
