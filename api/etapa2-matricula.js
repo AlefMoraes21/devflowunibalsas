@@ -274,7 +274,10 @@ export function createEtapa2({
     const falhou = pedida && (rec.cobranca_erro || (rec.cobranca_tentativas ?? 0) >= MAX_TENTATIVAS_AVISO);
     if (falhou) return render('MATR_PAGAMENTO', { ...base, valor: valorDaTaxa(rec), botao: 'Tentar novamente',
       mensagem: 'Não conseguimos gerar o Pix da sua taxa agora. A equipe da matrícula já foi avisada. Você pode tentar de novo mais tarde ou pagar pelo Portal do candidato (vestibular.unibalsas.edu.br/presencial).' });
-    const mensagem = enviada
+    // Envio sem confirmação do Blip (cobranca_incerta): não afirma que chegou.
+    const mensagem = enviada && rec.cobranca_incerta
+      ? 'Solicitamos o envio da mensagem de pagamento. Se ela não chegar em alguns minutos, toque em "Reenviar mensagem".'
+      : enviada
       ? `Enviamos a mensagem de pagamento aqui no WhatsApp às ${horaBr(rec.cobranca_enviada_em)}. O Pix vale 1 hora: se ele venceu ou você não achou a mensagem, toque em "Reenviar mensagem".`
       : pedida ? 'Estamos preparando a sua mensagem de pagamento. Ela chega aqui no WhatsApp em instantes.'
         : 'Ao tocar em "Realizar pagamento", você recebe aqui no WhatsApp uma mensagem com o Pix (copia e cola) e o link para pagar com cartão de crédito.';
@@ -896,14 +899,19 @@ export function createEtapa2({
   // gerado fica na fila por 50 min para as novas tentativas não gerarem outro; depois disso gera um novo.
   const PIX_VALIDO_MS = 50 * 60000;
   // Marca "enviando" deste pedido, gravada (e confirmada) antes de chamar o Blip: se a execução cair depois do
-  // envio, a próxima vê a marca e não manda de novo. Devolve false se não conseguiu gravar (aí não envia).
+  // envio, a próxima vê a marca e não manda de novo. Exclusiva pela gravação condicional (updateTime), sem depender
+  // só da trava do vigia. Devolve:
+  //  'dono'     → esta execução pegou a marca e pode chamar o Blip;
+  //  'ocupado'  → outra execução já tem a marca deste pedido, ou ele já foi enviado: não chama o Blip nem mexe na marca;
+  //  'falhou'   → não conseguiu gravar (pedido trocado ou conflito): não envia nem mexe na marca.
   async function marcarEnvioCobranca(id, pedido) {
     for (let i = 0; i < 4; i++) {
       const a = await store.get(id, FILA);
-      if (!a || a.record.cobranca_pedida_em !== pedido) return false;
-      if (await store.update(id, { ...a.record, cobranca_enviando: pedido }, a.version, FILA)) return true;
+      if (!a || a.record.cobranca_pedida_em !== pedido) return 'falhou';
+      if (a.record.cobranca_enviando === pedido || a.record.cobranca_enviada_em >= pedido) return 'ocupado';
+      if (await store.update(id, { ...a.record, cobranca_enviando: pedido }, a.version, FILA)) return 'dono';
     }
-    return false;
+    return 'falhou';
   }
   async function enviarCobranca(id, rec, sessao, processo, passoId) {
     const salvar = salvarFilaDe(id);
@@ -912,16 +920,25 @@ export function createEtapa2({
     // mostra "Enviamos…" e o candidato pode tocar em "Reenviar mensagem" (pedido novo) se não achou.
     const antes = (await store.get(id, FILA))?.record ?? rec;
     if (antes.cobranca_pedida_em && antes.cobranca_enviando === antes.cobranca_pedida_em && !(antes.cobranca_enviada_em >= antes.cobranca_pedida_em)) {
-      await salvar({ cobranca_enviada_em: clock(), cobranca_incerta: true, cobranca_enviando: null, cobranca_erro: null }).catch(() => {});
+      // A marca fica (não é desta execução); "enviada" já impede marcar de novo o mesmo pedido.
+      await salvar({ cobranca_enviada_em: clock(), cobranca_incerta: true, cobranca_erro: null }).catch(() => {});
       console.warn(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: 'envio_interrompido' }));
       return true;
     }
-    let ok = false, motivo = '', pixRecusado = false;
+    let ok = false, motivo = '', pixRecusado = false, dono = false;
     try {
       const bruto = await portalSite.passoBruto(sessao, passoId, processo);
       const passo = lerPassoPagamento(bruto);
       const contato = contatoDaResposta(bruto)?.celular ? contatoDaResposta(bruto) : rec.contato;
       await guardarContato(id, rec, contato);
+      // Sem celular (nem no portal nem guardado): a mensagem não teria para onde ir, então não gera o Pix no TOTVS.
+      // Não gasta as tentativas; a equipe é avisada uma vez e a tela orienta pagar pelo Portal do candidato.
+      if (!contato?.celular) {
+        await salvar({ cobranca_erro: 'sem_celular', cobranca_tentativas: MAX_TENTATIVAS_AVISO }).catch(() => {});
+        console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: 'sem_celular' }));
+        log({ event: 'etapa_final', id: curto(id), passo: 'cobranca_sem_celular' });
+        return true;
+      }
       // Fase de teste (AVISOS_SO_PARA): celular fora da lista não recebe a mensagem, então nem gera o Pix no TOTVS.
       // Não é falha: sem alerta para a equipe; a tela orienta pagar pelo portal.
       if (contato?.celular && avisos.permitido && !avisos.permitido(contato.celular)) {
@@ -948,8 +965,13 @@ export function createEtapa2({
       else if (!contato?.celular) motivo = 'sem_celular';
       else if (!centavos) motivo = 'sem_valor';
       else if (((r => r?.cobranca_enviada_em && r.cobranca_enviada_em >= (r.cobranca_pedida_em ?? 0))((await store.get(id, FILA))?.record))) { ok = true; motivo = 'ja_enviada'; }
-      else if (!(await marcarEnvioCobranca(id, antes.cobranca_pedida_em))) motivo = 'marcar';
       else {
+        const marca = await marcarEnvioCobranca(id, antes.cobranca_pedida_em);
+        if (marca === 'ocupado') motivo = 'outra_execucao';
+        else if (marca !== 'dono') motivo = 'marcar';
+        else dono = true;
+      }
+      if (dono) {
         // Tudo do sistema: Pix do TOTVS, valor (38658), recebedor do próprio Pix, nome do portal (a chave, o Blip lê da cobrança).
         const r = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
           referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) }, { detalhe: true });
@@ -960,10 +982,14 @@ export function createEtapa2({
       }
     } catch (e) { motivo = String(e?.message ?? e).slice(0, 120); }
     if (motivo === 'ja_enviada') return true;
+    // Outra execução está com este pedido (ou já enviou): não conta tentativa, não mexe em nada.
+    if (motivo === 'outra_execucao') { log({ event: 'etapa_final', id: curto(id), passo: 'cobranca_outra_execucao' }); return true; }
     if (motivo === 'incerto') console.warn(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: 'blip_sem_resposta' }));
-    await salvar(ok ? { cobranca_enviada_em: clock(), cobranca_erro: null, cobranca_enviando: null, ...(motivo === 'incerto' ? { cobranca_incerta: true } : {}) }
+    // Só quem pegou a marca a tira (envio confirmado, incerto ou recusa clara); quem não pegou nunca a apaga.
+    const soltar = dono ? { cobranca_enviando: null } : {};
+    await salvar(ok ? { cobranca_enviada_em: clock(), cobranca_erro: null, cobranca_incerta: motivo === 'incerto', ...soltar }
       : motivo === 'pix_recusado' ? { cobranca_tentativas: MAX_TENTATIVAS_AVISO, cobranca_erro: 'pix_recusado' }
-        : { cobranca_tentativas: tentativa, cobranca_enviando: null }).catch(() => {});
+        : { cobranca_tentativas: tentativa, ...soltar }).catch(() => {});
     if (motivo === 'pix_recusado') console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo }));
     else if (!ok && tentativa >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: motivo }));
     log({ event: 'etapa_final', id: curto(id), passo: ok ? 'cobranca_enviada' : 'cobranca_falhou', tentativa, motivo: motivo || undefined });

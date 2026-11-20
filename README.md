@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.6** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.6`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.7** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.7`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -213,7 +213,12 @@ gcloud scheduler jobs create http unibalsas-varredura --project talks-servidor -
 Se a execução cair depois disso, ou o Blip não responder (tempo esgotado, rede, 5xx), a cobrança conta como enviada e
 **não é repetida sozinha**; o candidato vê "Enviamos…" e pode tocar em "Reenviar mensagem" (pedido novo). Log de atenção
 `envio_interrompido` / `blip_sem_resposta`. Recusa clara do Blip continua tentando de novo (até 5×, mesmo Pix). Na fase
-de teste, celular fora do `AVISOS_SO_PARA` não gera Pix nem alerta a equipe. Roteiro de homologação: `ROTEIRO-HOMOLOGACAO.md`.
+de teste, celular fora do `AVISOS_SO_PARA` não gera Pix nem alerta a equipe.
+
+**2.17.7:** sem celular (portal e fila) não gera Pix, não gasta as 5 tentativas e avisa a equipe uma vez. A marca
+`cobranca_enviando` é exclusiva pela gravação condicional: outra execução não a pega, não a apaga e não remarca pedido
+já enviado (não depende só da trava do vigia). Envio sem confirmação do Blip mostra "Solicitamos o envio…" em vez de
+"Enviamos…". Roteiro de homologação: `ROTEIRO-HOMOLOGACAO.md`.
 
 ## Avisos pelo Blip (vigias)
 

@@ -1,3 +1,11 @@
+# Versão 2.17.7 — cobrança: Pix só com celular e marca de envio exclusiva (20/11/2026) — só servidor
+
+- Sem celular (nem no passo do portal nem guardado na fila): não gera o Pix no TOTVS, não gasta as 5 tentativas; alerta `sem_celular` uma vez; a tela orienta o Portal do candidato. Vale com ou sem `AVISOS_SO_PARA`.
+- Marca `cobranca_enviando` exclusiva (revisão do GPT): `marcarEnvioCobranca` devolve `dono`/`ocupado`/`falhou`. Só o dono chama o Blip e tira a marca; quem encontrou a marca de outra execução (ou o pedido já enviado) não chama o Blip, não conta tentativa e não mexe na marca. Tudo pela gravação condicional (updateTime), além da trava do vigia.
+- Execução interrompida: marca o pedido como enviado (incerto) sem apagar a marca alheia.
+- Tela: envio sem confirmação do Blip (`cobranca_incerta`) diz "Solicitamos o envio da mensagem de pagamento. Se ela não chegar em alguns minutos, toque em "Reenviar mensagem"."; envio confirmado zera `cobranca_incerta`.
+- Testes novos (5 falham na 2.17.6, passam na 2.17.7), incluindo as corridas A/B. Vestibular, Transferência, ENEM e LOGIN conferidos no servidor local; a cobrança não rodou no portal real (geraria Pix).
+
 # Versão 2.17.6 — cobrança sem mensagem em dobro e Pix só para a lista de teste (20/11/2026) — só servidor
 
 - Antes: se o Blip demorasse mais de 15 s para responder, ou o Run caísse logo depois do envio, o vigia mandava a cobrança de novo (mensagem em dobro).

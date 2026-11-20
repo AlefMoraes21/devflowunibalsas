@@ -1080,7 +1080,7 @@ test('Matrícula: portal com etapas vazias ou botão em formato desconhecido nã
 });
 
 // ---------------------------------------------------------------- cobrança sem mensagem em dobro (2.17.6)
-async function cenarioCobranca({ cobranca, permitido } = {}) {
+async function cenarioCobranca({ cobranca, permitido, semCelular = false } = {}) {
   const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
   const store = memoria(); const fila = []; const enviados = [];
   const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao() { return true; },
@@ -1095,11 +1095,12 @@ async function cenarioCobranca({ cobranca, permitido } = {}) {
   site.portalSite.popup = async () => ({ success: true, data: { applicantData: [{ field_id: 50901, value: PIX }] } });
   const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
     portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
+  if (semCelular) site.portalSite.passoBruto = async () => JSON.parse(JSON.stringify(passoPagamento()).replaceAll('99988880001', ''));
   const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
   const pedir = async (extra = {}) => { const a = await store.get(id, 'matriculaFila'); const t = Date.now(); await store.update(id, { ...a.record, cobranca_pedida_em: t, cobranca_tentativas: 0, cobranca_erro: null, ...extra }, a.version, 'matriculaFila'); return t; };
   const rodar = async () => { const w = []; const o = console.warn, e = console.error; console.warn = m => w.push(String(m)); console.error = m => w.push(String(m)); try { store.naHora(); await E.vigiarFinal(id); } finally { console.warn = o; console.error = e; } return w; };
   const rec = async () => (await store.get(id, 'matriculaFila')).record;
-  return { E, store, fila, enviados, ctl, id, pedir, rodar, rec };
+  return { E, store, fila, enviados, ctl, id, pedir, rodar, rec, site };
 }
 
 test('Cobrança: Blip sem resposta conta como enviada e NÃO repete sozinha; "Reenviar" (pedido novo) manda de novo', async () => {
@@ -1187,4 +1188,101 @@ test('Cobrança na fase de teste: celular da lista segue normal (Pix gerado e me
   await c.rodar();
   assert.equal(c.ctl.pix, 1); assert.equal(c.enviados.length, 1);
   assert.ok((await c.rec()).cobranca_enviada_em);
+});
+
+// ---------------------------------------------------------------- 2.17.7: sem celular, marca exclusiva, texto do incerto
+test('Cobrança sem celular (nem no portal nem guardado): não gera Pix, não gasta as 5 tentativas e avisa a equipe uma vez', async () => {
+  const c = await cenarioCobranca({ semCelular: true });
+  await c.pedir({ contato: null });
+  const avisos1 = await c.rodar();
+  const avisos2 = await c.rodar();
+  assert.equal(c.ctl.pix, 0, 'nenhuma geração de Pix no TOTVS');
+  assert.equal(c.enviados.length, 0);
+  const r = await c.rec();
+  assert.equal(r.cobranca_erro, 'sem_celular');
+  assert.equal(avisos1.filter(a => a.includes('sem_celular')).length, 1);
+  assert.equal(avisos2.length, 0, 'não repete nem alerta de novo');
+});
+
+test('Marca exclusiva: B leu antes de A marcar; na hora de marcar, B vê a marca de A, não chama o Blip, não conta tentativa e não apaga a marca', async () => {
+  const c = await cenarioCobranca();
+  const pedido = await c.pedir();
+  const { passoPagamento } = await import('./pagamento-fixture.js');
+  // B já passou da checagem inicial (sem marca); enquanto lê o portal, A marca o mesmo pedido.
+  // (o vigia também lê este passo antes, para o valor; a corrida é só na leitura de dentro da cobrança)
+  c.site.portalSite.passoBruto = async () => {
+    if (/enviarCobranca/.test(new Error().stack)) {
+      const a = await c.store.get(c.id, 'matriculaFila');
+      await c.store.update(c.id, { ...a.record, cobranca_enviando: pedido }, a.version, 'matriculaFila');
+    }
+    return passoPagamento();
+  };
+  await c.rodar(); // B
+  assert.equal(c.enviados.length, 0, 'B não chama o Blip');
+  const r = await c.rec();
+  assert.equal(r.cobranca_enviando, pedido, 'a marca de A continua lá');
+  assert.ok(!r.cobranca_tentativas, 'B não conta tentativa');
+  assert.ok(!r.cobranca_enviada_em, 'B não marca como enviada (quem envia é A)');
+});
+
+test('Pedido confirmado entre a checagem "já enviada" e a marcação não é marcado nem enviado de novo', async () => {
+  const c = await cenarioCobranca();
+  const pedido = await c.pedir();
+  const getOriginal = c.store.get.bind(c.store);
+  let confirmou = false;
+  c.store.get = async (id, col) => {
+    const x = await getOriginal(id, col);
+    // Leitura antiga só na checagem "já enviada": chamada direto de enviarCobranca (não pela marcação nem pelas
+    // gravações auxiliares, que regravariam o registro antigo).
+    const quemChamou = new Error().stack.split('\n')[2] ?? '';
+    if (confirmou && x && /enviarCobranca/.test(quemChamou)) { delete x.record.cobranca_enviada_em; }
+    return x;
+  };
+  const { passoPagamento } = await import('./pagamento-fixture.js');
+  c.site.portalSite.passoBruto = async () => {
+    if (/enviarCobranca/.test(new Error().stack)) {
+      const a = await getOriginal(c.id, 'matriculaFila');
+      await c.store.update(c.id, { ...a.record, cobranca_enviada_em: pedido + 1 }, a.version, 'matriculaFila'); // outra execução confirmou
+      confirmou = true;
+    }
+    return passoPagamento();
+  };
+  await c.rodar();
+  assert.equal(c.enviados.length, 0, 'não chama o Blip');
+  const r = await c.rec();
+  assert.equal(r.cobranca_enviando ?? null, null, 'nem deixa marca');
+  assert.ok(!r.cobranca_tentativas);
+});
+
+test('Recusa clara do Blip libera a marca de quem a pegou e a próxima tentativa envia normalmente', async () => {
+  let recusar = true;
+  const c = await cenarioCobranca({ cobranca: () => recusar ? { ok: false, incerto: false } : { ok: true, incerto: false } });
+  await c.pedir();
+  await c.rodar();
+  let r = await c.rec();
+  assert.equal(r.cobranca_enviando, null); assert.equal(r.cobranca_tentativas, 1);
+  recusar = false;
+  await c.rodar();
+  assert.equal(c.enviados.length, 2);
+  r = await c.rec(); assert.ok(r.cobranca_enviada_em >= r.cobranca_pedida_em); assert.equal(r.cobranca_incerta, false);
+});
+
+test('Tela de pagamento: envio sem confirmação do Blip diz "Solicitamos…", confirmado diz "Enviamos…"', async () => {
+  const store = memoria(); const fila = [];
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Concluído', conclusive: 1 } },
+    { title: 'Pagamento - Taxa de matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Pagar' }, cta_link: 'presencial/passo/300670' }] });
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, atualizacao: async () => true, cobranca: async () => true };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, avisos });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = filaDe(st);
+  const t = Date.now();
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_centavos: 100, cobranca_pedida_em: t, cobranca_enviada_em: t + 1, cobranca_incerta: true }, a.version, 'matriculaFila'); }
+  let pag = await continuar(E, st);
+  assert.equal(pag.data.botao, 'Reenviar mensagem');
+  assert.match(pag.data.mensagem, /^Solicitamos o envio da mensagem de pagamento\. Se ela não chegar em alguns minutos, toque em "Reenviar mensagem"\.$/);
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_incerta: false }, a.version, 'matriculaFila'); }
+  pag = await continuar(E, st);
+  assert.match(pag.data.mensagem, /^Enviamos a mensagem de pagamento/);
 });
