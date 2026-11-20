@@ -121,3 +121,26 @@ test('Chave da cobrança: lê a chave do JWS na URL do Pix (campo 26.25), també
   assert.equal(await chaveDaCobrancaPix(codigo, async () => { throw new Error('fora'); }), '');
   assert.equal(await chaveDaCobrancaPix('qualquer'), '');
 });
+
+// 2.17.6: a cobrança diz quando o Blip pode ter recebido sem responder (não repete sozinha) e a lista de teste é
+// conferida antes de gerar o Pix.
+test('Blip: cobrança sem resposta (tempo esgotado, rede ou 5xx) é "incerta"; recusa clara não é', async () => {
+  const dados = { celular: '99988880001', nome: 'MARIA', centavos: 100, codigoPix: PIX, chave: '07344774000189' };
+  const com = fetcher => createAvisosBlip({ env: ENV, fetcher, log: () => {} });
+  assert.deepEqual(await com(async () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); }).cobranca(dados, { detalhe: true }), { ok: false, incerto: true });
+  assert.deepEqual(await com(async () => ({ ok: false, status: 502, json: async () => ({}) })).cobranca(dados, { detalhe: true }), { ok: false, incerto: true });
+  assert.deepEqual(await com(async () => ({ ok: true, status: 200, json: async () => ({ status: 'failure', reason: { description: 'x' } }) })).cobranca(dados, { detalhe: true }), { ok: false, incerto: false });
+  assert.deepEqual(await com(blipFalso().fetcher).cobranca(dados, { detalhe: true }), { ok: true, incerto: false });
+  assert.equal(await com(async () => { throw new Error('rede'); }).cobranca(dados), false, 'sem detalhe: continua true/false');
+  assert.equal(await com(blipFalso().fetcher).cobranca(dados), true);
+});
+
+test('Blip: permitido() confere a lista de teste (AVISOS_SO_PARA) sem enviar nada', () => {
+  const b = blipFalso();
+  const A = createAvisosBlip({ env: { ...ENV, AVISOS_SO_PARA: '5599988880001' }, fetcher: b.fetcher, log: b.log });
+  assert.equal(A.permitido('99988880001'), true);
+  assert.equal(A.permitido('99911112222'), false);
+  assert.equal(A.permitido(''), false);
+  assert.equal(createAvisosBlip({ env: ENV, fetcher: b.fetcher, log: b.log }).permitido('99911112222'), true, 'sem lista: todos');
+  assert.equal(b.enviados.length, 0);
+});

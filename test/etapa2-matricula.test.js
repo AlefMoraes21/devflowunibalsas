@@ -1078,3 +1078,113 @@ test('Matrícula: portal com etapas vazias ou botão em formato desconhecido nã
     if (statusEsperado === 'pendente') assert.ok(fila.at(-1).atrasoSeg > 0, 'tenta de novo depois');
   }
 });
+
+// ---------------------------------------------------------------- cobrança sem mensagem em dobro (2.17.6)
+async function cenarioCobranca({ cobranca, permitido } = {}) {
+  const { PIX, passoPagamento } = await import('./pagamento-fixture.js');
+  const store = memoria(); const fila = []; const enviados = [];
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, async atualizacao() { return true; },
+    async cobranca(d, o) { enviados.push({ d, o }); return cobranca ? cobranca(d, o) : true; }, ...(permitido ? { permitido } : {}) };
+  const site = siteContrato();
+  const ctl = { pix: 0 };
+  site.portalSite.inscricao = async () => ({ processo: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Assinado', conclusive: 1 }, cta_link: 'presencial/passo/300669' },
+    { title: 'Pagamento', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/passo/300670' }] });
+  site.portalSite.passoBruto = async () => passoPagamento();
+  site.portalSite.clicar = async () => { ctl.pix++; return { success: true, data: { place_id: 1016, place_type_id: 6, stage_id: 261005 } }; };
+  site.portalSite.popup = async () => ({ success: true, data: { applicantData: [{ field_id: 50901, value: PIX }] } });
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: rubeusContrato().matricula, validCpf, log: () => {},
+    portalSite: site.portalSite, urlPublica: 'https://run.example', avisos });
+  const id = filaDe(await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC }));
+  const pedir = async (extra = {}) => { const a = await store.get(id, 'matriculaFila'); const t = Date.now(); await store.update(id, { ...a.record, cobranca_pedida_em: t, cobranca_tentativas: 0, cobranca_erro: null, ...extra }, a.version, 'matriculaFila'); return t; };
+  const rodar = async () => { const w = []; const o = console.warn, e = console.error; console.warn = m => w.push(String(m)); console.error = m => w.push(String(m)); try { store.naHora(); await E.vigiarFinal(id); } finally { console.warn = o; console.error = e; } return w; };
+  const rec = async () => (await store.get(id, 'matriculaFila')).record;
+  return { E, store, fila, enviados, ctl, id, pedir, rodar, rec };
+}
+
+test('Cobrança: Blip sem resposta conta como enviada e NÃO repete sozinha; "Reenviar" (pedido novo) manda de novo', async () => {
+  let incerto = true;
+  const c = await cenarioCobranca({ cobranca: () => incerto ? { ok: false, incerto: true } : { ok: true, incerto: false } });
+  await c.pedir();
+  const avisos = await c.rodar();
+  assert.equal(c.enviados.length, 1);
+  assert.deepEqual(c.enviados[0].o, { detalhe: true });
+  let r = await c.rec();
+  assert.ok(r.cobranca_enviada_em >= r.cobranca_pedida_em, 'tela mostra "Enviamos…" com "Reenviar mensagem"');
+  assert.equal(r.cobranca_incerta, true); assert.equal(r.cobranca_enviando, null);
+  assert.ok(avisos.some(a => a.includes('blip_sem_resposta')), 'log de atenção');
+  await c.rodar(); await c.rodar();
+  assert.equal(c.enviados.length, 1, 'nenhum envio automático a mais');
+  incerto = false;
+  await new Promise(res => setTimeout(res, 2));
+  await c.pedir();
+  await c.rodar();
+  assert.equal(c.enviados.length, 2, 'pedido novo do candidato: envia');
+  r = await c.rec(); assert.ok(!r.cobranca_incerta || r.cobranca_enviada_em >= r.cobranca_pedida_em);
+});
+
+test('Cobrança: execução que caiu no meio do envio (marca "enviando" do mesmo pedido) não manda de novo', async () => {
+  const c = await cenarioCobranca();
+  const pedido = Date.now();
+  await c.pedir({ cobranca_pedida_em: pedido, cobranca_enviando: pedido });
+  const avisos = await c.rodar();
+  assert.equal(c.enviados.length, 0); assert.equal(c.ctl.pix, 0, 'nem gera Pix');
+  const r = await c.rec();
+  assert.ok(r.cobranca_enviada_em >= r.cobranca_pedida_em); assert.equal(r.cobranca_incerta, true);
+  assert.ok(avisos.some(a => a.includes('envio_interrompido')));
+});
+
+test('Cobrança: a marca "enviando" é gravada antes do Blip e limpa depois; recusa clara do Blip ainda tenta de novo', async () => {
+  const marcas = [];
+  let c;
+  let recusar = true;
+  c = await cenarioCobranca({ cobranca: async () => { marcas.push((await c.rec()).cobranca_enviando); return recusar ? { ok: false, incerto: false } : { ok: true, incerto: false }; } });
+  const pedido = await c.pedir();
+  await c.rodar();
+  assert.deepEqual(marcas, [pedido], 'marca do pedido já gravada na hora do envio');
+  let r = await c.rec();
+  assert.equal(r.cobranca_enviando, null); assert.equal(r.cobranca_tentativas, 1); assert.ok(!r.cobranca_enviada_em);
+  recusar = false;
+  await c.rodar();
+  assert.equal(c.enviados.length, 2, 'recusa clara: o Blip não mandou, tenta de novo');
+  r = await c.rec();
+  assert.ok(r.cobranca_enviada_em >= r.cobranca_pedida_em); assert.equal(r.cobranca_enviando, null); assert.ok(!r.cobranca_incerta);
+  assert.equal(c.ctl.pix, 1, 'mesmo Pix');
+});
+
+test('Cobrança na fase de teste: celular fora da lista não gera Pix, não alerta a equipe e a tela orienta o portal', async () => {
+  const c = await cenarioCobranca({ permitido: () => false });
+  await c.pedir();
+  const avisos = await c.rodar();
+  await c.rodar();
+  assert.equal(c.ctl.pix, 0, 'nenhum Pix gerado no TOTVS');
+  assert.equal(c.enviados.length, 0);
+  assert.ok(!avisos.some(a => a.includes('etapa_aviso_atencao')), 'sem alerta para a equipe');
+  const r = await c.rec();
+  assert.equal(r.cobranca_erro, 'fora_da_lista');
+});
+
+test('Tela de pagamento com o celular fora da lista de teste: orienta o portal, sem "A equipe já foi avisada"', async () => {
+  const store = memoria(); const fila = [];
+  const r = rubeusFalso();
+  r.matricula.portal = async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+    { title: 'Contrato', feedback: { complementary_text: 'Concluído', conclusive: 1 } },
+    { title: 'Pagamento - Taxa de matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Pagar' }, cta_link: 'presencial/passo/300670' }] });
+  const avisos = { configurado: { atualizacao: () => true, cobranca: () => true }, atualizacao: async () => true, cobranca: async () => true };
+  const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula: r.matricula, validCpf, log: () => {}, avisos });
+  const st = await toque(E, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+  const id = filaDe(st);
+  { const a = await store.get(id, 'matriculaFila'); await store.update(id, { ...a.record, cobranca_centavos: 100, cobranca_pedida_em: Date.now(), cobranca_erro: 'fora_da_lista', cobranca_tentativas: 5 }, a.version, 'matriculaFila'); }
+  const pag = await continuar(E, st);
+  assert.equal(pag.screen, 'MATR_FIM');
+  assert.match(pag.data.mensagem, /Portal do candidato/);
+  assert.doesNotMatch(pag.data.mensagem, /equipe da matrícula já foi avisada/);
+});
+
+test('Cobrança na fase de teste: celular da lista segue normal (Pix gerado e mensagem enviada)', async () => {
+  const c = await cenarioCobranca({ permitido: () => true });
+  await c.pedir();
+  await c.rodar();
+  assert.equal(c.ctl.pix, 1); assert.equal(c.enviados.length, 1);
+  assert.ok((await c.rec()).cobranca_enviada_em);
+});

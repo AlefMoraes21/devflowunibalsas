@@ -1,3 +1,12 @@
+# Versão 2.17.6 — cobrança sem mensagem em dobro e Pix só para a lista de teste (20/11/2026) — só servidor
+
+- Antes: se o Blip demorasse mais de 15 s para responder, ou o Run caísse logo depois do envio, o vigia mandava a cobrança de novo (mensagem em dobro).
+- Agora: marca `cobranca_enviando` gravada (e confirmada) antes do Blip; execução interrompida ou Blip sem resposta contam como enviada, sem repetir sozinho. "Reenviar mensagem" (pedido novo) continua funcionando. Recusa clara do Blip ainda tenta de novo.
+- Fase de teste: celular fora do `AVISOS_SO_PARA` não gera Pix no TOTVS, não alerta a equipe; a tela orienta o Portal do candidato.
+- `blip.js`: `cobranca(dados, { detalhe: true })` devolve `{ ok, incerto }`; `permitido(celular)` confere a lista. Sem `detalhe`, tudo igual (true/false).
+- Testes novos (7 falham na 2.17.5, passam na 2.17.6; o 8º garante que o celular da lista segue normal). Telas e LOGIN conferidos no servidor local; o caminho da cobrança não foi rodado no portal real (geraria Pix de verdade).
+- `ROTEIRO-HOMOLOGACAO.md`: passo a passo da 2ª redação, pago → Matriculado e jornada completa.
+
 # Versão 2.17.5 — varredura de tarefas perdidas e comando "acordar" (20/11/2026) — só servidor
 
 - Antes: se uma tarefa do Cloud Tasks se perdesse (agendamento recusado, execução que caiu no meio, tarefa de outro worker ocupado), a fila ficava parada com os dados guardados até o candidato entrar de novo — e a etapa 1 nem isso.

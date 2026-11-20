@@ -57,12 +57,19 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
   // A chave Pix vem da cobrança de cada Pix (sistema); PIX_CHAVE é só a reserva se a cobrança não responder.
   const configurado = { atualizacao: () => ligado(), cobranca: () => ligado() };
 
-  async function campanha(tipo, recipient, nome, params, extras = {}, contexto = null) {
-    // Fase de teste: AVISOS_SO_PARA="5599...,5511..." manda só para esses números (o resto fica no log).
+  // Fase de teste: AVISOS_SO_PARA="5599...,5511..." manda só para esses números (o resto fica no log).
+  const naLista = recipient => {
     const soPara = String(env.AVISOS_SO_PARA ?? '').split(',').map(n => n.replace(/\D/g, '')).filter(Boolean);
-    if (soPara.length && !soPara.includes(String(recipient).replace(/\D/g, ''))) {
+    return !soPara.length || soPara.includes(String(recipient).replace(/\D/g, ''));
+  };
+  // A mensagem pode sair para este celular? (a cobrança confere antes de gerar o Pix)
+  const permitido = celular => { const r = telefoneBlip(celular); return Boolean(r) && naLista(r); };
+  // Devolve { ok, incerto }: incerto = o Blip pode ter recebido o pedido sem a resposta chegar (tempo esgotado,
+  // rede ou erro 5xx). Nesse caso a cobrança não é repetida sozinha (evita mensagem em dobro).
+  async function campanha(tipo, recipient, nome, params, extras = {}, contexto = null) {
+    if (!naLista(recipient)) {
       log({ event: 'blip_aviso', tipo, enviado: false, motivo: 'fora_da_lista_teste' });
-      return false;
+      return { ok: false, incerto: false };
     }
     const campaign = { name: `${tipo}-${crypto.randomUUID()}`, campaignType: 'Individual', channelType: 'WhatsApp' };
     if (env.BLIP_FLOW_ID) campaign.flowId = env.BLIP_FLOW_ID;
@@ -87,10 +94,10 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
       let j = {}; try { j = await r.json(); } catch {}
       const ok = r.ok && (j.status === undefined || j.status === 'success');
       log({ event: 'blip_aviso', tipo, enviado: ok, http: r.status, status: j.status ?? null, motivo: ok ? undefined : String(j.reason?.description ?? '').slice(0, 160) || undefined });
-      return ok;
+      return { ok, incerto: !ok && r.status >= 500 };
     } catch (e) {
       log({ event: 'blip_aviso', tipo, enviado: false, motivo: e.name });
-      return false;
+      return { ok: false, incerto: true };
     }
   }
 
@@ -99,11 +106,17 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
     if (!configurado.atualizacao()) { log({ event: 'blip_aviso', tipo: 'atualizacao', enviado: false, motivo: 'nao_configurado' }); return false; }
     const recipient = telefoneBlip(celular);
     if (!recipient) { log({ event: 'blip_aviso', tipo: 'atualizacao', enviado: false, motivo: 'telefone_invalido' }); return false; }
-    return campanha('atualizacao', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['processo', variavel(processo)], ['situacao', variavel(situacao)], ['proximo', variavel(proximo)]], {}, contexto);
+    return (await campanha('atualizacao', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['processo', variavel(processo)], ['situacao', variavel(situacao)], ['proximo', variavel(proximo)]], {}, contexto)).ok;
   }
 
   // Cobrança da taxa de matrícula: Pix dinâmico gerado no TOTVS + link do portal (cartão).
-  async function cobranca({ celular, nome, centavos, codigoPix, referencia, recebedor, chave = '' }) {
+  // Com { detalhe: true } devolve { ok, incerto } (ver campanha); sem ele, só true/false.
+  async function cobranca(dados, { detalhe = false } = {}) {
+    const r = await montarCobranca(dados);
+    const d = typeof r === 'object' && r ? r : { ok: r === true, incerto: false };
+    return detalhe ? d : d.ok;
+  }
+  async function montarCobranca({ celular, nome, centavos, codigoPix, referencia, recebedor, chave = '' }) {
     if (!configurado.cobranca()) { log({ event: 'blip_aviso', tipo: 'cobranca', enviado: false, motivo: 'nao_configurado' }); return false; }
     const recipient = telefoneBlip(celular);
     if (!recipient) { log({ event: 'blip_aviso', tipo: 'cobranca', enviado: false, motivo: 'telefone_invalido' }); return false; }
@@ -130,7 +143,7 @@ export function createAvisosBlip({ env = process.env, fetcher = fetch, log = e =
     return campanha('cobranca', recipient, primeiro(nome), [['nome', titulo(primeiro(nome))], ['valor', reaisDe(valor)]], { '#payment#': JSON.stringify(pedido) });
   }
 
-  return { atualizacao, cobranca, configurado };
+  return { atualizacao, cobranca, configurado, permitido };
 }
 
 // Aviso da etapa 1 (inscrição concluída, redação liberada): o mesmo template das outras etapas

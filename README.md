@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.5** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.5`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.6** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.6`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -208,6 +208,12 @@ gcloud iam service-accounts create unibalsas-varredura --project talks-servidor
 gcloud run services update devflowunibalsas-git --project talks-servidor --region southamerica-east1 --update-env-vars "^;^RECONCILIAR_EMAILS=unibalsas-varredura@talks-servidor.iam.gserviceaccount.com,<e-mail da equipe no gcloud>"
 gcloud scheduler jobs create http unibalsas-varredura --project talks-servidor --location southamerica-east1 --schedule "*/30 * * * *" --http-method POST --uri https://devflowunibalsas-git-a2yea7tx2q-rj.a.run.app/internal/reconciliar --headers Content-Type=application/json --message-body "{}" --oidc-service-account-email unibalsas-varredura@talks-servidor.iam.gserviceaccount.com --oidc-token-audience https://devflowunibalsas-git-a2yea7tx2q-rj.a.run.app
 ```
+
+**Cobrança sem mensagem em dobro** (2.17.6): antes de chamar o Blip, a fila grava a marca `cobranca_enviando` do pedido.
+Se a execução cair depois disso, ou o Blip não responder (tempo esgotado, rede, 5xx), a cobrança conta como enviada e
+**não é repetida sozinha**; o candidato vê "Enviamos…" e pode tocar em "Reenviar mensagem" (pedido novo). Log de atenção
+`envio_interrompido` / `blip_sem_resposta`. Recusa clara do Blip continua tentando de novo (até 5×, mesmo Pix). Na fase
+de teste, celular fora do `AVISOS_SO_PARA` não gera Pix nem alerta a equipe. Roteiro de homologação: `ROTEIRO-HOMOLOGACAO.md`.
 
 ## Avisos pelo Blip (vigias)
 

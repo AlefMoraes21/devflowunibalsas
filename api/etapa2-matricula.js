@@ -269,6 +269,8 @@ export function createEtapa2({
     if (!avisos?.configurado?.cobranca?.()) return fim('Pagamento', PAGAMENTO_SEM_BLIP);
     const enviada = rec.cobranca_enviada_em && rec.cobranca_enviada_em >= (rec.cobranca_pedida_em ?? 0);
     const pedida = rec.cobranca_pedida_em && !enviada;
+    // Fase de teste: celular fora da lista do AVISOS_SO_PARA não recebe a mensagem (nem o Pix é gerado).
+    if (pedida && rec.cobranca_erro === 'fora_da_lista') return fim('Pagamento', PAGAMENTO_SEM_BLIP);
     const falhou = pedida && (rec.cobranca_erro || (rec.cobranca_tentativas ?? 0) >= MAX_TENTATIVAS_AVISO);
     if (falhou) return render('MATR_PAGAMENTO', { ...base, valor: valorDaTaxa(rec), botao: 'Tentar novamente',
       mensagem: 'Não conseguimos gerar o Pix da sua taxa agora. A equipe da matrícula já foi avisada. Você pode tentar de novo mais tarde ou pagar pelo Portal do candidato (vestibular.unibalsas.edu.br/presencial).' });
@@ -893,15 +895,40 @@ export function createEtapa2({
   // copia e cola + link do portal (cartão). O Pix do TOTVS (Banco Rendimento) expira em 1 h (expiracao 3598 s): o
   // gerado fica na fila por 50 min para as novas tentativas não gerarem outro; depois disso gera um novo.
   const PIX_VALIDO_MS = 50 * 60000;
+  // Marca "enviando" deste pedido, gravada (e confirmada) antes de chamar o Blip: se a execução cair depois do
+  // envio, a próxima vê a marca e não manda de novo. Devolve false se não conseguiu gravar (aí não envia).
+  async function marcarEnvioCobranca(id, pedido) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, FILA);
+      if (!a || a.record.cobranca_pedida_em !== pedido) return false;
+      if (await store.update(id, { ...a.record, cobranca_enviando: pedido }, a.version, FILA)) return true;
+    }
+    return false;
+  }
   async function enviarCobranca(id, rec, sessao, processo, passoId) {
     const salvar = salvarFilaDe(id);
     const tentativa = (rec.cobranca_tentativas ?? 0) + 1;
+    // Execução anterior parou no meio do envio deste mesmo pedido: pode ter chegado. Não repete sozinho; a tela
+    // mostra "Enviamos…" e o candidato pode tocar em "Reenviar mensagem" (pedido novo) se não achou.
+    const antes = (await store.get(id, FILA))?.record ?? rec;
+    if (antes.cobranca_pedida_em && antes.cobranca_enviando === antes.cobranca_pedida_em && !(antes.cobranca_enviada_em >= antes.cobranca_pedida_em)) {
+      await salvar({ cobranca_enviada_em: clock(), cobranca_incerta: true, cobranca_enviando: null, cobranca_erro: null }).catch(() => {});
+      console.warn(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: 'envio_interrompido' }));
+      return true;
+    }
     let ok = false, motivo = '', pixRecusado = false;
     try {
       const bruto = await portalSite.passoBruto(sessao, passoId, processo);
       const passo = lerPassoPagamento(bruto);
       const contato = contatoDaResposta(bruto)?.celular ? contatoDaResposta(bruto) : rec.contato;
       await guardarContato(id, rec, contato);
+      // Fase de teste (AVISOS_SO_PARA): celular fora da lista não recebe a mensagem, então nem gera o Pix no TOTVS.
+      // Não é falha: sem alerta para a equipe; a tela orienta pagar pelo portal.
+      if (contato?.celular && avisos.permitido && !avisos.permitido(contato.celular)) {
+        await salvar({ cobranca_erro: 'fora_da_lista', cobranca_tentativas: MAX_TENTATIVAS_AVISO }).catch(() => {});
+        log({ event: 'etapa_final', id: curto(id), passo: 'cobranca_fora_da_lista' });
+        return true;
+      }
       const centavos = centavosDoPagamento(passo);
       let codigo = rec.cobranca_pix && clock() - (rec.cobranca_pix_em ?? 0) < PIX_VALIDO_MS ? pixValido(rec.cobranca_pix) : '';
       if (!codigo) {
@@ -921,15 +948,22 @@ export function createEtapa2({
       else if (!contato?.celular) motivo = 'sem_celular';
       else if (!centavos) motivo = 'sem_valor';
       else if (((r => r?.cobranca_enviada_em && r.cobranca_enviada_em >= (r.cobranca_pedida_em ?? 0))((await store.get(id, FILA))?.record))) { ok = true; motivo = 'ja_enviada'; }
+      else if (!(await marcarEnvioCobranca(id, antes.cobranca_pedida_em))) motivo = 'marcar';
       else {
         // Tudo do sistema: Pix do TOTVS, valor (38658), recebedor do próprio Pix, nome do portal (a chave, o Blip lê da cobrança).
-        ok = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
-          referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) });
-        if (!ok) motivo = 'blip';
+        const r = await avisos.cobranca({ celular: contato.celular, nome: contato.nome, centavos, codigoPix: codigo,
+          referencia: 'mat-' + (passo.valores[CAMPOS_PAGAMENTO.idBoleto] || curto(id)), recebedor: recebedorDoPix(codigo) }, { detalhe: true });
+        ok = r === true || r?.ok === true;
+        // Sem resposta do Blip (tempo esgotado, rede, 5xx): pode ter chegado. Conta como enviada, sem repetir.
+        if (!ok && r?.incerto) { ok = true; motivo = 'incerto'; }
+        else if (!ok) motivo = 'blip';
       }
     } catch (e) { motivo = String(e?.message ?? e).slice(0, 120); }
     if (motivo === 'ja_enviada') return true;
-    await salvar(ok ? { cobranca_enviada_em: clock(), cobranca_erro: null } : motivo === 'pix_recusado' ? { cobranca_tentativas: MAX_TENTATIVAS_AVISO, cobranca_erro: 'pix_recusado' } : { cobranca_tentativas: tentativa }).catch(() => {});
+    if (motivo === 'incerto') console.warn(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: 'blip_sem_resposta' }));
+    await salvar(ok ? { cobranca_enviada_em: clock(), cobranca_erro: null, cobranca_enviando: null, ...(motivo === 'incerto' ? { cobranca_incerta: true } : {}) }
+      : motivo === 'pix_recusado' ? { cobranca_tentativas: MAX_TENTATIVAS_AVISO, cobranca_erro: 'pix_recusado' }
+        : { cobranca_tentativas: tentativa, cobranca_enviando: null }).catch(() => {});
     if (motivo === 'pix_recusado') console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo }));
     else if (!ok && tentativa >= MAX_TENTATIVAS_AVISO) console.error(JSON.stringify({ event: 'etapa_aviso_atencao', id: curto(id), aviso: 'cobranca', motivo: motivo }));
     log({ event: 'etapa_final', id: curto(id), passo: ok ? 'cobranca_enviada' : 'cobranca_falhou', tentativa, motivo: motivo || undefined });
