@@ -1062,3 +1062,19 @@ test('C10: Pagamento abre a tela com o valor e "Realizar pagamento"; o toque ped
   assert.equal(fila.length, n + 1, 'pago: não cobra de novo');
 });
 
+
+test('Matrícula: portal com etapas vazias ou botão em formato desconhecido não vira "concluída" sem envio (2.17.2)', async () => {
+  const pre = { title: 'Pré-matrícula', feedback: { complementary_text: 'Pendente', conclusive: 0, cta_text: 'Continuar' } };
+  for (const [stages, statusEsperado] of [[[], 'pendente'], [[{ ...pre, cta_link: 'presencial/etapa-nova/abc' }], 'conferir']]) {
+    const store = memoria(); const fila = []; const r = rubeusFalso();
+    const matricula = { ...r.matricula, portal: async () => ({ token: 'tok2', processo_seletivo_id: '20383', stages }) };
+    const E = createEtapa2({ store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState, matricula, validCpf, log: () => {} });
+    await store.create('m1', { id: 'm1', login: '39184720514', data_nascimento: NASC, blocos: { responsavel: { responsavel: 'Eu' } }, enviados: {}, status: 'pendente', tentativas: 0, expires: Date.now() + 1e9 }, 'matriculaFila');
+    const original = console.error; console.error = () => {};
+    try { await E.worker('m1'); } finally { console.error = original; }
+    const rec = (await store.get('m1', 'matriculaFila')).record;
+    assert.equal(rec.status, statusEsperado); assert.notEqual(rec.passo, 'fim');
+    assert.ok(rec.blocos.responsavel, 'o bloco continua guardado'); assert.equal(r.envios.length, 0);
+    if (statusEsperado === 'pendente') assert.ok(fila.at(-1).atrasoSeg > 0, 'tenta de novo depois');
+  }
+});

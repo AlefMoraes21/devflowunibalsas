@@ -1,3 +1,10 @@
+# Versão 2.17.2 — resposta incompleta do portal nunca vira "concluída" (20/11/2026) — só servidor
+
+- **Matrícula:** etapas vazias no portal → tenta de novo (motivo `portal_vazio`); botão de etapa em formato desconhecido → equipe confere (`portal_formato`). Antes, os dois casos davam "concluída" sem enviar os blocos.
+- **Documentos de inscrição:** "já em análise" só quando a etapa não tem botão (ou tem o link de situação `feedback/<n>`). Botão em formato desconhecido → equipe confere; "Pendentes" sem botão → espera o portal. Os arquivos ficam guardados.
+- Formatos aceitos (`linkDesconhecido` em `api/portal-site.js`): `presencial/passo/<n>` e `presencial/feedback/<n>`, os únicos vistos no portal (conferido de novo em 20/11 com Juan e Rebeca: nenhum link fora desses).
+- Testes novos nos dois casos (falham na 2.17.1, passam na 2.17.2).
+
 # Versão 2.17.1 — reenvio ao Rubeus por até 72 h (20/11/2026) — só servidor, JSON igual à 2.16.23
 
 - **Motivo (auditoria do GPT, 20/11):** o worker desistia depois de 6 falhas (~15 min: 30 s, 1, 2, 4, 8 min) e a contagem não zerava com sucesso; um Rubeus fora do ar por mais de 15 min deixava a inscrição em "falhou" sem retomada.

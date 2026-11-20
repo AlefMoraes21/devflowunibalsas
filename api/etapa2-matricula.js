@@ -13,7 +13,7 @@
 // escolhido para o código do formulário do Rubeus.
 import crypto from 'node:crypto';
 import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js';
-import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
+import { jaEnviado, linkDesconhecido, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
 import { ICONES } from './icones.js';
 import { passoPagamento } from './processes.js';
 import { PRIMEIRA_TENTATIVA_S, MAX_TENTATIVAS, esperaDepoisDaFalha } from './retentativas.js';
@@ -1422,6 +1422,9 @@ export function createEtapa2({
           // O portal diz qual é o próximo passo liberado (os concluídos ficam de fora).
           const p = await matricula.portal(sessao);
           sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
+          // Resposta vazia ou botão em formato desconhecido nunca vira "concluída" (sem envio): tenta de novo ou a equipe confere.
+          if (!(p.stages ?? []).length) throw new ErroPasso('O portal devolveu a lista de etapas vazia.', { motivo: 'portal_vazio' });
+          if (p.stages.some(x => Number(x.feedback?.conclusive) !== 1 && linkDesconhecido(x.cta_link))) throw new ErroPasso('O botão de uma etapa do portal veio num formato desconhecido.', { final: true, motivo: 'portal_formato' });
           await salvar({ ultimo_status: { stages: enxugar(p.stages), processo: String(p.processo_seletivo_id ?? ''), at: clock() } });
           const next = summarizeStages(p.stages).next;
           if (!next) { await salvar({ status: 'concluida', passo: 'fim' }); return; }

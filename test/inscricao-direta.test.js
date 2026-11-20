@@ -399,3 +399,27 @@ test('Vestibular protegido: Concluir segue para a prova (INSC_PORTAL), sem telas
   const portal = await toque(M, 'INSC_CONCLUIDA', 'abrir_portal', concl.data.estado);
   assert.equal(portal.screen, 'INSC_PORTAL', 'Prova online, como antes');
 });
+
+test('Docs de inscrição: botão em formato desconhecido ou "Pendentes" sem botão nunca conclui sem enviar (2.17.2)', async () => {
+  const inscricao = { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 }, cta_link: 'presencial/feedback/920259' };
+  for (const [docs, statusEsperado] of [
+    [{ title: 'Documentos inscrição', feedback: { complementary_text: 'Pendentes', conclusive: 0, cta_text: 'Verificar' }, cta_link: 'presencial/etapa-nova/abc' }, 'conferir'],
+    [{ title: 'Documentos inscrição', feedback: { complementary_text: 'Pendentes', conclusive: 0, cta_text: null }, cta_link: null }, 'inscrita']
+  ]) {
+    const M = montar('20385', { etapas: () => [inscricao, docs] });
+    await cache(M.store, '20385');
+    const { status } = await inscrever(M, '20385');
+    const a = await toque(M, 'INSC_STATUS', 'verificar_documentos', status.data.estado);
+    const b = await toque(M, 'INSC_DOC_A', 'enviar_documento_inscricao', a.data.estado, { arquivo: MIDIA(28) });
+    const c = await toque(M, 'INSC_DOC_B', 'enviar_documento_inscricao', b.data.estado, { arquivo: [] });
+    await toque(M, 'INSC_DOC_C', 'enviar_documento_inscricao', c.data.estado, { arquivo: MIDIA(27) });
+    const id = M.fila[0].id;
+    const original = console.error; console.error = () => {};
+    try { await M.e1.worker(id); await M.e1.worker(id); } finally { console.error = original; }
+    const rec = (await M.store.get(id, 'inscricoesFila')).record;
+    assert.equal(rec.status, statusEsperado);
+    assert.notEqual(rec.passo, 'fim');
+    assert.ok(Object.keys(rec.docs_inscricao.arquivos ?? {}).length, 'os arquivos continuam guardados');
+    assert.equal(M.portal.estado.lotes.length, 0);
+  }
+});

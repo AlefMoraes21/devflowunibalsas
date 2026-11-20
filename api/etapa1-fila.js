@@ -5,7 +5,7 @@
 // as respostas são conferidas aqui. Os dados ficam guardados (Firestore, criptografados) e um worker do
 // Cloud Run repete no Rubeus os passos do site, conferindo cada tela.
 import crypto from 'node:crypto';
-import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo } from './portal-site.js';
+import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo, linkDesconhecido } from './portal-site.js';
 import { cursoFixo, cursoNoRubeus, turnoNoRubeus } from './cursos-fixos.js';
 import { PRIMEIRA_TENTATIVA_S, MAX_TENTATIVAS, esperaDepoisDaFalha } from './retentativas.js';
 
@@ -457,6 +457,10 @@ export function createEtapa1({
       // Diagnóstico: quais etapas o portal devolveu (só títulos) e de qual inscrição/processo.
       if (!etapa) log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'docs_portal_etapas', applyment_id: sessao.applyment_id ?? '', processo, esperado: String(rec.processo), etapas: (stages ?? []).map(x => x.title).join(' | ').slice(0, 200) });
       if (!etapa) throw new ErroPasso('A etapa Documentos inscrição ainda não apareceu no portal.', { motivo: 'docs_nao_liberado' });
+      // Só conta como "já em análise" sem botão nenhum (ou com o link de situação). Botão em formato desconhecido
+      // ou "Pendentes" sem botão: nunca conclui sem enviar (o portal mudou ou ainda não liberou).
+      if (linkDesconhecido(etapa.cta_link)) throw new ErroPasso('O botão de Documentos inscrição veio num formato desconhecido.', { final: true, motivo: 'portal_formato' });
+      if (/pendente/.test(norm(etapa.feedback?.complementary_text))) throw new ErroPasso('Documentos inscrição pendente sem o botão de envio.', { motivo: 'docs_nao_liberado' });
       log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'documentos_inscricao_ja_em_analise' });
       return { applyment_id: sessao.applyment_id, processo, stages, enviados };
     }

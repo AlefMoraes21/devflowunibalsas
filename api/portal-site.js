@@ -42,6 +42,10 @@ export function lerPassoDocumentos(resp) {
   };
 }
 
+// Botão de etapa (cta_link) em formato que o Run não conhece. Formatos observados no portal: "presencial/passo/<n>"
+// (abre o passo) e "presencial/feedback/<n>" (só a situação). Outro formato = o portal mudou: não concluir nada.
+export const linkDesconhecido = link => { const s = str(link).trim(); return Boolean(s) && !/passo\/\d+/.test(s) && !/feedback\/\d+/.test(s); };
+
 // Status de cada documento no portal: 1 = em análise, 2 = recusado, 3 = aceito; vazio = não enviado.
 export const jaEnviado = d => ["1", "3"].includes(str(d?.status));
 
