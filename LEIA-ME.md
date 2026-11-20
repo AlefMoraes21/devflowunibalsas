@@ -1,3 +1,11 @@
+# Versão 2.17.4 — refazer a redação pelo LOGIN (20/11/2026) — só servidor
+
+- Antes: quem fez a 1ª redação pelo LOGIN e foi reprovado ficava preso em "Redação enviada ✅" ao tentar de novo (o registro concluído não reabria).
+- Agora: quando o portal libera a prova de novo (o LOGIN só abre a prova nesse caso) e a entrega anterior tem 1 h ou mais, o registro reabre (`refazer` conta as vezes) e segue o caminho de sempre: texto guardado, 10 min de calma, conferência da prova atual e envio pelo worker.
+- Entrega com menos de 1 h continua como "Redação enviada" (o portal ainda pode estar sincronizando): nunca abre um segundo envio por atraso do portal.
+- NÃO CONCLUSIVO: como o Rubeus monta a 2ª tentativa (nova execução ou a mesma) só se confirma com um candidato fictício reprovado; o worker usa as mesmas conferências de vínculo e, se não reconhecer a prova, a fila vai para a equipe, sem reenvio cego.
+- Teste novo (falha na 2.17.3, passa na 2.17.4).
+
 # Versão 2.17.3 — sessão expirada no meio das tentativas (20/11/2026) — só servidor
 
 - A sessão do Rubeus guardada no registro (estado selado) vale 3 h; com 72 h de tentativas ela podia vencer e as tentativas seguintes falhavam sempre.

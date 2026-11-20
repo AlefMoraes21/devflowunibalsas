@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.3** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.3`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.4** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.4`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -167,6 +167,9 @@ Documentos de inscrição só contam como "já em análise" quando a etapa não 
 **Sessão vencida no meio das tentativas** (2.17.3): a sessão do Rubeus guardada vale 3 h. Vencida antes da conclusão,
 recomeça numa sessão nova; na redação ainda não enviada, entra de novo pelo CPF e data de nascimento; na redação já
 enviada esperando confirmação, vai para a equipe conferir (nunca reenvia).
+
+**Refazer a redação pelo LOGIN** (2.17.4): com a prova liberada de novo no portal e a entrega anterior com 1 h ou
+mais, a redação abre de novo no Flow (entrega recente continua como "Redação enviada").
 
 ## Avisos pelo Blip (vigias)
 

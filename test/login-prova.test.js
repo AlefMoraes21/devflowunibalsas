@@ -122,3 +122,44 @@ test('Sessão da inscrição expirada: a redação ainda não enviada entra de n
   assert.equal(r2.status, 'conferir', 'já enviada: a equipe confere, sem 72 h de tentativas inúteis');
   assert.equal(chamadas.length, 0, 'nada é reenviado');
 });
+
+// 2.17.4: reprovado que refaz a prova pelo LOGIN não fica preso em "Redação enviada".
+test('Refazer a redação pelo LOGIN: prova liberada de novo abre a redação; entrega recente continua como enviada', async () => {
+  const { createHash } = await import('node:crypto');
+  const idProva = createHash('sha256').update('login-prova:555').digest('hex');
+  for (const [minutosDesdeEntrega, telaEsperada] of [[120, 'INSC_REDACAO'], [10, 'INSC_FIM']]) {
+    const store = memoria(); const fila = []; const agora = Date.now();
+    const E1 = createEtapa1({
+      store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState,
+      validateBasic: () => {}, validateFinal: () => {}, origens: [], hoje: () => '2026-11-15', requiresEssay: () => true, academicId: () => '223', userFields: new Set(['texto_redacao']),
+      sleep: async () => {}, log: () => {}, clock: () => agora, runStep: async () => { throw new Error('sem Rubeus neste teste'); }
+    });
+    await store.create('etapa1-20383', { cursos: [{ id: 'a', title: 'A' }], turnos: {}, tema: TEMA, atualizado: agora, expires: agora + 1e9 }, 'flowCache');
+    await store.create(idProva, { id: idProva, processo: '20383', flow: 'antigo', applyment_id: '555', status: 'concluida', passo: 'fim', respostas: null, redacao: null, concluida_em: agora - minutosDesdeEntrega * 60000, criado: agora - 1e8, expires: agora + 1e9 }, 'inscricoesFila');
+    const matricula = {
+      login: async () => ({ token: 't', applyment_id: '555' }),
+      portal: async () => ({ token: 't', processo_seletivo_id: '20383', stages: [
+        { title: 'Inscrição', feedback: { complementary_text: 'Concluída', conclusive: 1 } },
+        { title: 'Prova online', feedback: { complementary_text: 'Prova disponível', conclusive: 0, cta_text: 'Realizar prova' }, cta_link: '/passo/300664' }
+      ] })
+    };
+    const E2 = createEtapa2({ store, enqueue: async () => {}, sealState, openState, matricula, validCpf, log: () => {}, entrarNaProva: a => E1.entrarNaProva(a) });
+    const toque = async (E, screen, acao, estado, user = {}) => {
+      const req = { screen, action: 'data_exchange', flow_token: 'ft-refazer', data: { acao, ...(estado ? { estado } : {}), ...user } };
+      return confere(screen, await flowContext.run({ request: req, deadline: Date.now() + 9500 }, () => E.route(req)));
+    };
+    const portal = await toque(E2, 'MATR_LOGIN', 'entrar', null, { login: CPF, data_nascimento: NASC });
+    assert.equal(portal.screen, 'INSC_PORTAL');
+    const aval = await toque(E1, 'INSC_PORTAL', 'realizar_prova', portal.data.estado);
+    const orient = await toque(E1, 'INSC_AVALIACAO', 'iniciar_prova', aval.data.estado);
+    const red = await toque(E1, 'INSC_ORIENTACAO', 'iniciar_redacao', orient.data.estado);
+    assert.equal(red.screen, telaEsperada, `${minutosDesdeEntrega} min depois da entrega`);
+    if (telaEsperada === 'INSC_REDACAO') {
+      assert.equal(red.data.tema_redacao, TEMA);
+      const fim = await toque(E1, 'INSC_REDACAO', 'enviar_redacao', red.data.estado, { texto_redacao: TEXTO });
+      assert.equal(fim.screen, 'INSC_FINALIZADA');
+      const rec = (await store.get(idProva, 'inscricoesFila')).record;
+      assert.equal(rec.status, 'inscrita'); assert.equal(rec.passo, 'redacao'); assert.equal(rec.redacao, TEXTO); assert.equal(rec.refazer, 1);
+    } else assert.match(red.data.titulo, /Redação enviada/);
+  }
+});

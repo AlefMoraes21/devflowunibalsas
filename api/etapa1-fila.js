@@ -15,6 +15,8 @@ const CACHE = 'flowCache';
 const FINAIS = new Set(['concluida', 'duplicada', 'conferir', 'falhou']);
 // Espera pelo portal (Documentos inscrição ainda não apareceu): alerta a equipe na 6ª espera.
 const ALERTA_DOCS_PORTAL = 6;
+// Prova liberada de novo no portal depois de uma redação entregue (refazer): só reabre 1 h depois da entrega.
+const REFAZER_APOS_MS = 3600000;
 // Docs de inscrição recebidos, mas o portal ainda não mostra a etapa "Documentos inscrição": espera com calma
 // (a cada 10 min, por até ~24 h) em vez de desistir em 6 tentativas e deixar os arquivos parados.
 const MAX_TENTATIVAS_DOCS_PORTAL = 150;
@@ -500,7 +502,7 @@ export function createEtapa1({
   }
 
   async function redacaoConfirmada(rec, salvar) {
-    const r = await salvar({ passo: 'fim', status: 'concluida' });
+    const r = await salvar({ passo: 'fim', status: 'concluida', concluida_em: clock() });
     const R = rec.respostas ?? {};
     try { await aoConfirmarRedacao({ login: rec.via_login?.login ?? R.cpf, data_nascimento: rec.via_login?.data_nascimento ?? R.data_nascimento, celular: R.celular, nome: R.nome }); }
     catch (e) { log({ event: 'etapa1_fila_erro', passo: 'vigia_redacao', message: String(e?.message ?? e).slice(0, 120) }); }
@@ -785,7 +787,15 @@ export function createEtapa1({
     const novo = { id, processo: String(processo), flow, applyment_id: String(applyment_id), via_login: { login, data_nascimento }, respostas: {}, redacao: null, status: 'inscrita', passo: 'redacao', inscrita_em: 0, tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
     const atual = await store.get(id, FILA);
     if (!atual) await store.create(id, novo, FILA);
-    else if (atual.record.status !== 'concluida') await store.update(id, { ...atual.record, flow, via_login: novo.via_login, status: atual.record.status === 'falhou' ? 'inscrita' : atual.record.status, tentativas: atual.record.status === 'falhou' ? 0 : atual.record.tentativas }, atual.version, FILA);
+    else if (atual.record.status === 'concluida') {
+      // Só chega aqui com a prova liberada de novo no portal (ex.: reprovado pode refazer). Redação entregue há
+      // pouco fica como está ("Redação enviada"): o portal ainda pode estar sincronizando a entrega.
+      const desde = atual.record.concluida_em ?? atual.record.redacao_em ?? atual.record.criado ?? 0;
+      if (clock() - desde >= REFAZER_APOS_MS) {
+        await store.update(id, { ...novo, refazer: (atual.record.refazer ?? 0) + 1 }, atual.version, FILA);
+        log({ event: 'etapa1_fila', id: curto(id), passo: 'redacao_refazer' });
+      }
+    } else await store.update(id, { ...atual.record, flow, via_login: novo.via_login, status: atual.record.status === 'falhou' ? 'inscrita' : atual.record.status, tentativas: atual.record.status === 'falhou' ? 0 : atual.record.tentativas }, atual.version, FILA);
     log({ event: 'etapa1_fila', id: curto(id), passo: 'login_prova' });
     return renderE1('INSC_PORTAL', { e1: true, processo_seletivo_id: String(processo), eh_nota_enem: false, fila_id: id });
   }
