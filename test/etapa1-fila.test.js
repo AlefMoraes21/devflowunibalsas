@@ -33,7 +33,7 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
     const a = req.data.acao; chamadas.push(a);
     if (a === 'selecionar_processo') return tela('DADOS_BASICOS', { token: 't1' });
     if (a === 'enviar_dados_basicos') { assert.equal(req.data.nome, BASICOS.nome); return tela('CURSO_INTERESSE', { cursos: CURSOS, turnos: [] }); }
-    if (a === 'buscar_turnos') return tela('CURSO_INTERESSE', { cursos: CURSOS, turnos: turnoAusente ? [] : TURNOS[req.data.curso_id], erro: turnoAusente ? 'Nenhum turno disponível para o curso selecionado.' : '' });
+    if (a === 'buscar_turnos') { const sem = api.turnoAusente ?? turnoAusente; return tela('CURSO_INTERESSE', { cursos: CURSOS, turnos: sem ? [] : TURNOS[req.data.curso_id], erro: sem ? 'Nenhum turno disponível para o curso selecionado.' : '' }); }
     if (a === 'avancar_curso_interesse') { const esp = api.aceitarCurso ?? { curso_id: '1-450', turno_id: '6' }; assert.equal(req.data.curso_id, esp.curso_id); assert.equal(req.data.turno_id, esp.turno_id); return tela('QUASE_LA', { sem_redacao: Boolean(req.data.numero_inscricao_enem) }); }
     if (a === 'enviar_informacoes_complementares') {
       assert.equal(req.data.cpf, FINAL.cpf);
@@ -435,4 +435,50 @@ test('falha passageira antes da conclusão: reagenda e recomeça numa sessão no
   assert.equal(rec.status, 'pendente'); assert.equal(rec.passo, 'inicio'); assert.equal(rec.tentativas, 1);
   assert.equal(fila.length, antes + 1); assert.ok(fila.at(-1).atrasoSeg > 0);
   assert.ok(!rubeus.chamadas.includes('enviar_informacoes_complementares'));
+});
+
+// ---------------------------------------------------------------- ritmo de reenvio (2.17.1)
+const { PRIMEIRA_TENTATIVA_S, MAX_TENTATIVAS, esperaDepoisDaFalha } = await import('../api/retentativas.js');
+
+test('Ritmo de reenvio: 10 s, 30 s, 2 min, 30 min, 30 min, 1 h (6ª à 10ª), 6 h 35 min 44 s (11ª à 20ª) = 72 h', () => {
+  const esperas = Array.from({ length: MAX_TENTATIVAS - 1 }, (_, i) => esperaDepoisDaFalha(i + 1));
+  assert.equal(MAX_TENTATIVAS, 20);
+  assert.deepEqual(esperas.slice(0, 4), [30, 120, 1800, 1800]);
+  assert.deepEqual(esperas.slice(4, 9), [3600, 3600, 3600, 3600, 3600]);
+  assert.deepEqual(esperas.slice(9), Array(10).fill(6 * 3600 + 35 * 60 + 44));
+  assert.equal(PRIMEIRA_TENTATIVA_S + esperas.reduce((a, b) => a + b, 0), 72 * 3600, 'da chegada à 20ª tentativa: 72 h exatas');
+});
+
+test('Rubeus falhando: 20 tentativas no ritmo novo e, depois da 20ª, a inscrição fica guardada como falhou', async () => {
+  const rubeus = rubeusFalso({ turnoAusente: true });
+  const { e1: E, store, fila } = montar({ rubeus });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id;
+  assert.equal(fila[0].atrasoSeg, 10, 'dados chegaram: 1ª tentativa em 10 s');
+  const esperas = [];
+  for (let n = 1; n <= MAX_TENTATIVAS; n++) {
+    const antes = fila.length;
+    await E.worker(id);
+    if (fila.length > antes) esperas.push(fila.at(-1).atrasoSeg);
+  }
+  const rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'falhou'); assert.equal(rec.tentativas, 20);
+  assert.ok(rec.respostas?.cpf, 'os dados continuam guardados no Firestore');
+  assert.deepEqual(esperas, Array.from({ length: 19 }, (_, i) => esperaDepoisDaFalha(i + 1)), 'sem nova tarefa depois da 20ª');
+});
+
+test('Falhas antigas não somam: quando o passo que falhou dá certo, as tentativas voltam a zero', async () => {
+  const rubeus = rubeusFalso({ turnoAusente: true });
+  const { e1: E, store, fila } = montar({ rubeus });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id;
+  for (let n = 0; n < 3; n++) await E.worker(id);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.tentativas, 3);
+  rubeus.turnoAusente = false;
+  await E.worker(id);
+  const rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.tentativas, 0); assert.ok(!rec.erro_passo);
+  assert.ok(rubeus.chamadas.includes('enviar_informacoes_complementares'), 'seguiu até a conclusão');
 });

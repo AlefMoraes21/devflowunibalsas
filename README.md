@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.0`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.1** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.1`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -19,7 +19,8 @@ WhatsApp Flow ──(criptografado)──▶ POST /api/flow ──▶ grava no F
 
 A Meta dá 10 s para cada resposta. Por isso o Flow só grava e responde; o envio ao Rubeus é feito pelo worker, com
 calma e conferência, igual ao que o candidato faria no site. Ao vivo ficam só o login (CPF + data de nascimento) e o CEP.
-O worker é chamado na hora em que cada tela é gravada; se o Rubeus falhar, tenta de novo (15 s, 30 s, 1 min… até 10 min).
+O worker é chamado 10 s depois de cada tela gravada; se o Rubeus falhar, tenta de novo por até 72 h (ver
+"Reenvio quando o Rubeus falha").
 
 **Cursos fixos no Flow** (`api/cursos-fixos.js`): os 11 cursos ficam no JSON, com o turno no subtítulo
 ("Turno: Noturno"; Medicina Veterinária e Odontologia "Turno: Integral"). Escolher o curso não chama o Run. O worker
@@ -76,6 +77,7 @@ api/portal-site.js        caminho do site (portal do candidato): status, documen
 api/matricula.js          login no Rubeus e leitura das etapas do portal
 api/blip.js               avisos pelo Blip (templates aprovados)
 api/cloud-store.js        Firestore, Cloud Tasks e cifragem
+api/retentativas.js       ritmo de reenvio ao Rubeus quando falha (10 s … 72 h, 20 tentativas)
 api/processes.js          política e documentos de inscrição por processo
 api/cursos-fixos.js       cursos e turnos fixos do Flow e a busca do curso no Rubeus pelo nome
 api/avaliacao.js, prova-route.js, proof-binding.js, prompt-text.js   prova e redação
@@ -122,13 +124,41 @@ O candidato não espera nenhum destes tempos: o Flow responde na hora e o worker
 
 | Etapa | Quando vai ao Rubeus / portal | Variável (padrão) |
 |---|---|---|
-| Inscrição (dados, curso, "Estamos quase lá") | na hora em que cada tela é gravada; em falha tenta de novo em 15 s, 30 s, 1 min… até 10 min | — |
+| Inscrição (dados, curso, "Estamos quase lá") | 10 s depois de cada tela gravada; em falha, o ritmo de reenvio abaixo (até 72 h) | — |
+| Matrícula (responsável, endereço, identidade) | 10 s depois de cada tela gravada; em falha, o ritmo de reenvio abaixo (até 72 h) | — |
 | Redação (Vestibular) | 10 min depois da **inscrição concluída** (o Rubeus ainda monta a prova) + 1 min conferindo que a prova não mudou; se mudou, espera mais 10 min. Redação escrita depois desses 10 min vai em ~1 min | `ETAPA1_ESPERA_PROVA_MS` (600000), `ETAPA1_ESTABILIDADE_MS` (60000) |
 | Documentos de inscrição | 1 min depois da inscrição concluída (o RM ainda sincroniza); sem a etapa no portal, tenta a cada 10 min por até ~24 h | `ETAPA1_ESPERA_DOCS_MS` (60000) |
 | Documentos de matrícula | 2 min depois do envio pelo Flow | `ETAPA2_ESPERA_DOCS_MS` (120000) |
 | Contrato (gerar o PDF) | 2 min de calma depois de a etapa ser liberada | `ETAPA3_CALMA_MS` (120000) |
 | Cobrança (Pix + cartão pelo Blip) | na hora do toque em "Realizar pagamento"; toque repetido em menos de 1 min é ignorado | — |
 | LOGIN (status) | ao vivo, ~2 a 7 s; com status guardado abre na hora e relê o portal em segundo plano | `ETAPA2_ESPERA_STATUS_MS` (7500), `ETAPA2_ESPERA_PORTAL_MS` (6500) |
+
+## Reenvio quando o Rubeus falha (`api/retentativas.js`)
+
+Vale para os dois workers que gravam no Rubeus: inscrição, redação e documentos de inscrição (etapa 1) e matrícula
+com os documentos de matrícula (etapa 2). Os dados chegam no Run e a 1ª tentativa sai em 10 s. Se falhar:
+
+| Tentativa | Espera antes dela | Tempo desde a chegada dos dados |
+|---|---|---|
+| 1ª | 10 s | 10 s |
+| 2ª | 30 s | 40 s |
+| 3ª | 2 min | 2 min 40 s |
+| 4ª | 30 min | 32 min 40 s |
+| 5ª | 30 min | 1 h 2 min 40 s |
+| 6ª a 10ª | 1 h cada | 6 h 2 min 40 s |
+| 11ª a 20ª | 6 h 35 min 44 s cada | **72 h** |
+
+- Depois da 20ª tentativa a fila fica `falhou`, **guardada no Firestore** (criptografada, até 30 dias da criação),
+  com o log `etapa1_fila_atencao` / `etapa2_fila_atencao` para a equipe. A matrícula reabre sozinha quando o
+  candidato entra de novo pelo LOGIN.
+- **O Run fica desligado na espera:** cada tentativa é uma tarefa agendada no Cloud Tasks; o Cloud Run liga só
+  para tentar (segundos) e volta a zero. As horas de espera não custam nada.
+- **Falhas antigas não somam:** quando o passo que falhou dá certo (ou um bloco da matrícula é gravado), as
+  tentativas voltam a zero.
+- Não entram neste ritmo: recusas definitivas do Rubeus (já inscrito, curso indisponível, resultado incerto no
+  envio da conclusão ou da redação), que vão direto para a equipe conferir sem reenvio; as esperas de propósito
+  (redação 10 min + 1 min, documentos 1 e 2 min, contrato 2 min); a espera pelo portal mostrar "Documentos
+  inscrição" (a cada até 10 min por ~25 h); os vigias e os avisos/cobrança do Blip (5 tentativas).
 
 ## Avisos pelo Blip (vigias)
 

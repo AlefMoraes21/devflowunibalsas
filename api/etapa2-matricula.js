@@ -16,11 +16,11 @@ import { summarizeStages, stepFromLink, portalScreenData } from './matricula.js'
 import { jaEnviado, tipoDoArquivo, lerPassoContrato, dadosDoContrato, pdfDoPopup, contatoDaResposta, lerPassoPagamento, centavosDoPagamento, dadosDoPix, pixDoPopup, pixValido, recebedorDoPix, CAMPOS_PAGAMENTO } from './portal-site.js';
 import { ICONES } from './icones.js';
 import { passoPagamento } from './processes.js';
+import { PRIMEIRA_TENTATIVA_S, MAX_TENTATIVAS, esperaDepoisDaFalha } from './retentativas.js';
 
 const DIA = 86400000;
 const FILA = 'matriculaFila';
 const FINAIS = new Set(['concluida', 'conferir', 'falhou']);
-const MAX_TENTATIVAS = 6;
 const hash = v => crypto.createHash('sha256').update(String(v)).digest('hex');
 const curto = id => String(id).slice(0, 10);
 const digits = v => String(v ?? '').replace(/\D/g, '');
@@ -251,7 +251,8 @@ export function createEtapa2({
       const rec = { ...atual.record, blocos: { ...atual.record.blocos, [bloco]: { ...dados, recebido_em: clock() } }, status: ['concluida', 'falhou'].includes(atual.record.status) ? 'pendente' : atual.record.status };
       if (await store.update(s.fila_id, rec, atual.version, FILA)) {
         log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'bloco_recebido', bloco });
-        try { await enqueue(s.fila_id, { tipo: 'etapa2' }).catch(() => enqueue(s.fila_id, { tipo: 'etapa2' })); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
+        const tarefa = { tipo: 'etapa2', atrasoSeg: PRIMEIRA_TENTATIVA_S };
+        try { await enqueue(s.fila_id, tarefa).catch(() => enqueue(s.fila_id, tarefa)); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
         return;
       }
     }
@@ -314,7 +315,8 @@ export function createEtapa2({
       if (await store.update(s.fila_id, rec, atual.version, FILA)) {
         if (completo) {
           log({ event: 'etapa2_fila', id: curto(s.fila_id), passo: 'documentos_recebidos', quantidade: Object.keys(documentos.arquivos).length });
-          try { await enqueue(s.fila_id, { tipo: 'etapa2' }).catch(() => enqueue(s.fila_id, { tipo: 'etapa2' })); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
+          const tarefa = { tipo: 'etapa2', atrasoSeg: PRIMEIRA_TENTATIVA_S };
+          try { await enqueue(s.fila_id, tarefa).catch(() => enqueue(s.fila_id, tarefa)); } catch (e) { log({ event: 'etapa2_fila_erro', passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
         }
         return;
       }
@@ -1436,7 +1438,7 @@ export function createEtapa2({
             }
             await entregarDocumentos(next.step, docsB);
             // Entregue: as referências dos arquivos (com as chaves de criptografia) não ficam guardadas.
-            await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true });
+            await salvar({ status: 'concluida', passo: 'fim', limpar_docs: true, tentativas: 0 });
             try { await agendarVigia(id, 'etapa3_vigia', VIGIA_INTERVALO_S); } catch {}
             return;
           }
@@ -1464,7 +1466,8 @@ export function createEtapa2({
           const montado = await montarDados(tela.screen, st, dados);
           const r = await matricula.send(tela.screen, montado);
           sessao = { ...sessao, token: r.token ?? sessao.token };
-          await salvar({ enviados: { ...rec.enviados, [bloco]: clock() }, passo: bloco });
+          // Bloco gravado no Rubeus: as tentativas recomeçam do zero (falhas antigas não somam).
+          await salvar({ enviados: { ...rec.enviados, [bloco]: clock() }, passo: bloco, tentativas: 0 });
           log({ event: 'etapa2_fila', id: curto(id), passo: 'enviado', bloco, ms: clock() - inicio });
         }
         await enqueue(id, { tipo: 'etapa2' });
@@ -1479,9 +1482,10 @@ export function createEtapa2({
       const status = final ? 'conferir' : tentativas >= MAX_TENTATIVAS ? 'falhou' : rec.status;
       await salvar({ status, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0, ...(rm ? { motivo: 'rm_recusou', conferir_em: clock() } : {}) });
       // Recusa do RM: alerta para a equipe (log de atenção); o candidato vê "Em conferência pela equipe".
-      const ev = { event: FINAIS.has(status) ? 'etapa2_fila_atencao' : 'etapa2_fila_erro', id: curto(id), passo: rec.passo, status, motivo: rm ? 'rm_recusou' : e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
+      const ev = { event: FINAIS.has(status) ? 'etapa2_fila_atencao' : 'etapa2_fila_erro', id: curto(id), passo: rec.passo, status, tentativa: tentativas, motivo: rm ? 'rm_recusou' : e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
       FINAIS.has(status) ? console.error(JSON.stringify(ev)) : log(ev);
-      if (!FINAIS.has(status)) await enqueue(id, { tipo: 'etapa2', atrasoSeg: Math.min(600, 30 * 2 ** tentativas) }).catch(() => {});
+      // Próxima tentativa agendada no Cloud Tasks (o Run fica desligado na espera). Tabela em api/retentativas.js.
+      if (!FINAIS.has(status)) await enqueue(id, { tipo: 'etapa2', atrasoSeg: esperaDepoisDaFalha(tentativas) }).catch(() => {});
     }
     return 204;
   }

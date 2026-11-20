@@ -1,3 +1,11 @@
+# Versão 2.17.1 — reenvio ao Rubeus por até 72 h (20/11/2026) — só servidor, JSON igual à 2.16.23
+
+- **Motivo (auditoria do GPT, 20/11):** o worker desistia depois de 6 falhas (~15 min: 30 s, 1, 2, 4, 8 min) e a contagem não zerava com sucesso; um Rubeus fora do ar por mais de 15 min deixava a inscrição em "falhou" sem retomada.
+- **Ritmo novo** (`api/retentativas.js`, inscrição/redação/documentos de inscrição e matrícula): 1ª tentativa 10 s depois de os dados chegarem; em falha 30 s, 2 min, 30 min, 30 min, 1 h da 6ª à 10ª e 6 h 35 min 44 s da 11ª à 20ª = 72 h. Depois da 20ª, "falhou" com os dados guardados no Firestore e alerta para a equipe.
+- **Contagem zera:** quando o passo que falhou dá certo (etapa 1) ou um bloco é gravado (matrícula). A espera pelo portal ("Documentos inscrição") tem contagem própria.
+- O Run continua desligado entre as tentativas (tarefas agendadas no Cloud Tasks). Vigias, avisos e cobrança do Blip não mudaram.
+- Testes novos: soma de 72 h, 20 tentativas no ritmo novo terminando em "falhou" com os dados guardados, e contagem zerada depois do sucesso.
+
 # Versão 2.17.0 — inscrição homologada nos 4 processos no app e no WhatsApp Web; limpeza do Run (20/11/2026) — só servidor, JSON igual à 2.16.23
 
 - **Homologação (20/11):** Vestibular, Transferência, Portador e ENEM chegaram ao fim da inscrição no WhatsApp Web; notas do ENEM conferidas no portal. Causa do problema no Web: o CalendarPicker da tela de Dados básicos (a 2.16.23 voltou o If do nome social e continuou passando). Regras em README › "Regras do Flow para funcionar também no WhatsApp Web".

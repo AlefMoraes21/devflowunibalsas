@@ -7,12 +7,14 @@
 import crypto from 'node:crypto';
 import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo } from './portal-site.js';
 import { cursoFixo, cursoNoRubeus, turnoNoRubeus } from './cursos-fixos.js';
+import { PRIMEIRA_TENTATIVA_S, MAX_TENTATIVAS, esperaDepoisDaFalha } from './retentativas.js';
 
 const DIA = 86400000;
 const FILA = 'inscricoesFila';
 const CACHE = 'flowCache';
 const FINAIS = new Set(['concluida', 'duplicada', 'conferir', 'falhou']);
-const MAX_TENTATIVAS = 6;
+// Espera pelo portal (Documentos inscrição ainda não apareceu): alerta a equipe na 6ª espera.
+const ALERTA_DOCS_PORTAL = 6;
 // Docs de inscrição recebidos, mas o portal ainda não mostra a etapa "Documentos inscrição": espera com calma
 // (a cada 10 min, por até ~24 h) em vez de desistir em 6 tentativas e deixar os arquivos parados.
 const MAX_TENTATIVAS_DOCS_PORTAL = 150;
@@ -108,7 +110,7 @@ export function createEtapa1({
       log({ event: 'etapa1_fila_erro', passo: 'redacao', message: String(e?.message ?? e).slice(0, 120) });
       return 'Não conseguimos guardar sua redação agora. Toque em Enviar redação de novo; o texto continua aqui.';
     }
-    await disparar(filaId);
+    await disparar(filaId, PRIMEIRA_TENTATIVA_S);
     return null;
   }
 
@@ -178,7 +180,7 @@ export function createEtapa1({
       if (await store.update(id, rec, atual.version, FILA)) break;
       if (i === 4) throw new Error('conflito');
     }
-    await disparar(id);
+    await disparar(id, PRIMEIRA_TENTATIVA_S);
   }
   const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
   const falha = (passo, e) => log({ event: 'etapa1_fila_erro', passo, message: String(e?.message ?? e).slice(0, 160) });
@@ -215,7 +217,7 @@ export function createEtapa1({
       if (await store.update(id, rec, atual.version, FILA)) {
         if (completo) {
           log({ event: 'etapa1_fila', id: curto(id), passo: 'documentos_inscricao_recebidos', quantidade: Object.keys(docs.arquivos).length });
-          await disparar(id);
+          await disparar(id, PRIMEIRA_TENTATIVA_S);
         }
         return;
       }
@@ -717,26 +719,34 @@ export function createEtapa1({
       throw new Error('Não foi possível gravar o andamento da inscrição.');
     }
 
+    // Passo em que a volta começou: é ele que conta como "o passo que falhou".
+    let passoDaVolta = rec.passo;
     try {
       while (!FINAIS.has(rec.status) && clock() - inicio < orcamentoMs) {
+        passoDaVolta = rec.passo;
         const r = await executarPasso(rec, salvar);
+        // O passo que tinha falhado agora deu certo: as tentativas recomeçam do zero (falhas antigas não somam).
+        if (rec.tentativas && rec.erro_passo === passoDaVolta && rec.passo !== passoDaVolta) await salvar({ tentativas: 0, erro_passo: null, ultimo_motivo: null });
         if (r === 'parar') break;
       }
     } catch (e) {
       const passoAntes = rec.passo;
-      const tentativas = (rec.tentativas ?? 0) + 1;
       const final = e instanceof ErroPasso && e.final;
       const esperaPortal = e?.motivo === 'docs_nao_liberado';
+      // Espera pelo portal e falha de envio têm contagens próprias: ao trocar de uma para a outra, recomeça.
+      const mesmaContagem = esperaPortal === (rec.ultimo_motivo === 'docs_nao_liberado');
+      const tentativas = (mesmaContagem ? rec.tentativas ?? 0 : 0) + 1;
       const limite = esperaPortal ? MAX_TENTATIVAS_DOCS_PORTAL : MAX_TENTATIVAS;
       const status = final ? (e.motivo === 'duplicada' ? 'duplicada' : 'conferir') : tentativas >= limite ? 'falhou' : rec.status;
       // Antes da conclusão, uma nova tentativa recomeça numa sessão nova do Rubeus.
       const passo = !final && ['basicos', 'turnos', 'curso', 'final'].includes(rec.passo) ? 'inicio' : rec.passo;
-      await salvar({ status, passo, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0 });
+      await salvar({ status, passo, tentativas, erro_passo: passoDaVolta, ultimo_motivo: e?.motivo ?? 'erro', ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0 });
       // Aviso de atenção na 6ª espera (a equipe confere o portal); depois só o log comum até liberar.
-      const atencao = FINAIS.has(status) || (esperaPortal && tentativas === MAX_TENTATIVAS);
-      const evento = { event: atencao ? 'etapa1_fila_atencao' : 'etapa1_fila_erro', id: curto(id), passo: passoAntes, status, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
+      const atencao = FINAIS.has(status) || (esperaPortal && tentativas === ALERTA_DOCS_PORTAL);
+      const evento = { event: atencao ? 'etapa1_fila_atencao' : 'etapa1_fila_erro', id: curto(id), passo: passoAntes, status, tentativa: tentativas, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
       atencao ? console.error(JSON.stringify(evento)) : log(evento);
-      if (!FINAIS.has(status)) await disparar(id, esperaPortal ? Math.min(600, 60 * tentativas) : Math.min(600, 15 * 2 ** tentativas));
+      // Próxima tentativa agendada no Cloud Tasks (o Run fica desligado na espera). Tabela em api/retentativas.js.
+      if (!FINAIS.has(status)) await disparar(id, esperaPortal ? Math.min(600, 60 * tentativas) : esperaDepoisDaFalha(tentativas));
       return 204;
     }
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.
