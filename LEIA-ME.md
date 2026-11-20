@@ -1,3 +1,11 @@
+# Versão 2.17.3 — sessão expirada no meio das tentativas (20/11/2026) — só servidor
+
+- A sessão do Rubeus guardada no registro (estado selado) vale 3 h; com 72 h de tentativas ela podia vencer e as tentativas seguintes falhavam sempre.
+- Antes da conclusão: sessão vencida recomeça numa sessão nova, sem contar como falha.
+- Redação ainda não enviada (redacao_enviar): volta para `redacao`, que entra de novo no Rubeus com o CPF e a data de nascimento guardados (como o LOGIN) e abre a mesma prova.
+- Redação já enviada, só faltando a confirmação (`entrega`): vai direto para a equipe conferir (`entrega_sem_sessao`), sem reenvio e sem 72 h de tentativas inúteis.
+- Teste novo (falha na 2.17.2, passa na 2.17.3).
+
 # Versão 2.17.2 — resposta incompleta do portal nunca vira "concluída" (20/11/2026) — só servidor
 
 - **Matrícula:** etapas vazias no portal → tenta de novo (motivo `portal_vazio`); botão de etapa em formato desconhecido → equipe confere (`portal_formato`). Antes, os dois casos davam "concluída" sem enviar os blocos.

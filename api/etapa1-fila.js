@@ -507,8 +507,18 @@ export function createEtapa1({
     return r;
   }
 
+  // Sessão do Rubeus guardada no registro (estado selado, vale 3 h). Expirada, não adianta tentar de novo com ela.
+  const ckValido = rec => { try { openState(rec.ck.estado, rec.ck.screen); return true; } catch { return false; } };
   async function executarPasso(rec, salvar) {
     const R = rec.respostas;
+    if (rec.ck && !ckValido(rec)) {
+      // Antes da conclusão: recomeça numa sessão nova, sem contar como falha.
+      if (['basicos', 'turnos', 'curso', 'final'].includes(rec.passo)) { log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'sessao_expirada', de: rec.passo }); return salvar({ passo: 'inicio', ck: null }); }
+      // Redação ainda não enviada: abre de novo a prova da inscrição (passo redacao entra no Rubeus pelo CPF).
+      if (rec.passo === 'redacao_enviar') { log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'sessao_expirada', de: rec.passo }); return salvar({ passo: 'redacao', ck: null }); }
+      // Redação já enviada, só falta a confirmação: sem a sessão, a equipe confere no portal (nunca reenvia).
+      if (rec.passo === 'entrega') throw new ErroPasso('A sessão expirou antes de o portal confirmar a entrega da redação.', { final: true, motivo: 'entrega_sem_sessao' });
+    }
     switch (rec.passo) {
       case 'inicio': {
         const r = await step('ESCOLHA_PROCESSO', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: [rec.processo] }), 'selecionar_processo', { processo_seletivo_id: rec.processo }, rec.id);
@@ -597,12 +607,17 @@ export function createEtapa1({
         if (clock() < pronta) return salvar({ parar: true, proxima: pronta });
         // 2) Lê a prova ATUAL da inscrição, sem acionar "Iniciar prova" de novo, duas vezes com
         //    intervalo: só segue se a execução e o registro não mudaram.
-        let base = {};
-        if (rec.via_login) {
-          // Entrou pelo LOGIN: sessão nova no Rubeus com o CPF e a data de nascimento guardados.
-          const sess = await loginRubeus(rec.via_login.login, rec.via_login.data_nascimento);
+        let base = null;
+        if (!rec.via_login && rec.ck) { try { base = openState(rec.ck.estado, rec.ck.screen); } catch {} }
+        // Entrou pelo LOGIN, ou a sessão da inscrição expirou (o estado selado vale 3 h): sessão nova no Rubeus
+        // com o CPF e a data de nascimento guardados, como o candidato faria no portal.
+        const reLogin = !base;
+        if (reLogin) {
+          const acesso = rec.via_login ?? { login: digits(R?.cpf), data_nascimento: R?.data_nascimento };
+          if (!acesso.login || !acesso.data_nascimento) throw new ErroPasso('Sessão da inscrição expirada e sem CPF/data de nascimento para entrar de novo.', { final: true, motivo: 'sessao_expirada' });
+          const sess = await loginRubeus(acesso.login, acesso.data_nascimento);
           base = { token: sess.token, applyment_id: String(rec.applyment_id), processo_seletivo_id: String(rec.processo), person_id: sess.person_id };
-        } else { try { base = openState(rec.ck.estado, rec.ck.screen); } catch {} }
+        }
         const conferir = async () => {
           const est = sealState('TELA_ORIENTACAO_PROVA', { ...base, prepared_existing: null, prova_pre_carregada: false, proof_resume_required: true });
           const c = await step('TELA_ORIENTACAO_PROVA', est, 'conferir_prova_existente', {}, rec.id);
@@ -614,7 +629,7 @@ export function createEtapa1({
         catch (e) {
           // Prova ainda não iniciada (inscrição feita e prova nunca aberta): aciona o "Iniciar prova" como o
           // site faz, uma vez, e espera a calma antes de conferir e enviar.
-          if (rec.via_login && !rec.prova_preparada && /idexecprova|nao foi confirmad|não foi confirmad|registro da prova/i.test(e.message)) {
+          if (reLogin && !rec.prova_preparada && /idexecprova|nao foi confirmad|não foi confirmad|registro da prova/i.test(e.message)) {
             await prepararProva(base);
             log({ event: 'etapa1_fila', id: curto(rec.id), passo: 'prova_iniciada_pelo_login' });
             return salvar({ prova_preparada: true, inscrita_em: clock(), parar: true, proxima: clock() + esperaProvaMs });

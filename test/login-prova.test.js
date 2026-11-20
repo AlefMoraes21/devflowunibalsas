@@ -85,3 +85,40 @@ test('LOGIN com a prova disponível: leva à redação; o Cloud Run inicia a pro
   assert.deepEqual(chamadas.slice(-3), ['iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
   assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'concluida');
 });
+
+// 2.17.3: a sessão guardada (estado selado) vale 3 h; com 72 h de tentativas, ela pode vencer no meio.
+test('Sessão da inscrição expirada: a redação ainda não enviada entra de novo pelo CPF e é entregue; a já enviada vai para a equipe', async () => {
+  const store = memoria(); const fila = []; const chamadas = [];
+  const agora = Date.now();
+  const tela = (screen, data) => ({ screen, data: { estado: sealState(screen, data) } });
+  const E1 = createEtapa1({
+    store, enqueue: async (id, o) => fila.push({ id, ...o }), sealState, openState,
+    validateBasic: () => {}, validateFinal: () => {}, origens: [], hoje: () => '2026-11-15', requiresEssay: () => true, academicId: () => '223', userFields: new Set(['texto_redacao']),
+    sleep: async () => {}, log: () => {}, clock: () => agora, esperaProvaMs: 600000, estabilidadeMs: 0,
+    loginRubeus: async (login, nasc) => { assert.equal(login, '39184720514'); assert.equal(nasc, NASC); chamadas.push('login'); return { token: 'tok-login', person_id: '1' }; },
+    prepararProva: async () => { throw new Error('a prova já foi iniciada na inscrição'); },
+    runStep: async req => {
+      const a = req.data.acao; chamadas.push(a);
+      if (a === 'conferir_prova_existente') { assert.equal(openState(req.data.estado, req.screen).token, 'tok-login', 'usa a sessão nova'); return tela('TELA_ORIENTACAO_PROVA', { prepared_existing: { binding: { executionCode: 'EX', proofId: '9' } } }); }
+      if (a === 'iniciar_redacao') return tela('TELA_REDACAO', { tema_redacao: TEMA });
+      if (a === 'enviar_redacao') { assert.equal(req.data.texto_redacao, TEXTO); return tela('TELA_REDACAO', { recibo_avaliacao: { id: 1 } }); }
+      if (a === 'verificar_entrega') return { screen: 'CONFIRMACAO', data: {} };
+      throw new Error('inesperado ' + a);
+    }
+  });
+  const base = { processo: '20383', flow: 'x', respostas: { cpf: CPF, data_nascimento: NASC, nome: 'Teste', celular: '99999999999' }, redacao: TEXTO, status: 'inscrita', applyment_id: '555', inscrita_em: agora - 4 * 3600000, tentativas: 0, criado: agora, expires: agora + 1e9 };
+  await store.create('r1', { id: 'r1', ...base, passo: 'redacao_enviar', ck: { screen: 'TELA_REDACAO', estado: 'expirado' } }, 'inscricoesFila');
+  await E1.worker('r1');
+  const r1 = (await store.get('r1', 'inscricoesFila')).record;
+  assert.equal(r1.status, 'concluida', 'entregue com a sessão nova');
+  assert.deepEqual(chamadas.filter(a => a !== 'conferir_prova_existente'), ['login', 'iniciar_redacao', 'enviar_redacao', 'verificar_entrega']);
+  assert.ok(!r1.tentativas, 'sessão vencida não conta como falha');
+
+  chamadas.length = 0;
+  await store.create('r2', { id: 'r2', ...base, passo: 'entrega', ck: { screen: 'TELA_REDACAO', estado: 'expirado' } }, 'inscricoesFila');
+  const original = console.error; console.error = () => {};
+  try { await E1.worker('r2'); } finally { console.error = original; }
+  const r2 = (await store.get('r2', 'inscricoesFila')).record;
+  assert.equal(r2.status, 'conferir', 'já enviada: a equipe confere, sem 72 h de tentativas inúteis');
+  assert.equal(chamadas.length, 0, 'nada é reenviado');
+});

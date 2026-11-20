@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.2** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.2`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.3** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.3`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -163,6 +163,10 @@ com os documentos de matrícula (etapa 2). Os dados chegam no Run e a 1ª tentat
 **Resposta incompleta do portal nunca vira "concluída"** (2.17.2): etapas vazias → tenta de novo; botão de etapa
 num formato que não seja `presencial/passo/<n>` ou `presencial/feedback/<n>` → a equipe confere (`portal_formato`).
 Documentos de inscrição só contam como "já em análise" quando a etapa não tem botão de envio.
+
+**Sessão vencida no meio das tentativas** (2.17.3): a sessão do Rubeus guardada vale 3 h. Vencida antes da conclusão,
+recomeça numa sessão nova; na redação ainda não enviada, entra de novo pelo CPF e data de nascimento; na redação já
+enviada esperando confirmação, vai para a equipe conferir (nunca reenvia).
 
 ## Avisos pelo Blip (vigias)
 
