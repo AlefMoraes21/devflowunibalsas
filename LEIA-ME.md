@@ -1,3 +1,9 @@
+# Versão 2.16.18 — curso em caixa de marcar "CURSO - TURNO" e catálogo de cursos no log (19/11/2026) — COLAR O JSON NOVO NA META
+
+- Ideia do usuário: curso em CheckboxGroup (mínimo 1; a Meta não aceita máximo 1, então o servidor recusa mais de um com \"Marque apenas um curso.\"), com o turno ao lado do nome: "DIREITO - NOTURNO". Acima de 30 caracteres, título cortado e o texto inteiro na descrição. O servidor aceita curso_id como lista (CheckboxGroup) ou texto.
+- Log flow_catalogo (processo, id e nome dos cursos e turnos, sem dado pessoal) ao abrir a tela de curso. Serve para montar as listas fixas de cursos no JSON da WABA, por processo (próxima ideia do usuário).
+- Situação do Web: a 2.16.17 continuou voltando ao início em 6 de 7 tentativas; a que passou (sessão 03c66a43) teve os Dados básicos recusados 2 vezes antes. Modo anônimo do navegador também falhou.
+
 # Versão 2.16.17 — processo seletivo em botões de opção na 1ª tela (WhatsApp Web) (19/11/2026) — COLAR O JSON NOVO NA META
 
 - Com a 2.16.16, a Transferência continuou voltando aos Dados básicos no Web, enquanto o Vestibular passa. As telas e a resposta do servidor são iguais nos 4 processos; a diferença está no Web antes do curso: a escolha do processo na lista da 1ª tela (Dropdown abre uma tela própria de seleção, que já se mostrou capaz de bagunçar a navigação do Web).

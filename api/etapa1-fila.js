@@ -312,16 +312,14 @@ export function createEtapa1({
     const processo = s.processo_seletivo_id;
     const base = { e1: true, processo_seletivo_id: processo, eh_nota_enem: Boolean(s.eh_nota_enem), fila_id: s.fila_id };
 
-    // Lista de cursos: nome até 30 caracteres (limite da Meta) e, com turno único, "Turno: Noturno" na
-    // descrição da opção. Nome maior que 30 vai inteiro na descrição.
+    // Lista de cursos com o turno ao lado: "DIREITO - NOTURNO". Até 30 caracteres no título (limite da Meta);
+    // maior que isso, o título é cortado e o texto inteiro vai na descrição.
     const cursosComTurno = c => (c?.cursos ?? []).map(x => {
       const t = c?.turnos?.[x.id] ?? [];
       const nome = String(x.title ?? '').trim();
-      const curto30 = nome.length > 30 ? nome.slice(0, 29).trimEnd() + '…' : nome;
-      const partes = [nome.length > 30 ? nome : '', t.length === 1 ? `Turno: ${titulo(t[0].title)}` : ''].filter(Boolean);
-      return { id: x.id, title: curto30, ...(partes.length ? { description: partes.join(' · ') } : {}) };
+      const cheio = t.length === 1 ? `${nome} - ${String(t[0].title ?? '').trim().toUpperCase()}` : nome;
+      return cheio.length > 30 ? { id: x.id, title: cheio.slice(0, 29).trimEnd() + '…', description: cheio } : { id: x.id, title: cheio };
     });
-    const titulo = v => String(v ?? '').toLowerCase().replace(/(^|\s)\S/g, m => m.toUpperCase());
     async function gravarCursoTurno(st, rq, { curso, turno, notas, media }) {
       const enem = Boolean(st.eh_nota_enem);
       try { await gravarTela(st.fila_id, processo, rq.flow_token, { curso_id: curso, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
@@ -337,6 +335,7 @@ export function createEtapa1({
       const c = await esperarCache(processo, x => x?.cursos?.length);
       if (!c?.cursos?.length) return renderE1('INSC_DADOS', { ...s, values: u, erro: 'Seus dados foram salvos. Estamos carregando os cursos: toque em Avançar de novo.' });
       const cursos = cursosComTurno(c);
+      log({ event: 'flow_catalogo', processo, cursos: (c?.cursos ?? []).map(x => ({ id: x.id, title: x.title, turnos: (c?.turnos?.[x.id] ?? []).map(t => ({ id: t.id, title: t.title })) })) });
       if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, cursos, anos_enem: anosEnem, erro: '' });
       return renderE1('INSC_CURSO', { ...base, cursos, erro: '' });
     }
@@ -346,7 +345,10 @@ export function createEtapa1({
     if ((screen === 'INSC_CURSO' || screen === 'INSC_CURSO_ENEM') && (acao === 'escolher_curso' || acao === 'buscar_turnos')) {
       const enem = screen === 'INSC_CURSO_ENEM';
       const notas = enem ? Object.fromEntries(ENEM_CAMPOS.map(k => [k, u[k] == null ? '' : String(u[k]).trim()])) : {};
-      const curso = String(u.curso_id ?? '');
+      // CheckboxGroup manda uma lista (1 item); o servidor aceita lista ou texto.
+      const marcados = (Array.isArray(u.curso_id) ? u.curso_id : [u.curso_id]).map(x => String(x ?? '')).filter(Boolean);
+      if (marcados.length > 1) return renderE1(screen, { ...s, values: notas, erro: 'Marque apenas um curso.' });
+      const curso = marcados[0] ?? '';
       const escolhido = (s.cursos ?? []).find(c => c.id === curso);
       if (!escolhido) return renderE1(screen, { ...s, values: notas, erro: 'Selecione um curso.' });
       let media = '';

@@ -125,7 +125,7 @@ async function etapa1(E, processo = '20383', extra = {}) {
   assert.equal(dados.screen, 'INSC_DADOS');
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
-  assert.deepEqual(curso.data.cursos.find(c => c.id === 'ads'), { id: 'ads', title: 'ADS', description: 'Turno: Noturno' }, 'turno único na descrição do curso');
+  assert.deepEqual(curso.data.cursos.find(c => c.id === 'ads'), { id: 'ads', title: 'ADS - NOTURNO' }, 'turno ao lado do nome');
   const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   return quase;
@@ -186,7 +186,7 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
 
-test('Curso com turno único: "Turno: Noturno" na descrição da opção e o Avançar segue direto; com 2 turnos abre a tela do Turno — nos 4 processos', async () => {
+test('Curso com turno único: "ADS - NOTURNO" na caixa de marcar e o Avançar segue direto; com 2 turnos abre a tela do Turno — nos 4 processos', async () => {
   for (const processo of ['20383', '20385', '20384', '20386']) {
     const { e1: E, store, fila } = montar();
     await store.create('etapa1-' + processo, { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
@@ -194,13 +194,15 @@ test('Curso com turno único: "Turno: Noturno" na descrição da opção e o Ava
     const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
     const enem = processo === '20386';
     assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO', processo);
-    assert.deepEqual(curso.data.cursos, [{ id: 'ads', title: 'ADS', description: 'Turno: Noturno' }, { id: 'dir', title: 'Direito' }], 'turno único na descrição; 2 turnos, só o curso');
+    assert.deepEqual(curso.data.cursos, [{ id: 'ads', title: 'ADS - NOTURNO' }, { id: 'dir', title: 'Direito' }], 'turno único ao lado; 2 turnos, só o curso');
     const extra = enem ? ENEM : {};
     const semCurso = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: '', ...extra });
     assert.equal(semCurso.screen, curso.screen); assert.match(semCurso.data.erro, /curso/);
+    const doisCursos = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: ['ads', 'dir'], ...extra });
+    assert.equal(doisCursos.screen, curso.screen); assert.match(doisCursos.data.erro, /apenas um curso/);
     // Turno único: o Avançar grava curso + turno e segue.
-    const quase = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'ads', ...extra });
-    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': Avançar segue direto');
+    const quase = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: ['ads'], ...extra });
+    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': Avançar segue direto (CheckboxGroup manda lista)');
     assert.equal(quase.data.eh_nota_enem, enem);
     const r = (await store.get(fila[0].id, 'inscricoesFila')).record.respostas;
     assert.equal(r.curso_id, 'ads'); assert.equal(r.turno_id, 'not', 'turno único gravado');
@@ -262,7 +264,7 @@ test('WhatsApp Web: o rodapé da 1ª tela fica numa posição que nenhuma outra 
   assert.deepEqual(iguais, [], 'rodapé na mesma posição da 1ª tela: ' + inicio);
 });
 
-test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e nome inteiro na descrição', async () => {
+test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e "CURSO - TURNO" inteiro na descrição', async () => {
   const { e1: E, store } = montar();
   const longo = 'TECNOLOGIA EM ANÁLISE E DESENVOLVIMENTO DE SISTEMAS';
   await store.create('etapa1-20385', { cursos: [{ id: 'ads', title: longo }], turnos: { ads: [{ id: 'not', title: 'NOTURNO' }] }, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
@@ -270,7 +272,7 @@ test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const op = curso.data.cursos[0];
   assert.ok(op.title.length <= 30, op.title); assert.ok(op.title.endsWith('…'));
-  assert.equal(op.description, longo + ' · Turno: Noturno');
+  assert.equal(op.description, longo + ' - NOTURNO');
   const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
 });

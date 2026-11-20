@@ -589,11 +589,12 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "RadioButtonsGroup",
+                "type": "CheckboxGroup",
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
-                "required": true
+                "required": true,
+                "min-selected-items": 1
               },
               {
                 "type": "Footer",
@@ -724,11 +725,12 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "RadioButtonsGroup",
+                "type": "CheckboxGroup",
                 "name": "curso_id",
                 "label": "Curso",
                 "data-source": "${data.cursos}",
-                "required": true
+                "required": true,
+                "min-selected-items": 1
               },
               {
                 "type": "TextSubheading",

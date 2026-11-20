@@ -149,7 +149,9 @@ const flow = {
             // Turno em tela própria (INSC_TURNO). No WhatsApp Web, tanto a escolha com on-select-action quanto um
             // turno dentro de If (campo ainda não exibido no init-values/payload) voltam o Flow para a 1ª tela sem
             // chamar o servidor (19/11). Aqui só o curso; o Avançar abre a tela do turno.
-            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
+            // Caixa de marcar com o turno ao lado do nome: "DIREITO - NOTURNO" (ideia do usuário, 19/11). A Meta não
+            // aceita max-selected-items 1 (mínimo 2): o servidor confere que só um curso foi marcado.
+            { type: 'CheckboxGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'min-selected-items': 1 },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id'])) }
           ]
         }]
@@ -174,7 +176,9 @@ const flow = {
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true },
+            // Caixa de marcar com o turno ao lado do nome: "DIREITO - NOTURNO" (ideia do usuário, 19/11). A Meta não
+            // aceita max-selected-items 1 (mínimo 2): o servidor confere que só um curso foi marcado.
+            { type: 'CheckboxGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'min-selected-items': 1 },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
             { type: 'RadioButtonsGroup', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
