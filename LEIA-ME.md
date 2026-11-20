@@ -1,3 +1,12 @@
+# Versão 2.17.5 — varredura de tarefas perdidas e comando "acordar" (20/11/2026) — só servidor
+
+- Antes: se uma tarefa do Cloud Tasks se perdesse (agendamento recusado, execução que caiu no meio, tarefa de outro worker ocupado), a fila ficava parada com os dados guardados até o candidato entrar de novo — e a etapa 1 nem isso.
+- Agora: cada fila da etapa 1 e da etapa 2 guarda a hora da próxima tentativa (`proximaAcaoEm`, só a data fora da criptografia). `POST /internal/reconciliar` religa as vencidas há mais de 10 min, uma vez; as que só esperam o candidato perdem a marca sem chamar o Rubeus.
+- `reabrir_falhas`: recomeça do zero as que ficaram `falhou` depois das 20 tentativas (o comando "acordar").
+- Rota fechada (403) até existir `RECONCILIAR_EMAILS`; aceita só ID token do Google de e-mail da lista. Comandos do Scheduler e do "acordar" no README.
+- Vigias ficam como estão (religados pelo LOGIN): devolver 500 neles poderia repetir avisos do Blip.
+- Testes novos (10 falham na 2.17.4, passam na 2.17.5). Conferido no servidor local (Google simulado): Transferência, Portador, Vestibular e ENEM iguais; tarefas apagadas de propósito voltaram pela varredura; nenhum host real chamado pela varredura.
+
 # Versão 2.17.4 — refazer a redação pelo LOGIN (20/11/2026) — só servidor
 
 - Antes: quem fez a 1ª redação pelo LOGIN e foi reprovado ficava preso em "Redação enviada ✅" ao tentar de novo (o registro concluído não reabria).

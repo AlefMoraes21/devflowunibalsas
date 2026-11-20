@@ -20,6 +20,21 @@ globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url);
   const method = (init.method || 'GET').toUpperCase();
   if (url.hostname === 'metadata.google.internal') return json(200, { access_token: 'local', expires_in: 3600 });
+  // ID token do Google: "verify-<email>" vale para esse e-mail (audiência do gcloud); o resto é recusado.
+  if (url.hostname === 'oauth2.googleapis.com' && url.pathname === '/tokeninfo') {
+    const t = url.searchParams.get('id_token') ?? '';
+    outside.push({ host: url.hostname, path: '/tokeninfo', shim: true });
+    if (!t.startsWith('verify-')) return json(400, { error: 'invalid_token' });
+    return json(200, { iss: 'https://accounts.google.com', email: t.slice(7).replace('_at_', '@'), email_verified: 'true', aud: '32555940559.apps.googleusercontent.com' });
+  }
+  if (url.hostname === 'firestore.googleapis.com' && url.pathname.endsWith(':runQuery')) {
+    const q = JSON.parse(init.body).structuredQuery;
+    const col = q.from[0].collectionId, campo = q.where.fieldFilter.field.fieldPath, antes = q.where.fieldFilter.value.timestampValue;
+    const out = [...docs].filter(([k, d]) => k.startsWith(col + '/') && d.fields[campo] && d.fields[campo].timestampValue < antes)
+      .sort((a, b) => a[1].fields[campo].timestampValue.localeCompare(b[1].fields[campo].timestampValue)).slice(0, q.limit ?? 100)
+      .map(([k, d]) => ({ document: { name: 'projects/local/databases/local/documents/' + k, fields: d.fields, updateTime: d.updateTime }, readTime: nextTime() }));
+    return json(200, out.length ? out : [{ readTime: nextTime() }]);
+  }
   if (url.hostname === 'firestore.googleapis.com') {
     const parts = url.pathname.split('/documents/')[1].split('/');
     if (method === 'POST') {
@@ -80,6 +95,12 @@ globalThis.fetch = async (input, init = {}) => {
   return realFetch(input, init);
 };
 
+// Mesmos campos que api/cloud-store.js grava (só datas fora da criptografia).
+const iso = v => ({ timestampValue: new Date(v).toISOString() });
+const campos = rec => ({ blob: { stringValue: pack(rec) }, expireAt: iso(rec.expires ?? Date.now() + 86400000),
+  ...(Number.isFinite(rec.proxima_acao_em) ? { proximaAcaoEm: iso(rec.proxima_acao_em) } : {}),
+  ...(rec.status === 'falhou' && Number.isFinite(rec.falhou_em) ? { falhouEm: iso(rec.falhou_em) } : {}) });
+
 function makeMedia(name, plain) {
   const key = crypto.randomBytes(32), hmacKey = crypto.randomBytes(32), iv = crypto.randomBytes(16);
   const c = crypto.createCipheriv('aes-256-cbc', key, iv);
@@ -111,14 +132,26 @@ http.createServer(async (req, res) => {
     if (u.pathname === '/store') {
       const col = u.searchParams.get('col');
       const out = [];
-      for (const [k, d] of docs) if (!col || k.startsWith(col + '/')) out.push({ key: k.split('/')[0] + '/' + k.split('/')[1].slice(0, 10), record: unpack(d.fields.blob.stringValue) });
+      for (const [k, d] of docs) if (!col || k.startsWith(col + '/')) out.push({ key: k.split('/')[0] + '/' + k.split('/')[1].slice(0, 10), fora: Object.keys(d.fields), record: unpack(d.fields.blob.stringValue) });
       return send(200, out);
     }
     if (u.pathname === '/put') {
       const rec = body.record;
-      docs.set(body.col + '/' + body.id, { fields: { blob: { stringValue: pack(rec) }, expireAt: { timestampValue: new Date(rec.expires ?? Date.now() + 86400000).toISOString() } }, updateTime: nextTime() });
+      docs.set(body.col + '/' + body.id, { fields: campos(rec), updateTime: nextTime() });
       return send(200, { ok: true });
     }
+    // Faz o tempo passar para a varredura: recua em `ms` a próxima ação (e a data da falha) da coleção.
+    if (u.pathname === '/age') {
+      let n = 0;
+      for (const [k, d] of docs) if (k.startsWith(body.col + '/')) {
+        const rec = unpack(d.fields.blob.stringValue);
+        if (Number.isFinite(rec.proxima_acao_em)) rec.proxima_acao_em -= body.ms;
+        if (Number.isFinite(rec.falhou_em)) rec.falhou_em -= body.ms;
+        docs.set(k, { fields: campos(rec), updateTime: nextTime() }); n++;
+      }
+      return send(200, { ok: true, n });
+    }
+    if (u.pathname === '/clear-tasks') { const n = tasks.length; tasks.length = 0; return send(200, { ok: true, removidas: n }); }
     if (u.pathname === '/task') { tasks.push({ name: 'manual', body: { id: body.id, tipo: body.tipo }, headers: { 'X-Flow-Worker-Signature': workerSignature(body.id) }, scheduleTime: null, at: new Date().toISOString() }); return send(200, { ok: true }); }
     if (u.pathname === '/env') { Object.assign(process.env, body); return send(200, { ok: true }); }
     if (u.pathname === '/media') return send(200, makeMedia(body.name || 'teste.pdf', Buffer.from(body.text || '%PDF-1.4\n% teste\n')));

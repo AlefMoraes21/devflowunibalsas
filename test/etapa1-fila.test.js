@@ -21,7 +21,14 @@ function memoria() {
     db,
     async get(id, c = 'flowJobs') { const x = db.get(k(c, id)); return x ? { record: structuredClone(x.record), version: x.version } : null; },
     async create(id, record, c = 'flowJobs') { if (db.has(k(c, id))) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; },
-    async update(id, record, version, c = 'flowJobs') { const x = db.get(k(c, id)); if (!x || x.version !== version) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; }
+    async update(id, record, version, c = 'flowJobs') { const x = db.get(k(c, id)); if (!x || x.version !== version) return false; db.set(k(c, id), { record: structuredClone(record), version: 'v' + (++v) }); return true; },
+    // Mesmo critério do Firestore (api/cloud-store.js): só datas fora da criptografia; falhouEm só com status falhou.
+    async query(c, campo, antes, limite = 100) {
+      const nome = { proximaAcaoEm: 'proxima_acao_em', falhouEm: 'falhou_em' }[campo];
+      return [...db].filter(([key, x]) => key.startsWith(c + '/') && Number.isFinite(x.record[nome]) && (campo !== 'falhouEm' || x.record.status === 'falhou') && x.record[nome] < antes)
+        .sort((a, b) => a[1].record[nome] - b[1].record[nome]).slice(0, limite)
+        .map(([key, x]) => ({ id: key.slice(c.length + 1), record: structuredClone(x.record), version: x.version }));
+    }
   };
 }
 
@@ -52,11 +59,11 @@ function rubeusFalso({ finalErro = '', finalPendente = false, turnoAusente = fal
   return api;
 }
 
-function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false } = {}) {
+function montar({ store = memoria(), rubeus = rubeusFalso(), rm = false, clock } = {}) {
   const fila = [];
   const avisos = [], redacoes = [];
   const e1 = createEtapa1({
-    store, enqueue: async (id, o) => { fila.push({ id, ...o }); },
+    store, ...(clock ? { clock } : {}), enqueue: async (id, o) => { fila.push({ id, ...o }); },
     runStep: rubeus.runStep, sealState, openState,
     validateBasic: d => { if (!String(d.nome ?? '').includes(' ')) throw new Error('Informe nome e sobrenome.'); },
     validateFinal: d => { if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(d.cpf ?? '')) throw new Error('CPF inválido.'); if (!(d.origens ?? []).some(o => o.id === d.como_conheceu)) throw new Error('Selecione como ficou sabendo.'); },
@@ -481,4 +488,83 @@ test('Falhas antigas não somam: quando o passo que falhou dá certo, as tentati
   const rec = (await store.get(id, 'inscricoesFila')).record;
   assert.equal(rec.tentativas, 0); assert.ok(!rec.erro_passo);
   assert.ok(rubeus.chamadas.includes('enviar_informacoes_complementares'), 'seguiu até a conclusão');
+});
+
+// ---------------------------------------------------------------- varredura de tarefas perdidas (2.17.5)
+const MIN = 60000;
+test('Tarefa perdida: a varredura religa a fila parada há mais de 10 min (simular só conta)', async () => {
+  let agora = Date.now();
+  const { e1: E, store, fila, rubeus } = montar({ clock: () => agora });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id;
+  const marcada = (await store.get(id, 'inscricoesFila')).record.proxima_acao_em;
+  assert.equal(marcada, agora + 10000, 'marca a 1ª tentativa (10 s) no registro');
+  fila.length = 0; // a tarefa do Cloud Tasks se perdeu
+  agora += 5 * MIN;
+  assert.deepEqual(await E.reconciliar(), { reenviadas: 0, limpas: 0, ocupadas: 0, reabertas: 0 }, 'dentro da folga: não mexe');
+  agora += 10 * MIN;
+  assert.equal((await E.reconciliar({ simular: true })).reenviadas, 1);
+  assert.equal(fila.length, 0, 'simular não agenda nada');
+  assert.equal((await E.reconciliar()).reenviadas, 1);
+  assert.equal(fila.length, 1); assert.equal(fila[0].atrasoSeg, 0);
+  assert.equal((await E.reconciliar()).reenviadas, 0, 'religada: não reenvia duas vezes');
+  await E.worker(id);
+  const rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'inscrita'); assert.equal(rec.passo, 'redacao', 'inscrita no Rubeus; agora espera a redação do candidato');
+  assert.equal(rec.proxima_acao_em, null, 'sem trabalho pendente: sai da varredura');
+  assert.ok(rubeus.chamadas.includes('enviar_informacoes_complementares'));
+});
+
+test('Execução interrompida no meio: a varredura espera a trava vencer e religa', async () => {
+  let agora = Date.now();
+  const { e1: E, store, fila } = montar({ clock: () => agora });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id;
+  const f = await store.get(id, 'inscricoesFila');
+  await store.update(id, { ...f.record, rodando_ate: agora + 170000, proxima_acao_em: agora + 170000 }, f.version, 'inscricoesFila'); // o worker caiu
+  fila.length = 0;
+  agora += 2 * MIN;
+  assert.equal((await E.reconciliar()).reenviadas, 0);
+  agora += 12 * MIN;
+  assert.equal((await E.reconciliar()).reenviadas, 1);
+  assert.equal(fila.length, 1);
+});
+
+test('Fila esperando o candidato (sem redação ainda): a varredura só limpa a marca, sem chamar o Rubeus', async () => {
+  let agora = Date.now();
+  const { e1: E, store, fila } = montar({ clock: () => agora });
+  const id = 'a'.repeat(64);
+  await store.create(id, { id, processo: '20383', respostas: {}, redacao: null, status: 'inscrita', passo: 'redacao', tentativas: 0, proxima_acao_em: agora, expires: agora + 1e9 }, 'inscricoesFila');
+  agora += 20 * MIN;
+  assert.equal((await E.reconciliar()).limpas, 1);
+  assert.equal(fila.length, 0);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.proxima_acao_em, null);
+  assert.equal((await E.reconciliar()).limpas, 0);
+});
+
+test('Execução normal: termina sem marca; a que esgotou as 20 tentativas só recomeça com reabrirFalhas', async () => {
+  let agora = Date.now();
+  const rubeus = rubeusFalso({ turnoAusente: true });
+  const { e1: E, store, fila } = montar({ rubeus, clock: () => agora });
+  await cacheCompleto(store);
+  await concluirInsc(E);
+  const id = fila[0].id;
+  for (let n = 1; n <= MAX_TENTATIVAS; n++) { await E.worker(id); agora += 1000; }
+  let rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'falhou'); assert.equal(rec.proxima_acao_em, null); assert.ok(rec.falhou_em);
+  const tarefas = fila.length;
+  agora += 30 * MIN;
+  assert.equal((await E.reconciliar()).reabertas, 0, 'sem pedir, a falha fica guardada');
+  assert.equal((await E.reconciliar({ reabrirFalhas: true, simular: true })).reabertas, 1);
+  assert.equal((await store.get(id, 'inscricoesFila')).record.status, 'falhou', 'simular não reabre');
+  assert.equal((await E.reconciliar({ reabrirFalhas: true })).reabertas, 1);
+  rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'pendente'); assert.equal(rec.tentativas, 0); assert.equal(rec.falhou_em, null);
+  assert.equal(fila.length, tarefas + 1); assert.equal(fila.at(-1).atrasoSeg, 0);
+  rubeus.turnoAusente = false;
+  await E.worker(id);
+  rec = (await store.get(id, 'inscricoesFila')).record;
+  assert.equal(rec.status, 'inscrita', 'reaberta, segue do ponto guardado até a inscrição'); assert.equal(rec.proxima_acao_em, null);
 });

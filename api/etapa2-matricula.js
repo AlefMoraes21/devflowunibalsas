@@ -189,6 +189,43 @@ export function createEtapa2({
   // Link do contrato aberto durante uma geração em andamento: espera o PDF ficar pronto (até ~40 s).
   esperaContratoMs = 40000, dormir = ms => new Promise(r => setTimeout(r, ms))
 }) {
+  // Todo envio agendado da matrícula marca no registro quando deve rodar: se a tarefa se perder (ou a execução
+  // cair no meio), a varredura (reconciliar) encontra a marca vencida e agenda de novo.
+  const FOLGA_VARREDURA_MS = 10 * 60000;
+  async function marcarProxima(id, quando) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, FILA).catch(() => null);
+      if (!a || FINAIS.has(a.record.status)) return;
+      if (await store.update(id, { ...a.record, proxima_acao_em: quando }, a.version, FILA).catch(() => false)) return;
+    }
+  }
+  const agendarTarefa = enqueue;
+  enqueue = async (id, tarefa) => {
+    if (tarefa?.tipo === 'etapa2') await marcarProxima(id, clock() + (tarefa.atrasoSeg ?? 0) * 1000);
+    return agendarTarefa(id, tarefa);
+  };
+  async function reconciliar({ simular = false, reabrirFalhas = false, limite = 100 } = {}) {
+    const res = { reenviadas: 0, limpas: 0, ocupadas: 0, reabertas: 0 };
+    for (const f of await store.query(FILA, 'proximaAcaoEm', clock() - FOLGA_VARREDURA_MS, limite)) {
+      if ((f.record.rodando_ate ?? 0) > clock()) { res.ocupadas++; continue; }
+      if (FINAIS.has(f.record.status)) {
+        res.limpas++;
+        if (!simular) await store.update(f.id, { ...f.record, proxima_acao_em: null }, f.version, FILA).catch(() => false);
+        continue;
+      }
+      res.reenviadas++;
+      if (!simular) await enqueue(f.id, { tipo: 'etapa2' }).catch(() => {});
+    }
+    if (reabrirFalhas) for (const f of await store.query(FILA, 'falhouEm', clock() + 1, limite)) {
+      if (f.record.status !== 'falhou') continue;
+      res.reabertas++;
+      if (simular) continue;
+      const reaberto = { ...f.record, status: 'pendente', tentativas: 0, rodando_ate: 0, falhou_em: null };
+      if (await store.update(f.id, reaberto, f.version, FILA).catch(() => false)) await enqueue(f.id, { tipo: 'etapa2' }).catch(() => {});
+    }
+    log({ event: 'reconciliar', fila: 'etapa2', simular, ...res });
+    return res;
+  }
   // ---------------------------------------------------------------- telas do Flow
   const valor = (...n) => n.map(x => 'valor_' + x);
   const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
@@ -1357,7 +1394,8 @@ export function createEtapa2({
     let f = await store.get(id, FILA);
     if (!f || FINAIS.has(f.record.status)) return 204;
     if ((f.record.rodando_ate ?? 0) > clock()) { await enqueue(id, { tipo: 'etapa2', atrasoSeg: 30 }).catch(() => {}); return 204; }
-    if (!await store.update(id, { ...f.record, rodando_ate: clock() + 170000 }, f.version, FILA)) return 204;
+    const travaAte = clock() + 170000;
+    if (!await store.update(id, { ...f.record, rodando_ate: travaAte, proxima_acao_em: travaAte }, f.version, FILA)) return 204;
     f = await store.get(id, FILA);
     let rec = f.record, version = f.version;
     async function salvar(patch) {
@@ -1368,6 +1406,9 @@ export function createEtapa2({
           : atual.record.blocos };
         delete novo.reabrir_docs;
         delete novo.limpar_docs;
+        // Fim desta execução: limpa a marca só se ninguém agendou outra enquanto rodava.
+        if ('soltar_proxima' in patch) { if (novo.proxima_acao_em === patch.soltar_proxima) novo.proxima_acao_em = null; delete novo.soltar_proxima; }
+        if (FINAIS.has(novo.status)) novo.proxima_acao_em = null;
         if (await store.update(id, novo, atual.version, FILA)) { const l = await store.get(id, FILA); rec = l.record; version = l.version; return; }
         if (i === 0) { const l = await store.get(id, FILA); rec = l.record; version = l.version; }
       }
@@ -1475,15 +1516,15 @@ export function createEtapa2({
         }
         await enqueue(id, { tipo: 'etapa2' });
       });
-      await salvar({ rodando_ate: 0 });
+      await salvar({ rodando_ate: 0, soltar_proxima: travaAte });
       log({ event: 'etapa2_fila', id: curto(id), passo: rec.passo, status: rec.status });
     } catch (e) {
-      if (e?.refazer) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documentos_refazer' }); await salvar({ rodando_ate: 0 }).catch(() => {}); return 204; }
+      if (e?.refazer) { log({ event: 'etapa2_fila', id: curto(id), passo: 'documentos_refazer' }); await salvar({ rodando_ate: 0, soltar_proxima: travaAte }).catch(() => {}); return 204; }
       const tentativas = (rec.tentativas ?? 0) + 1;
       const rm = ehRecusaRm(e?.message);
       const final = (e instanceof ErroPasso && e.final) || rm;
       const status = final ? 'conferir' : tentativas >= MAX_TENTATIVAS ? 'falhou' : rec.status;
-      await salvar({ status, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0, ...(rm ? { motivo: 'rm_recusou', conferir_em: clock() } : {}) });
+      await salvar({ status, tentativas, ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0, soltar_proxima: travaAte, ...(status === 'falhou' ? { falhou_em: clock() } : {}), ...(rm ? { motivo: 'rm_recusou', conferir_em: clock() } : {}) });
       // Recusa do RM: alerta para a equipe (log de atenção); o candidato vê "Em conferência pela equipe".
       const ev = { event: FINAIS.has(status) ? 'etapa2_fila_atencao' : 'etapa2_fila_erro', id: curto(id), passo: rec.passo, status, tentativa: tentativas, motivo: rm ? 'rm_recusou' : e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
       FINAIS.has(status) ? console.error(JSON.stringify(ev)) : log(ev);
@@ -1493,5 +1534,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao, iniciarVigiaInscricao, vigiarInscricao, guardarStatusDaInscricao };
+  return { route, worker, reconciliar, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao, iniciarVigiaInscricao, vigiarInscricao, guardarStatusDaInscricao };
 }

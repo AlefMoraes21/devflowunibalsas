@@ -20,6 +20,7 @@ const REFAZER_APOS_MS = 3600000;
 // Docs de inscrição recebidos, mas o portal ainda não mostra a etapa "Documentos inscrição": espera com calma
 // (a cada 10 min, por até ~24 h) em vez de desistir em 6 tentativas e deixar os arquivos parados.
 const MAX_TENTATIVAS_DOCS_PORTAL = 150;
+const FOLGA_VARREDURA_MS = 10 * 60000;
 export const DUPLICADA_MSG = 'Você já possui inscrição neste processo seletivo ou no curso selecionado! Acesse o Portal do candidato para acompanhar sua inscrição.';
 const hash = v => crypto.createHash('sha256').update(String(v)).digest('hex');
 const digits = v => String(v ?? '').replace(/\D/g, '');
@@ -412,7 +413,16 @@ export function createEtapa1({
     return null;
   }
 
+  // Marca no registro quando a próxima tentativa deve rodar (a varredura religa se a tarefa se perder).
+  async function marcarProxima(id, quando) {
+    for (let i = 0; i < 4; i++) {
+      const a = await store.get(id, FILA).catch(() => null);
+      if (!a || FINAIS.has(a.record.status)) return;
+      if (await store.update(id, { ...a.record, proxima_acao_em: quando }, a.version, FILA).catch(() => false)) return;
+    }
+  }
   async function disparar(id, atrasoSeg = 0) {
+    await marcarProxima(id, clock() + atrasoSeg * 1000);
     try { await enqueue(id, { tipo: 'etapa1', atrasoSeg }); }
     catch (e) { log({ event: 'etapa1_fila_erro', id: curto(id), passo: 'agendar', message: String(e?.message ?? e).slice(0, 120) }); }
   }
@@ -710,6 +720,38 @@ export function createEtapa1({
     }
   }
 
+  // Há o que enviar ao Rubeus com o que já foi guardado (sem isso, o worker só esperaria o candidato).
+  function temTrabalho(rec) {
+    const R2 = rec.respostas ?? {};
+    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true, docs_inscricao: Boolean(rec.docs_inscricao?.completo) };
+    return !FINAIS.has(rec.status) && pronto[rec.passo] === true;
+  }
+
+  // Varredura: religa as filas cuja próxima tentativa venceu há mais de 10 min sem rodar (tarefa perdida,
+  // execução interrompida). Com reabrirFalhas, as que esgotaram as 20 tentativas recomeçam do zero.
+  async function reconciliar({ simular = false, reabrirFalhas = false, limite = 100 } = {}) {
+    const res = { reenviadas: 0, limpas: 0, ocupadas: 0, reabertas: 0 };
+    for (const f of await store.query(FILA, 'proximaAcaoEm', clock() - FOLGA_VARREDURA_MS, limite)) {
+      if ((f.record.rodando_ate ?? 0) > clock()) { res.ocupadas++; continue; }
+      if (!temTrabalho(f.record)) {
+        res.limpas++;
+        if (!simular) await store.update(f.id, { ...f.record, proxima_acao_em: null }, f.version, FILA).catch(() => false);
+        continue;
+      }
+      res.reenviadas++;
+      if (!simular) await disparar(f.id, 0);
+    }
+    if (reabrirFalhas) for (const f of await store.query(FILA, 'falhouEm', clock() + 1, limite)) {
+      if (f.record.status !== 'falhou') continue;
+      res.reabertas++;
+      if (simular) continue;
+      const reaberto = { ...f.record, status: f.record.applyment_id ? 'inscrita' : 'pendente', tentativas: 0, erro_passo: null, ultimo_motivo: null, rodando_ate: 0, falhou_em: null };
+      if (await store.update(f.id, reaberto, f.version, FILA).catch(() => false)) await disparar(f.id, 0);
+    }
+    log({ event: 'reconciliar', fila: 'etapa1', simular, ...res });
+    return res;
+  }
+
   async function worker(id) {
     const inicio = clock();
     let f = await store.get(id, FILA);
@@ -717,7 +759,9 @@ export function createEtapa1({
     if (FINAIS.has(f.record.status)) return 204;
     if ((f.record.rodando_ate ?? 0) > clock()) return 204; // outro worker está com ela
     let version;
-    { const rec = { ...f.record, rodando_ate: clock() + 170000 };
+    const travaAte = clock() + 170000;
+    // Se esta execução cair no meio, a varredura encontra a marca vencida e reenvia.
+    { const rec = { ...f.record, rodando_ate: travaAte, proxima_acao_em: travaAte };
       if (!await store.update(id, rec, f.version, FILA)) return 204;
       f = await store.get(id, FILA); version = f.version; }
     let rec = f.record;
@@ -727,6 +771,9 @@ export function createEtapa1({
         const atual = i === 0 ? { record: rec, version } : await store.get(id, FILA);
         const novo = { ...atual.record, ...patch, redacao: atual.record.redacao ?? rec.redacao };
         delete novo.parar;
+        // Fim desta execução: limpa a marca só se ninguém agendou outra enquanto rodava.
+        if ('soltar_proxima' in patch) { if (novo.proxima_acao_em === patch.soltar_proxima) novo.proxima_acao_em = null; delete novo.soltar_proxima; }
+        if (FINAIS.has(novo.status)) novo.proxima_acao_em = null;
         // Entregue: os dados pessoais e o texto não ficam guardados além do necessário.
         if (novo.status === 'concluida') { novo.respostas = null; novo.redacao = null; novo.ck = null; }
         if (await store.update(id, novo, atual.version, FILA)) {
@@ -761,7 +808,7 @@ export function createEtapa1({
       const status = final ? (e.motivo === 'duplicada' ? 'duplicada' : 'conferir') : tentativas >= limite ? 'falhou' : rec.status;
       // Antes da conclusão, uma nova tentativa recomeça numa sessão nova do Rubeus.
       const passo = !final && ['basicos', 'turnos', 'curso', 'final'].includes(rec.passo) ? 'inicio' : rec.passo;
-      await salvar({ status, passo, tentativas, erro_passo: passoDaVolta, ultimo_motivo: e?.motivo ?? 'erro', ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0 });
+      await salvar({ status, passo, tentativas, erro_passo: passoDaVolta, ultimo_motivo: e?.motivo ?? 'erro', ultimo_erro: String(e?.message ?? e).slice(0, 200), rodando_ate: 0, soltar_proxima: travaAte, ...(status === 'falhou' ? { falhou_em: clock() } : {}) });
       // Aviso de atenção na 6ª espera (a equipe confere o portal); depois só o log comum até liberar.
       const atencao = FINAIS.has(status) || (esperaPortal && tentativas === ALERTA_DOCS_PORTAL);
       const evento = { event: atencao ? 'etapa1_fila_atencao' : 'etapa1_fila_erro', id: curto(id), passo: passoAntes, status, tentativa: tentativas, motivo: e?.motivo ?? 'erro', applyment_id: rec.applyment_id ?? '', message: String(e?.message ?? e).slice(0, 160) };
@@ -771,11 +818,8 @@ export function createEtapa1({
       return 204;
     }
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.
-    await salvar({ rodando_ate: 0 });
-    const R2 = rec.respostas ?? {};
-    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true, docs_inscricao: Boolean(rec.docs_inscricao?.completo) };
-    const temTrabalho = !FINAIS.has(rec.status) && pronto[rec.passo] === true;
-    if (temTrabalho) await disparar(id, rec.proxima > clock() ? Math.ceil((rec.proxima - clock()) / 1000) : 0);
+    await salvar({ rodando_ate: 0, soltar_proxima: travaAte });
+    if (temTrabalho(rec)) await disparar(id, rec.proxima > clock() ? Math.ceil((rec.proxima - clock()) / 1000) : 0);
     return 204;
   }
 
@@ -822,5 +866,5 @@ export function createEtapa1({
     return telaDocumento({ e1: true, processo_seletivo_id: String(processo), eh_nota_enem: ehEnem(processo), fila_id: id, docs }, 0);
   }
 
-  return { route, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, guardarTema, lerCache, gravarCache, cacheCompleto };
+  return { route, worker, reconciliar, entrarNaProva, entrarNosDocsInscricao, renderE1, guardarTema, lerCache, gravarCache, cacheCompleto };
 }

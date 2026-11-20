@@ -42,6 +42,12 @@ node .claude/skills/verify/start.mjs
 | `POST /media {name}` | Cria uma mídia de teste |
 | `POST /env {...}` | Muda variáveis de ambiente com o servidor rodando |
 | `GET /outside` | Mostra os hosts externos chamados |
+| `POST /age {col,ms}` | Recua em `ms` a próxima ação (e a data da falha) da coleção, para testar a varredura |
+| `POST /clear-tasks` | Apaga as tarefas da fila (simula tarefa perdida) |
+
+Varredura: suba com `RECONCILIAR_EMAILS=equipe@example.com` e chame `POST /internal/reconciliar` com
+`Authorization: Bearer verify-equipe_at_example.com` (o mock do tokeninfo troca `_at_` por `@`). Não
+despache as tarefas `etapa1` que ela religar: falam com o Rubeus real.
 
 ## Cenários
 

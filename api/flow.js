@@ -1572,6 +1572,37 @@ export async function workerHandler(req,res){
   return res.status(204).send("");
 }
 
+// Varredura de tarefas perdidas (POST /internal/reconciliar). Chamada pelo Cloud Scheduler ou à mão ("acordar").
+// Autenticação: ID token do Google de um e-mail listado em RECONCILIAR_EMAILS (conta de serviço do Scheduler ou
+// a pessoa da equipe com gcloud). Corpo: { simular: true } só conta; { reabrir_falhas: true } recomeça as que
+// esgotaram as 20 tentativas.
+const GCLOUD_CLI_AUD="32555940559.apps.googleusercontent.com";
+export async function quemChamou(authorization,{fetcher=fetch,emails=process.env.RECONCILIAR_EMAILS,origem=process.env.FLOW_WORKER_ORIGIN}={}){
+  const permitidos=String(emails??"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const token=/^Bearer\s+([\w.-]+)$/.exec(String(authorization??""))?.[1];
+  if(!permitidos.length||!token)return null;
+  const r=await fetcher("https://oauth2.googleapis.com/tokeninfo?id_token="+encodeURIComponent(token),{signal:AbortSignal.timeout(5000)}).catch(()=>null);
+  if(!r?.ok)return null;
+  const j=await r.json().catch(()=>({}));
+  const auds=[GCLOUD_CLI_AUD,String(origem??"").replace(/\/+$/,""),String(origem??"")].filter(Boolean);
+  const email=String(j.email??"").toLowerCase();
+  if(!["accounts.google.com","https://accounts.google.com"].includes(j.iss)||String(j.email_verified)!=="true"||!auds.includes(j.aud)||!permitidos.includes(email))return null;
+  return email;
+}
+export async function reconciliarHandler(req,res,{autenticar=quemChamou,filas={etapa1,etapa2}}={}){
+  if(req.method!=="POST")return res.status(405).send("");
+  const quem=await autenticar(req.headers?.authorization);
+  if(!quem)return res.status(403).send("");
+  const opcoes={simular:req.body?.simular===true,reabrirFalhas:req.body?.reabrir_falhas===true};
+  const resultado={};
+  for(const [nome,fila] of Object.entries(filas)){
+    try{resultado[nome]=await fila.reconciliar(opcoes)}
+    catch(error){resultado[nome]={erro:true};console.error(JSON.stringify({event:"reconciliar_erro",fila:nome,message:String(error?.message??error).slice(0,160)}))}
+  }
+  console.info(JSON.stringify({event:"reconciliar_fim",...opcoes,resultado}));
+  return res.status(200).json({ok:true,...opcoes,resultado});
+}
+
 // Etapa 3: link exclusivo do contrato (GET /contrato/<token>). Devolve o PDF gerado pelo portal na hora.
 const paginaContrato=(titulo,texto,recarregar=0)=>`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">${recarregar?`<meta http-equiv="refresh" content="${recarregar}">`:""}<meta name="viewport" content="width=device-width,initial-scale=1"><title>Contrato UniBalsas</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:32px 16px;background:#f6f4f3;color:#222}main{max-width:520px;margin:auto;background:#fff;border-radius:12px;padding:24px;border-top:6px solid #681006}h1{font-size:1.25rem;color:#681006}</style></head><body><main><h1>${titulo}</h1><p>${texto}</p></main></body></html>`;
 export async function contratoHandler(req,res){
@@ -1610,7 +1641,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.17.4" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.17.5" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

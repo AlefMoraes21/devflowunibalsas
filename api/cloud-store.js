@@ -19,7 +19,9 @@ export function workerSignature(id){return crypto.createHmac('sha256',key()).upd
 export function validWorkerSignature(id,sig){if(!/^[a-f0-9]{64}$/.test(id??'')||!/^[a-f0-9]{64}$/.test(sig??''))return false;return crypto.timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(workerSignature(id),'hex'))}
 export function createStore({request=googleRequest}={}){
   function base(){const project=process.env.FLOW_PROJECT_ID,db=process.env.FLOW_DATABASE_ID||'unibalsas-flow';if(!project)throw new Error('Configure FLOW_PROJECT_ID.');return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(project)}/databases/${encodeURIComponent(db)}/documents`}
-  function fields(record){return {blob:{stringValue:pack(record)},expireAt:{timestampValue:new Date(record.expires).toISOString()}}}
+  // Só datas ficam fora da criptografia: a próxima ação esperada (varredura de tarefas perdidas) e quando falhou de vez.
+  const quando=v=>({timestampValue:new Date(v).toISOString()});
+  function fields(record){return {blob:{stringValue:pack(record)},expireAt:quando(record.expires),...(Number.isFinite(record.proxima_acao_em)?{proximaAcaoEm:quando(record.proxima_acao_em)}:{}),...(record.status==='falhou'&&Number.isFinite(record.falhou_em)?{falhouEm:quando(record.falhou_em)}:{})}}
   function decode(json){return {record:unpack(json.fields.blob.stringValue),version:json.updateTime}}
   async function get(id,collection='flowJobs'){
     const r=await request(`${base()}/${collection}/${id}`);if(r.status===404)return null;
@@ -34,7 +36,14 @@ export function createStore({request=googleRequest}={}){
     if([409,412].includes(r.status)||r.json?.error?.status==='FAILED_PRECONDITION')return false;
     if(r.status!==200)throw new Error('Não foi possível atualizar o processamento.');return true;
   }
-  return {get,create,update};
+  // Documentos com a data (proximaAcaoEm ou falhouEm) antes de `antes` (ms), os mais antigos primeiro.
+  async function query(collection,campo,antes,limite=100){
+    if(!['proximaAcaoEm','falhouEm'].includes(campo))throw new Error('Campo de consulta inválido.');
+    const r=await request(`${base()}:runQuery`,{method:'POST',timeout:10000,body:{structuredQuery:{from:[{collectionId:collection}],where:{fieldFilter:{field:{fieldPath:campo},op:'LESS_THAN',value:quando(antes)}},orderBy:[{field:{fieldPath:campo},direction:'ASCENDING'}],limit:limite}}});
+    if(r.status!==200||!Array.isArray(r.json))throw new Error('Não foi possível consultar a fila.');
+    return r.json.filter(x=>x.document?.fields?.blob).map(x=>({id:x.document.name.split('/').pop(),...decode(x.document)}));
+  }
+  return {get,create,update,query};
 }
 // tipo: tarefas além dos jobs de tela (ex.: etapa1). Nome único por disparo; atrasoSeg agenda para depois.
 export async function enqueueJob(id,{tipo,atrasoSeg=0}={}){

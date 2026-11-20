@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.4** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.4`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.5** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.5`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -170,6 +170,44 @@ enviada esperando confirmação, vai para a equipe conferir (nunca reenvia).
 
 **Refazer a redação pelo LOGIN** (2.17.4): com a prova liberada de novo no portal e a entrega anterior com 1 h ou
 mais, a redação abre de novo no Flow (entrega recente continua como "Redação enviada").
+
+## Varredura de tarefas perdidas e comando "acordar" (2.17.5)
+
+Cada fila da etapa 1 (`inscricoesFila`) e da etapa 2 (`matriculaFila`) guarda a hora em que a próxima tentativa
+deve rodar (`proximaAcaoEm`, uma data fora da criptografia; os dados continuam no blob criptografado). Ela é marcada
+antes de agendar no Cloud Tasks e enquanto o worker roda (até a trava de 170 s vencer), e sai quando a fila termina,
+espera o candidato ou vai para a equipe. Quem falhou de vez ganha `falhouEm`.
+
+`POST /internal/reconciliar` procura as filas com `proximaAcaoEm` vencida há mais de 10 min (tarefa que se perdeu,
+agendamento que falhou, execução que caiu no meio) e agenda de novo, uma vez:
+
+| Corpo | O que faz |
+|---|---|
+| `{}` | Religa as filas paradas; tira a marca das que só esperam o candidato (nunca chama o Rubeus por elas) |
+| `{"simular": true}` | Só conta, sem mexer em nada |
+| `{"reabrir_falhas": true}` | Além disso, recomeça do zero (tentativas = 0) as que ficaram `falhou` depois das 20 tentativas |
+
+- Autenticação: ID token do Google de um e-mail listado em `RECONCILIAR_EMAILS` (separados por vírgula). Sem a
+  variável, a rota responde 403 para todos. Aceita o token do Cloud Scheduler (audiência = URL do serviço) e o do
+  `gcloud auth print-identity-token` de quem está na lista.
+- Responde `{ ok, resultado: { etapa1: {reenviadas, limpas, ocupadas, reabertas}, etapa2: {…} } }` e grava o log
+  `reconciliar_fim`.
+- Os vigias (redação, inscrição, contrato, etapa final) não entram: continuam religados pelo LOGIN do candidato.
+
+**Comando "acordar"** (PowerShell, com o gcloud logado num e-mail da lista):
+
+```powershell
+$t = gcloud auth print-identity-token
+Invoke-RestMethod -Method Post -Uri https://devflowunibalsas-git-a2yea7tx2q-rj.a.run.app/internal/reconciliar -Headers @{Authorization = "Bearer $t"} -ContentType 'application/json' -Body '{"reabrir_falhas": true}'
+```
+
+**Varredura automática** (Cloud Scheduler a cada 30 min; o Run liga ~1 s por chamada e volta a zero):
+
+```powershell
+gcloud iam service-accounts create unibalsas-varredura --project talks-servidor
+gcloud run services update devflowunibalsas-git --project talks-servidor --region southamerica-east1 --update-env-vars "^;^RECONCILIAR_EMAILS=unibalsas-varredura@talks-servidor.iam.gserviceaccount.com,<e-mail da equipe no gcloud>"
+gcloud scheduler jobs create http unibalsas-varredura --project talks-servidor --location southamerica-east1 --schedule "*/30 * * * *" --http-method POST --uri https://devflowunibalsas-git-a2yea7tx2q-rj.a.run.app/internal/reconciliar --headers Content-Type=application/json --message-body "{}" --oidc-service-account-email unibalsas-varredura@talks-servidor.iam.gserviceaccount.com --oidc-token-audience https://devflowunibalsas-git-a2yea7tx2q-rj.a.run.app
+```
 
 ## Avisos pelo Blip (vigias)
 
