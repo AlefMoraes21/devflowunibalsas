@@ -142,6 +142,18 @@ async function ateOrientacao(concl) {
 }
 const SUCCESS = r => { assert.equal(r.screen, 'SUCCESS'); return r.data.extension_message_response.params; };
 
+test('Roteamento do Flow sem ciclo: rotas declaradas + botões navigate (o WhatsApp Web monta a navegação ao abrir)', () => {
+  const R = FLOW_E1.routing_model, ids = FLOW_E1.screens.map(s => s.id), nav = {};
+  const walk = (o, sid) => { if (Array.isArray(o)) return o.forEach(x => walk(x, sid)); if (o && typeof o === 'object') { const a = o['on-click-action']; if (a?.name === 'navigate') (nav[sid] ??= new Set()).add(a.next.name); for (const v of Object.values(o)) walk(v, sid); } };
+  for (const s of FLOW_E1.screens) walk(s.layout, s.id);
+  for (const [s, set] of Object.entries(nav)) for (const d of set) assert.ok((R[s] ?? []).includes(d), `${s} navega para ${d} sem rota declarada`);
+  const cor = {}, ciclos = [];
+  const dfs = u => { cor[u] = 1; for (const v of R[u] ?? []) { if (cor[v] === 1) ciclos.push(u + '->' + v); else if (!cor[v]) dfs(v); } cor[u] = 2; };
+  for (const id of ids) if (!cor[id]) dfs(id);
+  assert.deepEqual(ciclos, []);
+  assert.ok(!ids.includes('INSC_PRIVACIDADE'), '"Leia mais" abre a página da LGPD (open_url)');
+});
+
 test('Etapa 1: cada tela grava no Google; Concluir fecha o Flow na hora com dados_recebidos', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
   ateOrientacao.E = E;

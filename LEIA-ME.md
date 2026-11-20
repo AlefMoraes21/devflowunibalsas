@@ -1,3 +1,10 @@
+# Versão 2.16.20 — Flow sem ciclo de rotas: "Leia mais" abre a página da LGPD (20/11/2026) — COLAR O JSON NOVO NA META
+
+- Conferência do roteamento (rotas declaradas + botões navigate): o único ponto fora do padrão nas 35 telas era INSC_PRIVACIDADE, cujo "Voltar" navegava para INSC_DADOS sem rota declarada (ciclo Dados básicos → Privacidade → Dados básicos).
+- O OptIn de privacidade agora usa open_url para https://lp.unibalsas.edu.br/lgpd/ e a tela INSC_PRIVACIDADE saiu (34 telas). Resto igual à 2.16.19.
+- Hipótese a testar no WhatsApp Web: o ciclo não declarado atrapalha a navegação que o Web monta ao abrir o Flow (1ª passada erra o botão). Não comprovado.
+- Teste novo: nenhum navigate sem rota declarada e nenhum ciclo no routing_model.
+
 # Versão 2.16.19 — etapa 1 restaurada para a 2.16.8 (curso carrega o turno abaixo) (20/11/2026) — COLAR O JSON NOVO NA META
 
 - A pedido do usuário, as telas e o servidor da etapa 1 voltaram à 2.16.8: ao escolher o curso, o turno carrega logo abaixo (lista com on-select-action), igual ao que funcionava no aplicativo.

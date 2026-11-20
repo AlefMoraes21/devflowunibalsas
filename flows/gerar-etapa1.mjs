@@ -43,8 +43,7 @@ const flow = {
   data_api_version: '3.0',
   routing_model: {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM', 'MATR_LOGIN'],
-    INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_PRIVACIDADE', 'INSC_FIM'],
-    INSC_PRIVACIDADE: [],
+    INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_FIM'],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
@@ -109,22 +108,12 @@ const flow = {
             { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', 'max-date': '${data.data_maxima_nascimento}', required: true },
             { type: 'TextInput', name: 'celular', label: 'Celular', 'helper-text': 'Para facilitar o nosso contato, confirme o seu WhatsApp, de preferência.', 'input-type': 'phone', required: true },
             { type: 'RadioButtonsGroup', name: 'genero', label: 'Gênero', required: true, 'data-source': [{ id: 'M', title: 'Masculino' }, { id: 'F', title: 'Feminino' }] },
-            { type: 'OptIn', name: 'aceite_privacidade', label: 'Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.', required: true, 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'INSC_PRIVACIDADE' }, payload: DADOS_PAYLOAD } },
+            // "Leia mais" abre a página da LGPD. Antes abria a tela INSC_PRIVACIDADE, cujo "Voltar" navegava de novo
+            // para INSC_DADOS sem rota declarada: o único ciclo do Flow (suspeito do erro no WhatsApp Web, 20/11).
+            { type: 'OptIn', name: 'aceite_privacidade', label: 'Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.', required: true, 'on-click-action': { name: 'open_url', url: 'https://lp.unibalsas.edu.br/lgpd/' } },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('enviar_dados_basicos', form(DADOS)) }
           ]
         }]
-      }
-    },
-    {
-      id: 'INSC_PRIVACIDADE',
-      title: 'Privacidade',
-      data: DADOS_DATA,
-      layout: {
-        type: 'SingleColumnLayout',
-        children: [
-          { type: 'TextCaption', text: 'A Faculdade de Balsas - Unibalsas preza pelos preceitos fundamentais de confiabilidade de seus contratantes e qualidade de seus serviços prestados, levando em consideração o princípio da boa-fé e estando comprometida com a proteção e privacidade dos seus dados pessoais.\n\nOs dados informados serão utilizados exclusivamente para o gerenciamento de sua inscrição e comunicação no processo seletivo vigente.\n\nPara maiores detalhes e contato com nosso DPO, acesse: https://lp.unibalsas.edu.br/lgpd/' },
-          { type: 'Footer', label: 'Voltar', 'on-click-action': { name: 'navigate', next: { type: 'screen', name: 'INSC_DADOS' }, payload: DADOS_PAYLOAD } }
-        ]
       }
     },
     {

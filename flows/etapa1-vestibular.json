@@ -10,10 +10,8 @@
     "INSC_DADOS": [
       "INSC_CURSO",
       "INSC_CURSO_ENEM",
-      "INSC_PRIVACIDADE",
       "INSC_FIM"
     ],
-    "INSC_PRIVACIDADE": [],
     "INSC_CURSO": [
       "INSC_QUASE_LA",
       "INSC_FIM"
@@ -388,25 +386,8 @@
                 "label": "Aceito receber conteúdos e lembretes sobre o processo seletivo e concordo com a Política de Privacidade vigente.",
                 "required": true,
                 "on-click-action": {
-                  "name": "navigate",
-                  "next": {
-                    "type": "screen",
-                    "name": "INSC_PRIVACIDADE"
-                  },
-                  "payload": {
-                    "estado": "${data.estado}",
-                    "erro": "${data.erro}",
-                    "tem_erro": "${data.tem_erro}",
-                    "data_maxima_nascimento": "${data.data_maxima_nascimento}",
-                    "valor_nome": "${data.valor_nome}",
-                    "valor_possui_nome_social": "${data.valor_possui_nome_social}",
-                    "valor_nome_social": "${data.valor_nome_social}",
-                    "valor_email": "${data.valor_email}",
-                    "valor_data_nascimento": "${data.valor_data_nascimento}",
-                    "valor_celular": "${data.valor_celular}",
-                    "valor_genero": "${data.valor_genero}",
-                    "valor_aceite_privacidade": "${data.valor_aceite_privacidade}"
-                  }
+                  "name": "open_url",
+                  "url": "https://lp.unibalsas.edu.br/lgpd/"
                 }
               },
               {
@@ -429,94 +410,6 @@
                 }
               }
             ]
-          }
-        ]
-      }
-    },
-    {
-      "id": "INSC_PRIVACIDADE",
-      "title": "Privacidade",
-      "data": {
-        "estado": {
-          "type": "string",
-          "__example__": ""
-        },
-        "erro": {
-          "type": "string",
-          "__example__": ""
-        },
-        "tem_erro": {
-          "type": "boolean",
-          "__example__": false
-        },
-        "data_maxima_nascimento": {
-          "type": "string",
-          "__example__": "2026-11-15"
-        },
-        "valor_nome": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_possui_nome_social": {
-          "type": "boolean",
-          "__example__": false
-        },
-        "valor_nome_social": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_email": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_data_nascimento": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_celular": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_genero": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_aceite_privacidade": {
-          "type": "boolean",
-          "__example__": false
-        }
-      },
-      "layout": {
-        "type": "SingleColumnLayout",
-        "children": [
-          {
-            "type": "TextCaption",
-            "text": "A Faculdade de Balsas - Unibalsas preza pelos preceitos fundamentais de confiabilidade de seus contratantes e qualidade de seus serviços prestados, levando em consideração o princípio da boa-fé e estando comprometida com a proteção e privacidade dos seus dados pessoais.\n\nOs dados informados serão utilizados exclusivamente para o gerenciamento de sua inscrição e comunicação no processo seletivo vigente.\n\nPara maiores detalhes e contato com nosso DPO, acesse: https://lp.unibalsas.edu.br/lgpd/"
-          },
-          {
-            "type": "Footer",
-            "label": "Voltar",
-            "on-click-action": {
-              "name": "navigate",
-              "next": {
-                "type": "screen",
-                "name": "INSC_DADOS"
-              },
-              "payload": {
-                "estado": "${data.estado}",
-                "erro": "${data.erro}",
-                "tem_erro": "${data.tem_erro}",
-                "data_maxima_nascimento": "${data.data_maxima_nascimento}",
-                "valor_nome": "${data.valor_nome}",
-                "valor_possui_nome_social": "${data.valor_possui_nome_social}",
-                "valor_nome_social": "${data.valor_nome_social}",
-                "valor_email": "${data.valor_email}",
-                "valor_data_nascimento": "${data.valor_data_nascimento}",
-                "valor_celular": "${data.valor_celular}",
-                "valor_genero": "${data.valor_genero}",
-                "valor_aceite_privacidade": "${data.valor_aceite_privacidade}"
-              }
-            }
           }
         ]
       }
