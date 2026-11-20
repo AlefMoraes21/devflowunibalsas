@@ -3,6 +3,8 @@
 import { writeFileSync, readFileSync } from 'node:fs';
 // Etapa 2 (login + matrícula) no mesmo Flow, aberta pelo link "Já sou inscrito" da tela inicial.
 import { screens as TELAS_ETAPA2, routing as ROTAS_ETAPA2, LOGIN_VAZIO } from './gerar-etapa2.mjs';
+// Cursos fixos no Flow (com o turno no nome): a escolha não chama o Run. O worker acha o curso no Rubeus depois.
+import { opcoesCursos } from '../api/cursos-fixos.js';
 
 // Logos vermelhos com fundo transparente (flows/img), embutidos em base64 como pede o Flow JSON.
 const png = n => readFileSync(new URL('./img/' + n, import.meta.url)).toString('base64');
@@ -25,7 +27,9 @@ const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nasci
 const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
 // As notas do ENEM ficam na tela do curso, como no site (passo 300708); a "Estamos quase lá" é igual nos 4 processos.
 const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
-const CURSO_ENEM = ['curso_id', 'turno_id', ...ENEM];
+const CURSO_ENEM = ['curso_id', ...ENEM];
+// Valor inicial só nos campos de texto do ENEM (listas sem valor inicial).
+const ENEM_TEXTO = ENEM.filter(k => k !== 'ano_enem');
 // Documentos de inscrição (Transferência, Portador e ENEM): uma tela por posição, para o seletor de arquivo vir
 // vazio em cada documento. A 1ª é sempre o documento obrigatório. Id de tela só com letras (regra da Meta).
 const DOCS_INSC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
@@ -119,45 +123,44 @@ const flow = {
     {
       id: 'INSC_CURSO',
       title: 'Curso de interesse',
-      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), valor_curso_id: str(), valor_turno_id: str() },
+      data: { estado: str(), erro: str(), tem_erro: bool() },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso',
-          'init-values': init(['curso_id', 'turno_id']),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'on-select-action': troca('buscar_turnos', { curso_id: '${form.curso_id}' }) },
-            { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
-            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id', 'turno_id'])) }
+            // Lista fixa (curso com o turno no nome), sem on-select: no WhatsApp Web, a resposta do Run com a mesma
+            // tela (que carregava o turno) fazia o Flow mostrar a 1ª tela (20/11).
+            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': opcoesCursos(), required: true },
+            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id'])) }
           ]
         }]
       }
     },
     {
-      // Nota do ENEM: curso e turno + os dados do ENEM na mesma tela, igual ao site (passo 300708).
+      // Nota do ENEM: curso (com o turno no nome) + os dados do ENEM na mesma tela, igual ao site (passo 300708).
       // A média é calculada pelo Cloud Run e aparece na tela seguinte (o site mostra o campo bloqueado).
       id: 'INSC_CURSO_ENEM',
       title: 'Curso de interesse',
       data: {
-        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), anos_enem: opcoes(),
-        ...Object.fromEntries(CURSO_ENEM.map(k => ['valor_' + k, str()]))
+        estado: str(), erro: str(), tem_erro: bool(), anos_enem: opcoes(),
+        ...Object.fromEntries(ENEM_TEXTO.map(k => ['valor_' + k, str()]))
       },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso_enem',
-          'init-values': init(CURSO_ENEM),
+          'init-values': init(ENEM_TEXTO),
           children: [
             imagem(LOGO_ENEM, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'on-select-action': troca('buscar_turnos', form(CURSO_ENEM)) },
-            { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
+            { type: 'RadioButtonsGroup', name: 'curso_id', label: 'Curso', 'data-source': opcoesCursos(), required: true },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
             { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },

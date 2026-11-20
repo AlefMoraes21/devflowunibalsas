@@ -15,8 +15,8 @@ const { docsInscricao, tituloProcesso, temDocsInscricao } = await import('../api
 const { ICONES } = await import('../api/icones.js');
 
 const FLOW = JSON.parse(readFileSync(new URL('../flows/etapa1-vestibular.json', import.meta.url), 'utf8'));
-const CURSOS = [{ id: 'dir', title: 'Direito' }];
-const TURNOS = { dir: [{ id: 'not', title: 'Noturno' }] };
+const CURSOS = [{ id: '1-20', title: 'DIREITO' }];
+const TURNOS = { '1-20': [{ id: '6', title: 'NOTURNO' }] };
 const USER = new Set(['nome', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade', 'possui_nome_social', 'nome_social', 'curso_id', 'turno_id', 'cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro', 'processo_seletivo_id', 'numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem', 'media_enem']);
 const BASICOS = { nome: 'Rebeca Teste Drumond', email: 'rebeca@example.com', data_nascimento: '1959-04-13', celular: '(68) 99996-6749', genero: 'F', aceite_privacidade: true, possui_nome_social: false };
 const FINAL = { cpf: '391.847.205-14', nacionalidade: '10', concluiu_ensino_medio: 'Sim', possui_deficiencia: 'F', como_conheceu: '01' };
@@ -144,8 +144,7 @@ async function inscrever(M, processo) {
   const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const enem = processo === '20386';
   assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO');
-  const t = await toque(M, curso.screen, 'buscar_turnos', curso.data.estado, { curso_id: 'dir', ...(enem ? ENEM : {}) });
-  const quase = await toque(M, curso.screen, 'escolher_curso', t.data.estado, { curso_id: 'dir', turno_id: 'not', ...(enem ? ENEM : {}) });
+  const quase = await toque(M, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'direito', ...(enem ? ENEM : {}) });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   const concl = await toque(M, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
   assert.equal(concl.screen, 'INSC_CONCLUIDA', 'Obrigado pelo seu cadastro!');
@@ -388,8 +387,7 @@ test('Vestibular protegido: Concluir segue para a prova (INSC_PORTAL), sem telas
   const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
-  const t = await toque(M, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
-  const quase = await toque(M, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'dir', turno_id: 'not' });
+  const quase = await toque(M, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'direito' });
   assert.equal(quase.data.eh_nota_enem, false); assert.equal(quase.data.resumo_enem, '');
   const concl = await toque(M, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
   const portal = await toque(M, 'INSC_CONCLUIDA', 'abrir_portal', concl.data.estado);

@@ -1,3 +1,10 @@
+# Versão 2.16.21 — cursos fixos no Flow; o worker acha curso e turno no Rubeus (20/11/2026) — COLAR O JSON NOVO NA META
+
+- **Causa do Web confirmada nos logs (20/11):** ao escolher o curso, o Run respondia com a mesma tela (INSC_CURSO) já com os turnos; o WhatsApp Web mostrava a 1ª tela em vez de redesenhar a tela de curso. Tocando de novo, a tela de curso aparecia certa. Só a etapa do curso fazia esse tipo de resposta.
+- **Ideia do usuário:** os cursos não mudam no semestre, então ficam fixos no Flow (api/cursos-fixos.js): 11 cursos em botões de opção, com o turno no nome ("DIREITO - NOTURNO"; Med. Veterinária e Odontologia "INTEGRAL"). Escolher o curso não chama o Run; o Avançar grava a escolha e vai direto para "Estamos quase lá". A tela de curso abre na hora, sem esperar o Rubeus.
+- **Worker:** no passo turnos, acha o curso do Rubeus pelo começo do nome na lista do processo, consulta os turnos e escolhe o turno pelo nome (NOTURNO/INTEGRAL). Guarda os códigos em rubeus_curso e envia. Curso que o Rubeus não tem no processo vai para "conferir" (motivo curso_indisponivel), sem enviar curso errado.
+- Lista conferida no catálogo do Vestibular (19/11). Transferência mostrou os mesmos 11 cursos na tela; Portador e ENEM não foram conferidos.
+
 # Versão 2.16.20 — Flow sem ciclo de rotas: "Leia mais" abre a página da LGPD (20/11/2026) — COLAR O JSON NOVO NA META
 
 - Conferência do roteamento (rotas declaradas + botões navigate): o único ponto fora do padrão nas 35 telas era INSC_PRIVACIDADE, cujo "Voltar" navegava para INSC_DADOS sem rota declarada (ciclo Dados básicos → Privacidade → Dados básicos).

@@ -6,6 +6,7 @@
 // Cloud Run repete no Rubeus os passos do site, conferindo cada tela.
 import crypto from 'node:crypto';
 import { jaEnviado as jaEnviadoNoPortal, tipoDoArquivo } from './portal-site.js';
+import { cursoFixo, cursoNoRubeus, turnoNoRubeus } from './cursos-fixos.js';
 
 const DIA = 86400000;
 const FILA = 'inscricoesFila';
@@ -156,9 +157,10 @@ export function createEtapa1({
   const TELAS_DOC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
   const INSC_KEYS = {
     INSC_DADOS: ['estado', 'erro', 'tem_erro', 'data_maxima_nascimento', ...valor('nome', 'possui_nome_social', 'nome_social', 'email', 'data_nascimento', 'celular', 'genero', 'aceite_privacidade')],
-    INSC_CURSO: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', ...valor('curso_id', 'turno_id')],
+    // Lista de cursos fixa no JSON (api/cursos-fixos.js): a tela só recebe estado e erro.
+    INSC_CURSO: ['estado', 'erro', 'tem_erro'],
     // Nota do ENEM: as notas ficam na tela do curso, como no site (passo 300708).
-    INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'cursos', 'turnos', 'turno_visivel', 'anos_enem', ...valor('curso_id', 'turno_id', ...ENEM_CAMPOS)],
+    INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'anos_enem', ...valor(...ENEM_CAMPOS.filter(k => k !== 'ano_enem'))],
     INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'resumo_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
     INSC_CONCLUIDA: ['estado'],
     INSC_PORTAL: ['estado'],
@@ -171,7 +173,7 @@ export function createEtapa1({
     INSC_FINALIZADA: [],
     INSC_FIM: ['titulo', 'mensagem']
   };
-  const INSC_PADRAO = { tem_erro: false, turno_visivel: false, eh_nota_enem: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [], anos_enem: [] };
+  const INSC_PADRAO = { tem_erro: false, eh_nota_enem: false, valor_possui_nome_social: false, valor_aceite_privacidade: false, valor_nacionalidade: '10', valor_tipos_deficiencia: [], cursos: [], turnos: [], origens: [], anos_enem: [] };
   const LISTAS = ['cursos', 'turnos', 'origens', 'anos_enem'];
   const proj = l => (l ?? []).map(o => ({ id: String(o.id), title: String(o.title) }));
   function renderE1(screen, data) {
@@ -284,35 +286,25 @@ export function createEtapa1({
       try { validateBasic(u); } catch (e) { return renderE1('INSC_DADOS', { ...s, values: u, erro: e.message }); }
       try { await gravarTela(s.fila_id, processo, req.flow_token, u); }
       catch (e) { falha('dados_basicos', e); return renderE1('INSC_DADOS', { ...s, values: u, erro: ERRO_GRAVAR }); }
-      const c = await esperarCache(processo, x => x?.cursos?.length);
-      if (!c?.cursos?.length) return renderE1('INSC_DADOS', { ...s, values: u, erro: 'Seus dados foram salvos. Estamos carregando os cursos: toque em Avançar de novo.' });
-      if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, cursos: c.cursos, turnos: [], turno_visivel: false, anos_enem: anosEnem, erro: '' });
-      return renderE1('INSC_CURSO', { ...base, cursos: c.cursos, turnos: [], turno_visivel: false, erro: '' });
+      // Cursos fixos no Flow: a tela de curso abre na hora, sem esperar o Rubeus.
+      if (base.eh_nota_enem) return renderE1('INSC_CURSO_ENEM', { ...base, anos_enem: anosEnem, erro: '' });
+      return renderE1('INSC_CURSO', { ...base, erro: '' });
     }
 
-    // Curso e turno na mesma tela: ao escolher o curso, os turnos aparecem abaixo. No ENEM, os dados do
-    // exame ficam na mesma tela (INSC_CURSO_ENEM) e o que já foi digitado volta preenchido.
-    if ((screen === 'INSC_CURSO' || screen === 'INSC_CURSO_ENEM') && (acao === 'buscar_turnos' || acao === 'escolher_curso')) {
+    // Curso (lista fixa, com o turno no nome): o Run só confere e guarda a escolha. O worker acha o curso e o
+    // turno no Rubeus pelo nome, depois. No ENEM, os dados do exame ficam na mesma tela (INSC_CURSO_ENEM).
+    if ((screen === 'INSC_CURSO' || screen === 'INSC_CURSO_ENEM') && acao === 'escolher_curso') {
       const enem = screen === 'INSC_CURSO_ENEM';
       const notas = enem ? Object.fromEntries(ENEM_CAMPOS.map(k => [k, u[k] == null ? '' : String(u[k]).trim()])) : {};
-      const curso = String(u.curso_id ?? '');
-      if (!(s.cursos ?? []).some(c => c.id === curso)) return renderE1(screen, { ...s, values: notas, erro: 'Selecione um curso.' });
-      if (acao === 'buscar_turnos' || curso !== s.curso_selecionado) {
-        const c = await esperarCache(processo, x => x?.turnos?.[curso]?.length);
-        const turnos = c?.turnos?.[curso] ?? [];
-        if (!turnos.length) return renderE1(screen, { ...s, curso_selecionado: '', turnos: [], turno_visivel: false, values: { ...notas, curso_id: curso }, erro: 'Estamos carregando os turnos deste curso. Toque no curso de novo em alguns segundos.' });
-        const unico = turnos.length === 1 ? turnos[0].id : '';
-        return renderE1(screen, { ...s, curso_selecionado: curso, turnos, turno_visivel: true, values: { ...notas, curso_id: curso, turno_id: unico }, erro: '' });
-      }
-      const turno = String(u.turno_id ?? '');
-      if (!(s.turnos ?? []).some(t => t.id === turno)) return renderE1(screen, { ...s, values: { ...notas, curso_id: curso }, erro: 'Selecione o turno.' });
+      const fixo = cursoFixo(u.curso_id);
+      if (!fixo) return renderE1(screen, { ...s, values: notas, erro: 'Selecione um curso.' });
       let media = '';
       if (enem) {
         try { validateEnem(notas); media = String(mediaEnem(notas) ?? ''); }
-        catch (e) { return renderE1(screen, { ...s, values: { ...notas, curso_id: curso, turno_id: turno }, erro: e.message }); }
+        catch (e) { return renderE1(screen, { ...s, values: notas, erro: e.message }); }
       }
-      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: curso, turno_id: turno, ...notas, ...(enem ? { media_enem: media } : {}) }); }
-      catch (e) { falha('curso', e); return renderE1(screen, { ...s, values: { ...notas, curso_id: curso, turno_id: turno }, erro: ERRO_GRAVAR }); }
+      try { await gravarTela(s.fila_id, processo, req.flow_token, { curso_id: fixo.id, ...notas, ...(enem ? { media_enem: media } : {}) }); }
+      catch (e) { falha('curso', e); return renderE1(screen, { ...s, values: notas, erro: ERRO_GRAVAR }); }
       const resumo_enem = enem && media ? `Média das notas do ENEM: ${media.replace('.', ',')}` : '';
       return renderE1('INSC_QUASE_LA', { ...base, origens, resumo_enem, erro: '' });
     }
@@ -575,24 +567,38 @@ export function createEtapa1({
         return salvar({ passo: 'turnos', ck: ck(r) });
       }
       case 'turnos': {
-        if (!R.curso_id || !R.turno_id) return salvar({ parar: true });
+        if (!R.curso_id) return salvar({ parar: true });
         let st0 = {}; try { st0 = openState(rec.ck.estado, rec.ck.screen); } catch {}
-        if (st0.cursos && !st0.cursos.some(c => c.id === R.curso_id)) throw new ErroPasso('O curso escolhido não está mais disponível no Rubeus.', { final: true, motivo: 'curso_indisponivel' });
-        const r = await step(rec.ck.screen, rec.ck.estado, 'buscar_turnos', { curso_id: R.curso_id }, rec.id);
+        // Curso da lista fixa do Flow: acha o curso do Rubeus pelo nome e, depois da consulta, o turno.
+        const fixo = R.turno_id ? null : cursoFixo(R.curso_id);
+        let cursoRubeus = R.curso_id;
+        if (fixo) {
+          const lista = st0.cursos?.length ? st0.cursos : (await lerCache(rec.processo))?.cursos;
+          const achado = cursoNoRubeus(fixo, lista);
+          if (!achado) throw new ErroPasso(`O curso ${fixo.title} não foi achado na lista do Rubeus deste processo.`, { final: true, motivo: 'curso_indisponivel' });
+          cursoRubeus = achado.id;
+        } else if (!R.turno_id) return salvar({ parar: true });
+        else if (st0.cursos && !st0.cursos.some(c => c.id === R.curso_id)) throw new ErroPasso('O curso escolhido não está mais disponível no Rubeus.', { final: true, motivo: 'curso_indisponivel' });
+        const r = await step(rec.ck.screen, rec.ck.estado, 'buscar_turnos', { curso_id: cursoRubeus }, rec.id);
         const st = abrirCurso(r);
-        if (!st.turnos?.some(t => t.id === R.turno_id)) throw new ErroPasso('O turno escolhido não veio na consulta do Rubeus.', { motivo: 'turno' });
+        let turnoRubeus = R.turno_id;
+        if (fixo) {
+          const t = turnoNoRubeus(fixo, st.turnos);
+          if (!t) throw new ErroPasso(`O turno ${fixo.turno} do curso ${fixo.title} não veio na consulta do Rubeus.`, { motivo: 'turno' });
+          turnoRubeus = t.id;
+        } else if (!st.turnos?.some(t => t.id === R.turno_id)) throw new ErroPasso('O turno escolhido não veio na consulta do Rubeus.', { motivo: 'turno' });
         // Aproveita a sessão para renovar o cache de cursos e turnos (só leitura).
         const c = await lerCache(rec.processo, { fresco: true });
         if (!c?.atualizado || clock() - c.atualizado > 6 * 3600000 || !cacheCompletoSemTema(c)) {
           try { await turnosDeTodos(rec.ck.estado, st.cursos, rec.processo, rec.ck.screen); } catch {}
         }
-        return salvar({ passo: 'curso', ck: ck(r) });
+        return salvar({ passo: 'curso', ck: ck(r), rubeus_curso: { curso_id: cursoRubeus, turno_id: turnoRubeus } });
       }
       case 'curso': {
         // ENEM: o curso vai junto com as notas, que chegam na última tela.
         if (ehEnem(rec.processo) && !R.numero_inscricao_enem) return salvar({ parar: true });
         const notas = ehEnem(rec.processo) ? Object.fromEntries(ENEM_CAMPOS.map(k => [k, R[k]])) : {};
-        const r = await step(rec.ck.screen, rec.ck.estado, rec.ck.screen === 'CURSO_INGRESSO' ? 'avancar_curso_ingresso' : 'avancar_curso_interesse', { curso_id: R.curso_id, turno_id: R.turno_id, ...notas }, rec.id);
+        const r = await step(rec.ck.screen, rec.ck.estado, rec.ck.screen === 'CURSO_INGRESSO' ? 'avancar_curso_ingresso' : 'avancar_curso_interesse', { curso_id: rec.rubeus_curso?.curso_id ?? R.curso_id, turno_id: rec.rubeus_curso?.turno_id ?? R.turno_id, ...notas }, rec.id);
         abrir(r, 'QUASE_LA');
         return salvar({ passo: 'final', ck: ck(r) });
       }
@@ -788,7 +794,7 @@ export function createEtapa1({
     // Libera e, se ainda há trabalho (orçamento acabou ou a redação chegou agora), agenda a continuação.
     await salvar({ rodando_ate: 0 });
     const R2 = rec.respostas ?? {};
-    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id && R2.turno_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true, docs_inscricao: Boolean(rec.docs_inscricao?.completo) };
+    const pronto = { inicio: true, basicos: Boolean(R2.nome), turnos: Boolean(R2.curso_id), curso: !ehEnem(rec.processo) || Boolean(R2.numero_inscricao_enem), final: Boolean(R2.cpf), redacao: Boolean(rec.redacao), redacao_enviar: Boolean(rec.redacao), entrega: true, docs_inscricao: Boolean(rec.docs_inscricao?.completo) };
     const temTrabalho = !FINAIS.has(rec.status) && pronto[rec.passo] === true;
     if (temTrabalho) await disparar(id, rec.proxima > clock() ? Math.ceil((rec.proxima - clock()) / 1000) : 0);
     return 204;

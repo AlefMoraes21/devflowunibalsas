@@ -429,48 +429,6 @@
         "tem_erro": {
           "type": "boolean",
           "__example__": false
-        },
-        "cursos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turnos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turno_visivel": {
-          "type": "boolean",
-          "__example__": false
-        },
-        "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_turno_id": {
-          "type": "string",
-          "__example__": ""
         }
       },
       "layout": {
@@ -479,10 +437,6 @@
           {
             "type": "Form",
             "name": "form_curso",
-            "init-values": {
-              "curso_id": "${data.valor_curso_id}",
-              "turno_id": "${data.valor_turno_id}"
-            },
             "children": [
               {
                 "type": "Image",
@@ -504,33 +458,59 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "curso_id",
                 "label": "Curso",
-                "data-source": "${data.cursos}",
-                "required": true,
-                "on-select-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "buscar_turnos",
-                    "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}"
-                  }
-                }
-              },
-              {
-                "type": "If",
-                "condition": "${data.turno_visivel} == true",
-                "then": [
+                "data-source": [
                   {
-                    "type": "Dropdown",
-                    "name": "turno_id",
-                    "label": "Turno",
-                    "data-source": "${data.turnos}",
-                    "required": true
+                    "id": "agronomia",
+                    "title": "AGRONOMIA - NOTURNO"
+                  },
+                  {
+                    "id": "ads",
+                    "title": "ANÁLISE DE SISTEMAS - NOTURNO",
+                    "description": "Análise e Desenvolvimento de Sistemas"
+                  },
+                  {
+                    "id": "biomedicina",
+                    "title": "BIOMEDICINA - NOTURNO"
+                  },
+                  {
+                    "id": "contabeis",
+                    "title": "CIÊNCIAS CONTÁBEIS - NOTURNO"
+                  },
+                  {
+                    "id": "direito",
+                    "title": "DIREITO - NOTURNO"
+                  },
+                  {
+                    "id": "enfermagem",
+                    "title": "ENFERMAGEM - NOTURNO"
+                  },
+                  {
+                    "id": "estetica",
+                    "title": "ESTÉTICA E COSMÉTICA - NOTURNO"
+                  },
+                  {
+                    "id": "veterinaria",
+                    "title": "MED. VETERINÁRIA - INTEGRAL",
+                    "description": "Medicina Veterinária"
+                  },
+                  {
+                    "id": "odontologia",
+                    "title": "ODONTOLOGIA - INTEGRAL"
+                  },
+                  {
+                    "id": "publicidade",
+                    "title": "PROD. PUBLICITÁRIA - NOTURNO",
+                    "description": "Produção Publicitária"
+                  },
+                  {
+                    "id": "psicologia",
+                    "title": "PSICOLOGIA - NOTURNO"
                   }
                 ],
-                "else": []
+                "required": true
               },
               {
                 "type": "Footer",
@@ -540,8 +520,7 @@
                   "payload": {
                     "acao": "escolher_curso",
                     "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}"
+                    "curso_id": "${form.curso_id}"
                   }
                 }
               }
@@ -566,40 +545,6 @@
           "type": "boolean",
           "__example__": false
         },
-        "cursos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turnos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          },
-          "__example__": []
-        },
-        "turno_visivel": {
-          "type": "boolean",
-          "__example__": false
-        },
         "anos_enem": {
           "type": "array",
           "items": {
@@ -615,19 +560,7 @@
           },
           "__example__": []
         },
-        "valor_curso_id": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_turno_id": {
-          "type": "string",
-          "__example__": ""
-        },
         "valor_numero_inscricao_enem": {
-          "type": "string",
-          "__example__": ""
-        },
-        "valor_ano_enem": {
           "type": "string",
           "__example__": ""
         },
@@ -659,10 +592,7 @@
             "type": "Form",
             "name": "form_curso_enem",
             "init-values": {
-              "curso_id": "${data.valor_curso_id}",
-              "turno_id": "${data.valor_turno_id}",
               "numero_inscricao_enem": "${data.valor_numero_inscricao_enem}",
-              "ano_enem": "${data.valor_ano_enem}",
               "nota_natureza_enem": "${data.valor_nota_natureza_enem}",
               "nota_humanas_enem": "${data.valor_nota_humanas_enem}",
               "nota_matematica_enem": "${data.valor_nota_matematica_enem}",
@@ -690,41 +620,59 @@
                 "visible": "${data.tem_erro}"
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "curso_id",
                 "label": "Curso",
-                "data-source": "${data.cursos}",
-                "required": true,
-                "on-select-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "acao": "buscar_turnos",
-                    "estado": "${data.estado}",
-                    "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}",
-                    "numero_inscricao_enem": "${form.numero_inscricao_enem}",
-                    "ano_enem": "${form.ano_enem}",
-                    "nota_natureza_enem": "${form.nota_natureza_enem}",
-                    "nota_humanas_enem": "${form.nota_humanas_enem}",
-                    "nota_matematica_enem": "${form.nota_matematica_enem}",
-                    "nota_linguagens_enem": "${form.nota_linguagens_enem}",
-                    "nota_redacao_enem": "${form.nota_redacao_enem}"
-                  }
-                }
-              },
-              {
-                "type": "If",
-                "condition": "${data.turno_visivel} == true",
-                "then": [
+                "data-source": [
                   {
-                    "type": "Dropdown",
-                    "name": "turno_id",
-                    "label": "Turno",
-                    "data-source": "${data.turnos}",
-                    "required": true
+                    "id": "agronomia",
+                    "title": "AGRONOMIA - NOTURNO"
+                  },
+                  {
+                    "id": "ads",
+                    "title": "ANÁLISE DE SISTEMAS - NOTURNO",
+                    "description": "Análise e Desenvolvimento de Sistemas"
+                  },
+                  {
+                    "id": "biomedicina",
+                    "title": "BIOMEDICINA - NOTURNO"
+                  },
+                  {
+                    "id": "contabeis",
+                    "title": "CIÊNCIAS CONTÁBEIS - NOTURNO"
+                  },
+                  {
+                    "id": "direito",
+                    "title": "DIREITO - NOTURNO"
+                  },
+                  {
+                    "id": "enfermagem",
+                    "title": "ENFERMAGEM - NOTURNO"
+                  },
+                  {
+                    "id": "estetica",
+                    "title": "ESTÉTICA E COSMÉTICA - NOTURNO"
+                  },
+                  {
+                    "id": "veterinaria",
+                    "title": "MED. VETERINÁRIA - INTEGRAL",
+                    "description": "Medicina Veterinária"
+                  },
+                  {
+                    "id": "odontologia",
+                    "title": "ODONTOLOGIA - INTEGRAL"
+                  },
+                  {
+                    "id": "publicidade",
+                    "title": "PROD. PUBLICITÁRIA - NOTURNO",
+                    "description": "Produção Publicitária"
+                  },
+                  {
+                    "id": "psicologia",
+                    "title": "PSICOLOGIA - NOTURNO"
                   }
                 ],
-                "else": []
+                "required": true
               },
               {
                 "type": "TextSubheading",
@@ -798,7 +746,6 @@
                     "acao": "escolher_curso",
                     "estado": "${data.estado}",
                     "curso_id": "${form.curso_id}",
-                    "turno_id": "${form.turno_id}",
                     "numero_inscricao_enem": "${form.numero_inscricao_enem}",
                     "ano_enem": "${form.ano_enem}",
                     "nota_natureza_enem": "${form.nota_natureza_enem}",
