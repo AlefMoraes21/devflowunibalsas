@@ -1166,10 +1166,7 @@ async function routeFlowRequest(requestData) {
 
         const submit = await submitForm(data.button_id, fields, data.token);
         const next = await getForm(submit.data.next, submit.data.local, submit.data.token ?? data.token);
-        const telaCurso = responseForScreen("CURSO_INTERESSE", await buildCourseScreenData(next, data.processo_seletivo_id));
-        // Modo fila: aproveita esta sessão (só leitura) para aquecer o cache de cursos e turnos.
-        if (!flowContext.getStore()?.worker) etapa1.aquecer(toStringValue(data.processo_seletivo_id), telaCurso).catch(() => {});
-        return telaCurso;
+        return responseForScreen("CURSO_INTERESSE", await buildCourseScreenData(next, data.processo_seletivo_id));
       } catch (e) {
         const p = pendingAfterWrite(data);
         if (p) return p;
@@ -1613,7 +1610,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.16.23" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.17.0" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

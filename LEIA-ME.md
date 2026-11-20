@@ -1,3 +1,11 @@
+# Versão 2.17.0 — inscrição homologada nos 4 processos no app e no WhatsApp Web; limpeza do Run (20/11/2026) — só servidor, JSON igual à 2.16.23
+
+- **Homologação (20/11):** Vestibular, Transferência, Portador e ENEM chegaram ao fim da inscrição no WhatsApp Web; notas do ENEM conferidas no portal. Causa do problema no Web: o CalendarPicker da tela de Dados básicos (a 2.16.23 voltou o If do nome social e continuou passando). Regras em README › "Regras do Flow para funcionar também no WhatsApp Web".
+- **Limpeza:** saíram o pré-carregamento dos turnos de todos os cursos (turnosDeTodos/aquecer, ~11 consultas ao Rubeus a cada 6 h) e a espera do cache na tela de curso (esperarCache): com os cursos fixos, o worker consulta só o turno do curso escolhido. O cache guarda o tema da redação e a lista de cursos do Rubeus (reserva do worker).
+- README revisto: cursos fixos, regras do Web, tempos de cada etapa, ritmo dos vigias e avisos, Cloud Run e variáveis que o código usa de fato (BLIP_TEMPLATE_REDACAO não existe mais; entram BLIP_FLOW_ID, BLIP_STATE_ID, BLIP_MASTERSTATE, BLIP_TEMPLATE_*, AVISOS_DESLIGADOS).
+- Scripts de verificação local (.claude/skills/verify) no caminho novo do curso (um toque, sem turno).
+- Teste novo: sem cache, Transferência/Portador/ENEM acham curso e turno na tela de curso do processo (CURSO_INGRESSO).
+
 # Versão 2.16.23 — nome social volta a aparecer só com a caixa marcada (teste do calendário) (20/11/2026) — COLAR O JSON NOVO NA META
 
 - 2.16.22 passou no WhatsApp Web (Vestibular 02:14 e Transferência 02:16): escolher_curso chegou ao Run e o worker achou curso e turno no Rubeus. Mudanças da 2.16.22: CalendarPicker → DatePicker e If do nome social removido.

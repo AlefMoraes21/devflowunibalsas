@@ -1,7 +1,7 @@
 // Etapa 1 (telas INSC_* do Flow): inscrição nos 4 processos, redação do Vestibular e documentos de
 // inscrição da Transferência, do Portador e do ENEM.
 //
-// O Flow responde na hora: as telas são montadas com o cache (cursos, turnos e tema da redação) e
+// O Flow responde na hora: os cursos são fixos no Flow (api/cursos-fixos.js), o tema da redação vem do cache e
 // as respostas são conferidas aqui. Os dados ficam guardados (Firestore, criptografados) e um worker do
 // Cloud Run repete no Rubeus os passos do site, conferindo cada tela.
 import crypto from 'node:crypto';
@@ -54,7 +54,6 @@ export function createEtapa1({
 }) {
   // ---------------------------------------------------------------- cache
   const memo = new Map();
-  const aquecendo = new Set();
   async function lerCache(processo, { fresco = false } = {}) {
     const m = memo.get(processo);
     if (!fresco && m && clock() - m.at < 60000) return m.value;
@@ -64,9 +63,9 @@ export function createEtapa1({
     if (value) memo.set(processo, { at: clock(), value });
     return value;
   }
+  // Cache do processo: tema da redação e a lista de cursos do Rubeus (reserva do worker para achar o curso fixo).
   function cacheCompleto(c) {
-    return Boolean(c?.tema && c.cursos?.length && clock() - (c.atualizado ?? 0) < 3 * DIA &&
-      c.cursos.every(x => (c.turnos?.[x.id] ?? []).length > 0));
+    return Boolean(c?.tema && c.cursos?.length && clock() - (c.atualizado ?? 0) < 3 * DIA);
   }
   async function gravarCache(processo, patch) {
     const id = 'etapa1-' + processo;
@@ -87,38 +86,6 @@ export function createEtapa1({
     if (c?.tema === tema) return;
     await gravarCache(processo, { tema });
     log({ event: 'etapa1_cache', processo, tema: true });
-  }
-  // Busca os turnos de todos os cursos usando a sessão da tela de curso do Rubeus (só leitura). A tela muda por
-  // processo (CURSO_INTERESSE no Vestibular, CURSO_ENEM no ENEM, CURSO_INGRESSO…): a consulta usa a mesma tela do
-  // estado, senão o estado não abre e nenhum turno vem (bug de 19/11: ENEM travado em "carregando os turnos").
-  async function turnosDeTodos(estadoCurso, cursos, processo, telaCurso = 'CURSO_INTERESSE') {
-    const turnos = {};
-    const fila = [...cursos];
-    async function trabalhador() {
-      for (let c = fila.shift(); c; c = fila.shift()) {
-        try {
-          const r = await runStep({ screen: telaCurso, action: 'data_exchange', flow_token: 'etapa1-cache', data: { acao: 'buscar_turnos', estado: estadoCurso, curso_id: c.id } });
-          const st = openState(r.data.estado, r.screen);
-          if (!st.erro && st.turnos?.length) turnos[c.id] = st.turnos;
-        } catch {}
-      }
-    }
-    await Promise.all([1, 2, 3, 4].map(trabalhador));
-    // Nenhum turno lido (Rubeus fora ou sessão inválida): não apaga os turnos que o cache já tem.
-    if (!Object.keys(turnos).length) { console.error(JSON.stringify({ event: 'etapa1_cache_atencao', processo, motivo: 'sem_turnos', tela: telaCurso })); return; }
-    await gravarCache(processo, { cursos, turnos });
-    log({ event: 'etapa1_cache', processo, cursos: cursos.length, com_turno: Object.keys(turnos).length });
-  }
-  // Chamado pelo caminho síncrono ao montar a tela de curso: aquece o cache para os próximos.
-  async function aquecer(processo, respostaCurso) {
-    if (!requiresEssay(processo) || aquecendo.has(processo)) return;
-    const c = await lerCache(processo);
-    if (c?.cursos?.length && c.cursos.every(x => (c.turnos?.[x.id] ?? []).length) && clock() - (c.atualizado ?? 0) < 6 * 3600000) return;
-    aquecendo.add(processo);
-    try {
-      const st = openState(respostaCurso.data.estado, respostaCurso.screen);
-      if (st.cursos?.length) await turnosDeTodos(respostaCurso.data.estado, st.cursos, processo, respostaCurso.screen);
-    } finally { aquecendo.delete(processo); }
   }
 
   // ---------------------------------------------------------------- Flow (instantâneo)
@@ -212,16 +179,6 @@ export function createEtapa1({
       if (i === 4) throw new Error('conflito');
     }
     await disparar(id);
-  }
-  // Espera o worker trazer do Rubeus o que a tela precisa (só quando o cache ainda não tem).
-  async function esperarCache(processo, pronto, ms = 6000) {
-    const ate = clock() + ms;
-    for (;;) {
-      const c = await lerCache(processo, { fresco: true });
-      if (pronto(c)) return c;
-      if (clock() + 700 > ate) return c;
-      await sleep(700);
-    }
   }
   const ERRO_GRAVAR = 'Não conseguimos guardar seus dados agora. Toque no botão de novo.';
   const falha = (passo, e) => log({ event: 'etapa1_fila_erro', passo, message: String(e?.message ?? e).slice(0, 160) });
@@ -556,13 +513,10 @@ export function createEtapa1({
         if (!R.nome) return salvar({ parar: true });
         const r = await step(rec.ck.screen, rec.ck.estado, 'enviar_dados_basicos', pick({ nome: R.nome, possui_nome_social: R.possui_nome_social, nome_social: R.nome_social, email: R.email, data_nascimento: R.data_nascimento, celular: R.celular, genero: R.genero, aceite_privacidade: R.aceite_privacidade }), rec.id);
         const st = abrirCurso(r);
-        // Cursos e turnos vêm desta sessão (só leitura) e alimentam as telas do Flow.
+        // Guarda a lista de cursos do Rubeus (reserva do passo turnos), renovada a cada 6 h.
         if (st.cursos?.length) {
           const c = await lerCache(rec.processo, { fresco: true });
-          if (!c?.cursos?.length || !cacheCompletoSemTema(c) || clock() - (c.atualizado ?? 0) > 6 * 3600000) {
-            await gravarCache(rec.processo, { cursos: st.cursos });
-            try { await turnosDeTodos(r.data.estado, st.cursos, rec.processo, r.screen); } catch {}
-          }
+          if (!c?.cursos?.length || clock() - (c.atualizado ?? 0) > 6 * 3600000) await gravarCache(rec.processo, { cursos: st.cursos });
         }
         return salvar({ passo: 'turnos', ck: ck(r) });
       }
@@ -587,11 +541,6 @@ export function createEtapa1({
           if (!t) throw new ErroPasso(`O turno ${fixo.turno} do curso ${fixo.title} não veio na consulta do Rubeus.`, { motivo: 'turno' });
           turnoRubeus = t.id;
         } else if (!st.turnos?.some(t => t.id === R.turno_id)) throw new ErroPasso('O turno escolhido não veio na consulta do Rubeus.', { motivo: 'turno' });
-        // Aproveita a sessão para renovar o cache de cursos e turnos (só leitura).
-        const c = await lerCache(rec.processo, { fresco: true });
-        if (!c?.atualizado || clock() - c.atualizado > 6 * 3600000 || !cacheCompletoSemTema(c)) {
-          try { await turnosDeTodos(rec.ck.estado, st.cursos, rec.processo, rec.ck.screen); } catch {}
-        }
         return salvar({ passo: 'curso', ck: ck(r), rubeus_curso: { curso_id: cursoRubeus, turno_id: turnoRubeus } });
       }
       case 'curso': {
@@ -737,7 +686,6 @@ export function createEtapa1({
         throw new ErroPasso('Passo desconhecido: ' + rec.passo, { final: true });
     }
   }
-  function cacheCompletoSemTema(c) { return Boolean(c?.cursos?.length && c.cursos.every(x => (c.turnos?.[x.id] ?? []).length > 0)); }
 
   async function worker(id) {
     const inicio = clock();
@@ -835,5 +783,5 @@ export function createEtapa1({
     return telaDocumento({ e1: true, processo_seletivo_id: String(processo), eh_nota_enem: ehEnem(processo), fila_id: id, docs }, 0);
   }
 
-  return { route, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, aquecer, guardarTema, lerCache, gravarCache, cacheCompleto };
+  return { route, worker, entrarNaProva, entrarNosDocsInscricao, renderE1, guardarTema, lerCache, gravarCache, cacheCompleto };
 }

@@ -274,15 +274,21 @@ test('Docs de inscrição recebidos antes de o portal mostrar a etapa: o worker 
   assert.deepEqual(M.portal.estado.lotes.map(l => l.codigos), [['28', '27']]);
 });
 
-test('Cache de turnos sem pré-carga (ENEM/Transf./Portador): o worker lê os turnos na tela de curso do processo e a tela do Flow libera o turno', async () => {
-  const M = montar('20386');
-  const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
-  await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  const erros = []; const original = console.error; console.error = m => erros.push(String(m));
-  try { await M.e1.worker(M.fila[0].id); } finally { console.error = original; }
-  const c = (await M.store.get('etapa1-20386', 'flowCache')).record;
-  assert.ok(Object.keys(c.turnos ?? {}).length > 0, 'turnos no cache (antes: com_turno 0, a candidata ficava presa)');
-  assert.ok(!erros.some(e => e.includes('sem_turnos')));
+test('Sem cache (ENEM/Transf./Portador): a tela de curso abre na hora e o worker acha curso e turno na tela de curso do processo (CURSO_INGRESSO)', async () => {
+  for (const processo of ['20385', '20384', '20386']) {
+    const M = montar(processo);
+    const enem = processo === '20386';
+    const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: processo });
+    const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
+    assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO', processo);
+    const quase = await toque(M, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'direito', ...(enem ? ENEM : {}) });
+    assert.equal(quase.screen, 'INSC_QUASE_LA', processo);
+    await M.e1.worker(M.fila[0].id);
+    const rec = (await M.store.get(M.fila[0].id, 'inscricoesFila')).record;
+    assert.deepEqual(rec.rubeus_curso, { curso_id: '1-20', turno_id: '6' }, processo);
+    const enviado = M.rubeus.chamadas.find(x => x.a === 'avancar_curso_ingresso');
+    assert.equal(enviado.data.curso_id, '1-20'); assert.equal(enviado.data.turno_id, '6');
+  }
 });
 
 test('ENEM: Portal mostra "Checando as notas: Validando"; um documento (boletim) e volta ao status com as notas', async () => {

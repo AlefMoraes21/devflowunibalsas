@@ -10,18 +10,14 @@ const basicos = { acao: 'enviar_dados_basicos', estado: r.data.estado, nome: 'Ju
 r = await call('INSC_DADOS', 'data_exchange', basicos, TOKEN); mostrar('INSC_DADOS → enviar', r);
 const est = r.data.estado;
 const notas = { numero_inscricao_enem: '999999999999', ano_enem: '2025', nota_natureza_enem: '600.5', nota_humanas_enem: '620', nota_matematica_enem: '580', nota_linguagens_enem: '640', nota_redacao_enem: '700' };
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est, curso_id: 'c2', ...notas }, TOKEN); mostrar('INSC_CURSO_ENEM → escolhe Direito (notas já digitadas)', r, ['valor_nota_natureza_enem', 'valor_numero_inscricao_enem', 'valor_turno_id']);
-let est2 = r.data.estado;
-// 🔍 sem turno
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est2, curso_id: 'c2', turno_id: '', ...notas }, TOKEN); mostrar('🔍 avançar sem turno', r, ['valor_nota_redacao_enem']);
+// Cursos fixos no Flow: o curso vai junto com as notas, num toque.
 // 🔍 nota fora da faixa
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est2, curso_id: 'c2', turno_id: 't2', ...notas, nota_redacao_enem: '1200' }, TOKEN); mostrar('🔍 nota de redação 1200', r, ['valor_nota_redacao_enem', 'valor_turno_id']);
+r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est, curso_id: 'direito', ...notas, nota_redacao_enem: '1200' }, TOKEN); mostrar('🔍 nota de redação 1200', r, ['valor_nota_redacao_enem']);
 // 🔍 inscrição ENEM curta
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est2, curso_id: 'c2', turno_id: 't2', ...notas, numero_inscricao_enem: '123' }, TOKEN); mostrar('🔍 nº de inscrição ENEM com 3 dígitos', r);
-// troca de curso: turnos recarregam, notas ficam
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est2, curso_id: 'c1', turno_id: 't2', ...notas }, TOKEN); mostrar('🔍 troca de curso para Psicologia', r, ['valor_turno_id', 'valor_nota_matematica_enem']);
-est2 = r.data.estado;
-r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est2, curso_id: 'c1', turno_id: 't1', ...notas }, TOKEN); mostrar('INSC_CURSO_ENEM → avançar válido', r);
+r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est, curso_id: 'direito', ...notas, numero_inscricao_enem: '123' }, TOKEN); mostrar('🔍 nº de inscrição ENEM com 3 dígitos', r);
+// 🔍 curso fora da lista
+r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est, curso_id: 'inventado', ...notas }, TOKEN); mostrar('🔍 curso fora da lista', r);
+r = await call('INSC_CURSO_ENEM', 'data_exchange', { acao: 'escolher_curso', estado: est, curso_id: 'direito', ...notas }, TOKEN); mostrar('INSC_CURSO_ENEM → avançar válido', r);
 const origem = r.data.origens?.[0]?.id;
 const final = { acao: 'enviar_informacoes_complementares', estado: r.data.estado, cpf: '972.402.321-40', nacionalidade: '10', concluiu_ensino_medio: 'Sim', possui_deficiencia: 'F', tipos_deficiencia: [], deficiencia_outra: '', como_conheceu: origem, como_conheceu_outro: '' };
 r = await call('INSC_QUASE_LA', 'data_exchange', final, TOKEN); mostrar('INSC_QUASE_LA → concluir (consulta RM ligada, CPF do Juan já inscrito)', r);

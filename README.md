@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.16.23** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.16.23`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.0** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.0`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -19,9 +19,24 @@ WhatsApp Flow ──(criptografado)──▶ POST /api/flow ──▶ grava no F
 
 A Meta dá 10 s para cada resposta. Por isso o Flow só grava e responde; o envio ao Rubeus é feito pelo worker, com
 calma e conferência, igual ao que o candidato faria no site. Ao vivo ficam só o login (CPF + data de nascimento) e o CEP.
+O worker é chamado na hora em que cada tela é gravada; se o Rubeus falhar, tenta de novo (15 s, 30 s, 1 min… até 10 min).
+
+**Cursos fixos no Flow** (`api/cursos-fixos.js`): os 11 cursos ficam no JSON, com o turno no subtítulo
+("Turno: Noturno"; Medicina Veterinária e Odontologia "Turno: Integral"). Escolher o curso não chama o Run. O worker
+acha o curso na lista do Rubeus do processo pelo começo do nome, consulta os turnos e escolhe pelo nome. Curso que o
+Rubeus não tiver no processo vai para conferência (`curso_indisponivel`). Atualizar o arquivo a cada semestre.
 
 O estado de cada tela vai selado (AES-GCM) no campo `estado`, nunca vindo do cliente. Telas que não são do Flow atual
 (`INSC_*`, `MATR_*`, `CONTR_*`) recebem uma tela de fim com orientação.
+
+### Regras do Flow para funcionar também no WhatsApp Web (testes de 19 e 20/11/2026)
+
+- **Sem `CalendarPicker`**: na 1ª passada, a tela seguinte herdava o botão "Iniciar inscrição" da 1ª tela. Usar `DatePicker`.
+- **Sem resposta do Run com a mesma tela** (ex.: escolher o curso e o Run devolver a tela de curso com os turnos): o Web
+  mostrava a 1ª tela. Dados que não mudam ficam fixos no JSON.
+- **Sem ciclo de rotas**: todo `navigate` precisa estar no `routing_model`, sem voltar a uma tela anterior. A política
+  de privacidade abre o site (`open_url`).
+- Rótulo de lista (`Dropdown`) com até 20 caracteres (aviso da Meta) e opção com título até 30.
 
 ## Jornada
 
@@ -62,6 +77,7 @@ api/matricula.js          login no Rubeus e leitura das etapas do portal
 api/blip.js               avisos pelo Blip (templates aprovados)
 api/cloud-store.js        Firestore, Cloud Tasks e cifragem
 api/processes.js          política e documentos de inscrição por processo
+api/cursos-fixos.js       cursos e turnos fixos do Flow e a busca do curso no Rubeus pelo nome
 api/avaliacao.js, prova-route.js, proof-binding.js, prompt-text.js   prova e redação
 api/documentos.js         mídia do DocumentPicker
 api/enem.js, diagnostics.js, icones.js
@@ -94,8 +110,44 @@ Variáveis de ambiente (no Cloud Run; nunca no código):
 | `FLOW_PRIVATE_KEY` / `FLOW_PASSPHRASE` | Chave privada do endpoint do Flow; também deriva as chaves do estado e da fila |
 | `META_APP_SECRET` | Segredo do app Meta (confere a assinatura de cada requisição) |
 | `FLOW_PROJECT_ID`, `FLOW_DATABASE_ID`, `FLOW_TASKS_REGION`, `FLOW_TASKS_QUEUE`, `FLOW_WORKER_ORIGIN` | Firestore e Cloud Tasks (preenchidas por `implantar.sh`) |
-| `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_TEMPLATE_REDACAO`, `PIX_CHAVE`, `AVISOS_SO_PARA` | Avisos e cobrança pelo Blip (sem elas, nada é enviado). `BLIP_API_URL` sem `/commands`; `PIX_CHAVE` é só reserva (a chave vem da cobrança do Pix); `AVISOS_SO_PARA` = números de teste (só eles recebem) |
+| `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_FLOW_ID`, `BLIP_STATE_ID`, `BLIP_MASTERSTATE` | Avisos e cobrança pelo Blip (sem URL e chave, nada é enviado). `BLIP_API_URL` sem `/commands` |
+| `BLIP_TEMPLATE_ATUALIZACAO`, `BLIP_TEMPLATE_COBRANCA` | Opcionais. Padrão `unibalsas_atualizacao_processo` e `unibalsas_cobranca_matriculav1` |
+| `PIX_CHAVE` | Reserva: a chave Pix vem da própria cobrança; usada quando a cobrança traz chave aleatória (EVP) |
+| `AVISOS_SO_PARA`, `AVISOS_DESLIGADOS` | Números de teste (só eles recebem avisos) e chave geral para desligar os avisos |
 | `PORT` | Opcional. Padrão `8080` |
+
+## Tempos de cada etapa
+
+O candidato não espera nenhum destes tempos: o Flow responde na hora e o worker faz o resto depois.
+
+| Etapa | Quando vai ao Rubeus / portal | Variável (padrão) |
+|---|---|---|
+| Inscrição (dados, curso, "Estamos quase lá") | na hora em que cada tela é gravada; em falha tenta de novo em 15 s, 30 s, 1 min… até 10 min | — |
+| Redação (Vestibular) | 10 min depois da **inscrição concluída** (o Rubeus ainda monta a prova) + 1 min conferindo que a prova não mudou; se mudou, espera mais 10 min. Redação escrita depois desses 10 min vai em ~1 min | `ETAPA1_ESPERA_PROVA_MS` (600000), `ETAPA1_ESTABILIDADE_MS` (60000) |
+| Documentos de inscrição | 1 min depois da inscrição concluída (o RM ainda sincroniza); sem a etapa no portal, tenta a cada 10 min por até ~24 h | `ETAPA1_ESPERA_DOCS_MS` (60000) |
+| Documentos de matrícula | 2 min depois do envio pelo Flow | `ETAPA2_ESPERA_DOCS_MS` (120000) |
+| Contrato (gerar o PDF) | 2 min de calma depois de a etapa ser liberada | `ETAPA3_CALMA_MS` (120000) |
+| Cobrança (Pix + cartão pelo Blip) | na hora do toque em "Realizar pagamento"; toque repetido em menos de 1 min é ignorado | — |
+| LOGIN (status) | ao vivo, ~2 a 7 s; com status guardado abre na hora e relê o portal em segundo plano | `ETAPA2_ESPERA_STATUS_MS` (7500), `ETAPA2_ESPERA_PORTAL_MS` (6500) |
+
+## Avisos pelo Blip (vigias)
+
+Cada vigia é uma tarefa do Cloud Tasks que relê o portal e avisa quando a etapa muda. Ritmo: 1ª conferência 2 min
+depois de ligar; depois a cada **10 min nas primeiras 2 h** e a cada **1 h** até 15 dias (o vigia final, até 30 dias).
+Variáveis: `VIGIA_PRIMEIRA_S` (120), `ETAPA3_VIGIA_INTERVALO_S` (600), `VIGIA_INTERVALO_LONGO_S` (3600), `VIGIA_PAGAMENTO_S` (120).
+
+| Vigia | Quando liga | Aviso |
+|---|---|---|
+| `redacao_vigia` | redação enviada (Vestibular) | redação corrigida e aprovada: segue para a matrícula |
+| `inscricao_vigia` | documentos de inscrição enviados (Transf., Portador, ENEM) | documentos aprovados ou recusados (pede só os recusados) |
+| `etapa3_vigia` | documentos de matrícula enviados | documentos aprovados; contrato liberado (só com os documentos aprovados) |
+| `etapa4_vigia` | contrato com baixa da equipe | pagamento liberado; com "Realizar pagamento", a cobrança Pix + cartão; depois de enviada, confere a cada 2 min por 70 min; "Recebido"; Matriculado |
+
+## Cloud Run
+
+Escala até zero quando parado (sem instância mínima; não há custo de máquina parada), até 3 instâncias,
+20 requisições por instância, 1 vCPU e 512 MiB, com *startup CPU boost*. Os vigias e o worker acordam o serviço
+pelo Cloud Tasks. A 1ª chamada depois de parado leva ~1 s a mais.
 
 ## Testes
 

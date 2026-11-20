@@ -8,9 +8,7 @@ async function ate(processo, token, pessoa) {
   let r = await call('INSC_INICIO', 'data_exchange', { acao: 'e1_iniciar', processo_seletivo_id: processo }, token);
   r = await call('INSC_DADOS', 'data_exchange', { acao: 'enviar_dados_basicos', estado: r.data.estado, possui_nome_social: false, nome_social: '', genero: 'F', aceite_privacidade: true, ...pessoa.basicos }, token);
   mostrar(`${processo}: INSC_DADOS → tela do curso`, r);
-  r = await call(r.screen, 'data_exchange', { acao: 'escolher_curso', estado: r.data.estado, curso_id: 'c1' }, token);
-  mostrar(`${processo}: curso com turno único (pré-selecionado?)`, r, ['valor_turno_id']);
-  r = await call(r.screen, 'data_exchange', { acao: 'escolher_curso', estado: r.data.estado, curso_id: 'c1', turno_id: r.data.valor_turno_id }, token);
+  r = await call(r.screen, 'data_exchange', { acao: 'escolher_curso', estado: r.data.estado, curso_id: 'direito' }, token);
   mostrar(`${processo}: avançar → QUASE_LA (sem campos do ENEM)`, r);
   r = await call('INSC_QUASE_LA', 'data_exchange', { acao: 'enviar_informacoes_complementares', estado: r.data.estado, cpf: pessoa.cpf, nacionalidade: '10', concluiu_ensino_medio: 'Sim', possui_deficiencia: 'F', tipos_deficiencia: [], deficiencia_outra: '', como_conheceu: r.data.origens[0].id, como_conheceu_outro: '' }, token);
   r = await call('INSC_CONCLUIDA', 'data_exchange', { acao: 'abrir_portal', estado: r.data.estado }, token);
