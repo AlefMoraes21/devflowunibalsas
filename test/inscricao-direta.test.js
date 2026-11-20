@@ -144,8 +144,8 @@ async function inscrever(M, processo) {
   const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   const enem = processo === '20386';
   assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO');
-  assert.deepEqual(curso.data.cursos[0], { id: 'dir', title: 'Direito - NOTURNO' });
-  const quase = await toque(M, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'dir', ...(enem ? ENEM : {}) });
+  const t = await toque(M, curso.screen, 'buscar_turnos', curso.data.estado, { curso_id: 'dir', ...(enem ? ENEM : {}) });
+  const quase = await toque(M, curso.screen, 'escolher_curso', t.data.estado, { curso_id: 'dir', turno_id: 'not', ...(enem ? ENEM : {}) });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   const concl = await toque(M, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
   assert.equal(concl.screen, 'INSC_CONCLUIDA', 'Obrigado pelo seu cadastro!');
@@ -388,7 +388,8 @@ test('Vestibular protegido: Concluir segue para a prova (INSC_PORTAL), sem telas
   const dados = await toque(M, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await toque(M, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
-  const quase = await toque(M, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'dir' });
+  const t = await toque(M, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
+  const quase = await toque(M, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'dir', turno_id: 'not' });
   assert.equal(quase.data.eh_nota_enem, false); assert.equal(quase.data.resumo_enem, '');
   const concl = await toque(M, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL);
   const portal = await toque(M, 'INSC_CONCLUIDA', 'abrir_portal', concl.data.estado);

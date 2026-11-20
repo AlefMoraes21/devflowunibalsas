@@ -1,3 +1,10 @@
+# Versão 2.16.19 — etapa 1 restaurada para a 2.16.8 (curso carrega o turno abaixo) (20/11/2026) — COLAR O JSON NOVO NA META
+
+- A pedido do usuário, as telas e o servidor da etapa 1 voltaram à 2.16.8: ao escolher o curso, o turno carrega logo abaixo (lista com on-select-action), igual ao que funcionava no aplicativo.
+- Mantida a correção da 2.16.10: documentos de inscrição esperam o portal (até ~24 h, a cada 10 min) e o log docs_portal_etapas.
+- Desfeitas as tentativas para o WhatsApp Web (2.16.9, 2.16.11 a 2.16.18): tela de turno própria, turno no nome/descrição, botões de opção, caixa de marcar, logo fora do Form, listas validadas e logs flow_lista/flow_catalogo.
+- Conclusão do teste no Web (19/11): o WhatsApp Web erra só na primeira passada depois de abrir o Flow (a tela seguinte herda o botão "Iniciar inscrição"); refazendo o caminho no mesmo Flow, Vestibular e Transferência passam. O servidor responde igual nos dois casos. Limitação do Web, não do Flow.
+
 # Versão 2.16.18 — curso em caixa de marcar "CURSO - TURNO" e catálogo de cursos no log (19/11/2026) — COLAR O JSON NOVO NA META
 
 - Ideia do usuário: curso em CheckboxGroup (mínimo 1; a Meta não aceita máximo 1, então o servidor recusa mais de um com \"Marque apenas um curso.\"), com o turno ao lado do nome: "DIREITO - NOTURNO". Acima de 30 caracteres, título cortado e o texto inteiro na descrição. O servidor aceita curso_id como lista (CheckboxGroup) ou texto.

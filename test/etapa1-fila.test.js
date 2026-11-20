@@ -125,8 +125,9 @@ async function etapa1(E, processo = '20383', extra = {}) {
   assert.equal(dados.screen, 'INSC_DADOS');
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO');
-  assert.deepEqual(curso.data.cursos.find(c => c.id === 'ads'), { id: 'ads', title: 'ADS - NOTURNO' }, 'turno ao lado do nome');
-  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
+  assert.equal(t.data.valor_turno_id, 'not', 'turno único já vem marcado');
+  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
   assert.equal(quase.screen, 'INSC_QUASE_LA');
   return quase;
 }
@@ -186,111 +187,22 @@ test('Etapa 2: o INIT com o link do aviso abre direto a redação; Enviar fecha 
   assert.equal(deNovo.screen, 'INSC_FIM', 'link usado de novo: avisa que a redação já foi enviada');
 });
 
-test('Curso com turno único: "ADS - NOTURNO" na caixa de marcar e o Avançar segue direto; com 2 turnos abre a tela do Turno — nos 4 processos', async () => {
-  for (const processo of ['20383', '20385', '20384', '20386']) {
-    const { e1: E, store, fila } = montar();
-    await store.create('etapa1-' + processo, { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
-    const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: processo });
-    const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-    const enem = processo === '20386';
-    assert.equal(curso.screen, enem ? 'INSC_CURSO_ENEM' : 'INSC_CURSO', processo);
-    assert.deepEqual(curso.data.cursos, [{ id: 'ads', title: 'ADS - NOTURNO' }, { id: 'dir', title: 'Direito' }], 'turno único ao lado; 2 turnos, só o curso');
-    const extra = enem ? ENEM : {};
-    const semCurso = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: '', ...extra });
-    assert.equal(semCurso.screen, curso.screen); assert.match(semCurso.data.erro, /curso/);
-    const doisCursos = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: ['ads', 'dir'], ...extra });
-    assert.equal(doisCursos.screen, curso.screen); assert.match(doisCursos.data.erro, /apenas um curso/);
-    // Turno único: o Avançar grava curso + turno e segue.
-    const quase = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: ['ads'], ...extra });
-    assert.equal(quase.screen, 'INSC_QUASE_LA', processo + ': Avançar segue direto (CheckboxGroup manda lista)');
-    assert.equal(quase.data.eh_nota_enem, enem);
-    const r = (await store.get(fila[0].id, 'inscricoesFila')).record.respostas;
-    assert.equal(r.curso_id, 'ads'); assert.equal(r.turno_id, 'not', 'turno único gravado');
-    // Dois turnos: tela própria do turno.
-    const turno = await e1(E, curso.screen, 'escolher_curso', curso.data.estado, { curso_id: 'dir', ...extra });
-    assert.equal(turno.screen, 'INSC_TURNO'); assert.equal(turno.data.curso_nome, 'Direito'); assert.equal(turno.data.turnos.length, 2);
-    const semTurno = await e1(E, 'INSC_TURNO', 'escolher_turno', turno.data.estado, { turno_id: '' });
-    assert.equal(semTurno.screen, 'INSC_TURNO'); assert.match(semTurno.data.erro, /turno/);
-    const quase2 = await e1(E, 'INSC_TURNO', 'escolher_turno', turno.data.estado, { turno_id: 'mat' });
-    assert.equal(quase2.screen, 'INSC_QUASE_LA');
-  }
-  const json = JSON.stringify(FLOW_E1.screens.filter(x => /^INSC_(CURSO|TURNO)/.test(x.id)));
-  assert.doesNotMatch(json, /on-select-action/, 'listas sem ação ao selecionar');
-  assert.doesNotMatch(json, /"type":"If"/, 'sem If nas telas de curso e turno (WhatsApp Web)');
-  assert.deepEqual(FLOW_E1.routing_model.INSC_CURSO, ['INSC_TURNO', 'INSC_QUASE_LA', 'INSC_FIM']);
-  assert.deepEqual(FLOW_E1.routing_model.INSC_TURNO, ['INSC_QUASE_LA', 'INSC_FIM']);
-  // WhatsApp Web: lista dinâmica sem valor inicial (igual à lista do processo, que funciona).
-  for (const id of ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_TURNO']) {
-    const form = FLOW_E1.screens.find(x => x.id === id).layout.children[0];
-    for (const k of ['curso_id', 'turno_id', 'ano_enem']) assert.ok(!(k in (form['init-values'] ?? {})), id + ': sem valor inicial em ' + k);
-  }
-});
-
-test('WhatsApp Web: nenhuma lista com opções do servidor tem valor inicial (em todo o Flow)', () => {
-  const walk = (c, o = []) => { for (const x of c ?? []) { o.push(x); walk(x.children, o); walk(x.then, o); walk(x.else, o); } return o; };
-  const achados = [];
-  for (const s of FLOW_E1.screens) for (const fm of walk(s.layout.children).filter(c => c.type === 'Form')) {
-    const iv = fm['init-values'] ?? {};
-    for (const c of walk(fm.children)) if (typeof c['data-source'] === 'string' && c.name in iv) achados.push(s.id + '.' + c.name);
-  }
-  assert.deepEqual(achados, []);
-});
-
-test('Lista de cursos enviada ao Flow: sem id repetido, sem opção vazia, título até 30 (formato da Meta)', async () => {
-  const { e1: E, store } = montar();
-  const cursos = [{ id: 'ads', title: 'ADS' }, { id: 'ads', title: 'ADS de novo' }, { id: '', title: 'Sem id' }, { id: 'x', title: '  ' }, { id: 'dir', title: 'Direito' }];
-  await store.create('etapa1-20385', { cursos, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20385' });
-  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  assert.deepEqual(curso.data.cursos.map(c => c.id), ['ads', 'dir']);
-  for (const c of curso.data.cursos) { assert.ok(c.title && c.title.length <= 30); assert.ok(!('description' in c) || (c.description && c.description.length <= 300)); }
-});
-
-test('WhatsApp Web: depois da 1ª tela, escolha em botões de opção (a lista em tela própria volta o Web para a 1ª tela)', () => {
-  const walk = (c, o = []) => { for (const x of c ?? []) { o.push(x); walk(x.children, o); walk(x.then, o); walk(x.else, o); } return o; };
-  const listas = [];
-  for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'Dropdown') listas.push(s.id + '.' + c.name);
-  // Nenhuma lista em tela própria na inscrição, nem a do processo (1ª tela): no Web, escolher Transferência
-  // nessa lista fazia a tela de curso herdar o botão "Iniciar inscrição". Só as de UF (27 estados, acima do
-  // limite de 20 dos botões de opção) continuam Dropdown.
-  assert.deepEqual(listas.filter(x => !/\.(uf|estado_natal|uf_rg)$/.test(x)), []);
-  for (const s of FLOW_E1.screens) for (const c of walk(s.layout.children)) if (c.type === 'RadioButtonsGroup' && Array.isArray(c['data-source'])) assert.ok(c['data-source'].length <= 20, s.id + '.' + c.name);
-});
-
-test('WhatsApp Web: o rodapé da 1ª tela fica numa posição que nenhuma outra tela usa', () => {
-  const pos = s => { const r = s.layout.children; for (let i = 0; i < r.length; i++) { if (r[i].type === 'Footer') return `${i}`; if (r[i].type === 'Form') { const j = r[i].children.findIndex(c => c.type === 'Footer'); if (j >= 0) return `${i}>${j}`; } } return null; };
-  const inicio = pos(FLOW_E1.screens.find(s => s.id === 'INSC_INICIO'));
-  const iguais = FLOW_E1.screens.filter(s => s.id !== 'INSC_INICIO' && pos(s) === inicio).map(s => s.id);
-  assert.deepEqual(iguais, [], 'rodapé na mesma posição da 1ª tela: ' + inicio);
-});
-
-test('Curso com nome maior que 30 caracteres: título cortado (limite da Meta) e "CURSO - TURNO" inteiro na descrição', async () => {
-  const { e1: E, store } = montar();
-  const longo = 'TECNOLOGIA EM ANÁLISE E DESENVOLVIMENTO DE SISTEMAS';
-  await store.create('etapa1-20385', { cursos: [{ id: 'ads', title: longo }], turnos: { ads: [{ id: 'not', title: 'NOTURNO' }] }, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
-  const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20385' });
-  const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  const op = curso.data.cursos[0];
-  assert.ok(op.title.length <= 30, op.title); assert.ok(op.title.endsWith('…'));
-  assert.equal(op.description, longo + ' - NOTURNO');
-  const quase = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
-  assert.equal(quase.screen, 'INSC_QUASE_LA');
-});
-
 test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o curso com as notas e conclui sem redação', async () => {
   const { e1: E, store, fila, rubeus, avisos } = montar();
   await store.create('etapa1-20386', { cursos: CURSOS, turnos: TURNOS, tema: TEMA, atualizado: Date.now(), expires: Date.now() + 1e9 }, 'flowCache');
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20386' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
   assert.equal(curso.screen, 'INSC_CURSO_ENEM'); assert.equal(curso.data.anos_enem.length, 1);
+  // Escolher o curso não apaga o que já foi digitado do ENEM.
+  const t = await e1(E, 'INSC_CURSO_ENEM', 'buscar_turnos', curso.data.estado, { curso_id: 'ads', numero_inscricao_enem: '123456789012' });
+  assert.equal(t.data.valor_turno_id, 'not'); assert.equal(t.data.valor_numero_inscricao_enem, '123456789012');
   const id = fila[0].id;
-  // Nota inválida: fica na tela do curso, com o que já foi digitado.
-  const semNotas = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', curso.data.estado, { curso_id: 'ads', numero_inscricao_enem: '123' });
-  assert.equal(semNotas.screen, 'INSC_CURSO_ENEM'); assert.match(semNotas.data.erro, /ENEM/); assert.equal(semNotas.data.valor_numero_inscricao_enem, '123');
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'turnos', 'espera curso, turno e notas');
   assert.ok(!rubeus.chamadas.includes('avancar_curso_interesse'));
-  const quase = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', curso.data.estado, { curso_id: 'ads', ...ENEM });
+  const semNotas = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', numero_inscricao_enem: '123' });
+  assert.equal(semNotas.screen, 'INSC_CURSO_ENEM'); assert.match(semNotas.data.erro, /ENEM/);
+  const quase = await e1(E, 'INSC_CURSO_ENEM', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not', ...ENEM });
   assert.equal(quase.screen, 'INSC_QUASE_LA'); assert.equal(quase.data.eh_nota_enem, true);
   assert.equal((await store.get(id, 'inscricoesFila')).record.respostas.numero_inscricao_enem, ENEM.numero_inscricao_enem, 'notas guardadas com o curso');
   const okEnem = await toque(E, 'INSC_QUASE_LA', 'enviar_informacoes_complementares', quase.data.estado, FINAL, 'ft-e1');
@@ -310,7 +222,8 @@ test('Flow INSC: o worker avança no Rubeus só até onde o candidato já preenc
   const id = fila[0].id;
   await E.worker(id);
   assert.deepEqual(rubeus.chamadas, ['selecionar_processo', 'enviar_dados_basicos']);
-  await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'ads' });
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'ads' });
+  await e1(E, 'INSC_CURSO', 'escolher_curso', t.data.estado, { curso_id: 'ads', turno_id: 'not' });
   await E.worker(id);
   assert.equal((await store.get(id, 'inscricoesFila')).record.passo, 'final', 'para antes da conclusão, esperando o CPF');
 });
@@ -323,9 +236,9 @@ test('Flow INSC: sem cache, a tela de curso espera o worker trazer os cursos do 
   E = createEtapa1({ store, enqueue: async id => { pend.push(E.worker(id)); }, runStep: rubeus.runStep, sealState, openState, validateBasic: () => {}, validateFinal: () => {}, origens: [{ id: '01', title: 'Site' }], hoje: () => '2026-11-15', requiresEssay: id => String(id) === '20383', academicId: () => '223', userFields: USER, sleep: () => new Promise(r => setTimeout(r, 5)), log: () => {} });
   const dados = await e1(E, 'INSC_INICIO', 'e1_iniciar', undefined, { processo_seletivo_id: '20383' });
   const curso = await e1(E, 'INSC_DADOS', 'enviar_dados_basicos', dados.data.estado, BASICOS);
-  assert.deepEqual(curso.data.cursos.map(c => c.id), CURSOS.map(c => c.id));
-  const t = await e1(E, 'INSC_CURSO', 'escolher_curso', curso.data.estado, { curso_id: 'dir' });
-  assert.equal(t.screen, 'INSC_TURNO'); assert.equal(t.data.turnos.length, 2);
+  assert.deepEqual(curso.data.cursos, CURSOS);
+  const t = await e1(E, 'INSC_CURSO', 'buscar_turnos', curso.data.estado, { curso_id: 'dir' });
+  assert.equal(t.data.turnos.length, 2);
   await Promise.all(pend);
   assert.equal(await toque(E, 'ESCOLHA_PROCESSO', 'selecionar_processo', sealState('ESCOLHA_PROCESSO', { processos_disponiveis: ['20383'] }), { processo_seletivo_id: '20383' }), null, 'tela que não é INSC_* não é da etapa 1');
 });

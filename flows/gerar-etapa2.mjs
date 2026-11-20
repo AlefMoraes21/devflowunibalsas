@@ -142,7 +142,7 @@ export const screens = [
   },
   {
     id: 'MATR_IDENTIDADE', title: 'Identidade', data: dados(IDENT, { escolas: ESCOLAS, tem_escolas: bool() }),
-    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT.filter(k => k !== 'escola')), children: [
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_identidade', 'init-values': init(IDENT), children: [
       imagem(LOGO_MATRICULA),
       { type: 'TextHeading', text: 'Documento e perfil' },
       { type: 'TextBody', text: 'Precisamos de mais algumas informações suas.' },
@@ -150,8 +150,8 @@ export const screens = [
       { type: 'TextInput', name: 'rg', label: 'Nº da identidade', 'input-type': 'text', required: true },
       { type: 'TextInput', name: 'orgao_emissor', label: 'Órgão emissor', 'helper-text': 'Ex.: SSP', 'input-type': 'text', required: true },
       { type: 'Dropdown', name: 'uf_rg', label: 'UF da identidade', required: true, 'data-source': UFS },
-      { type: 'RadioButtonsGroup', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
-      { type: 'RadioButtonsGroup', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
+      { type: 'Dropdown', name: 'cor_raca', label: 'Cor / Raça', required: true, 'data-source': RACAS },
+      { type: 'Dropdown', name: 'estado_civil', label: 'Estado civil', required: true, 'data-source': ESTADOS_CIVIS },
       // No site é uma lista fechada: busca pelo nome e escolhe na lista (opcional).
       { type: 'TextInput', name: 'busca_escola', label: 'Escola de Ensino Médio', 'helper-text': 'Opcional. Digite parte do nome e toque em Buscar escola', 'input-type': 'text', required: false },
       { type: 'EmbeddedLink', text: 'Buscar escola', 'on-click-action': troca('buscar_escola', form(IDENT)) },

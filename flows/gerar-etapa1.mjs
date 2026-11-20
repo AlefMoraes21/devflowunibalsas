@@ -15,7 +15,7 @@ const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'co
 
 const str = (ex = '') => ({ type: 'string', __example__: ex });
 const bool = (ex = false) => ({ type: 'boolean', __example__: ex });
-const opcoes = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } }, __example__: [] });
+const opcoes = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } }, __example__: [] });
 const erroTexto = { type: 'TextBody', text: '${data.erro}', visible: '${data.tem_erro}' };
 const troca = (acao, campos = {}) => ({ name: 'data_exchange', payload: { acao, estado: '${data.estado}', ...campos } });
 const form = names => Object.fromEntries(names.map(n => [n, '${form.' + n + '}']));
@@ -25,10 +25,7 @@ const DADOS = ['nome', 'possui_nome_social', 'nome_social', 'email', 'data_nasci
 const ENEM = ['numero_inscricao_enem', 'ano_enem', 'nota_natureza_enem', 'nota_humanas_enem', 'nota_matematica_enem', 'nota_linguagens_enem', 'nota_redacao_enem'];
 // As notas do ENEM ficam na tela do curso, como no site (passo 300708); a "Estamos quase lá" é igual nos 4 processos.
 const QUASE = ['cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro'];
-const CURSO_ENEM = ['curso_id', ...ENEM];
-// Valor inicial só nos campos de texto: no WhatsApp Web, lista dinâmica (Dropdown) com valor inicial que não
-// está nas opções ("") volta o Flow para a 1ª tela ao escolher (19/11). A lista do processo, sem valor inicial, funciona.
-const ENEM_TEXTO = ENEM.filter(k => k !== 'ano_enem');
+const CURSO_ENEM = ['curso_id', 'turno_id', ...ENEM];
 // Documentos de inscrição (Transferência, Portador e ENEM): uma tela por posição, para o seletor de arquivo vir
 // vazio em cada documento. A 1ª é sempre o documento obrigatório. Id de tela só com letras (regra da Meta).
 const DOCS_INSC = ['INSC_DOC_A', 'INSC_DOC_B', 'INSC_DOC_C'];
@@ -48,9 +45,8 @@ const flow = {
     INSC_INICIO: ['INSC_DADOS', 'INSC_FIM', 'MATR_LOGIN'],
     INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_PRIVACIDADE', 'INSC_FIM'],
     INSC_PRIVACIDADE: [],
-    INSC_CURSO: ['INSC_TURNO', 'INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_CURSO_ENEM: ['INSC_TURNO', 'INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_TURNO: ['INSC_QUASE_LA', 'INSC_FIM'],
+    INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
+    INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
     INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS', 'INSC_FIM'],
     INSC_STATUS: ['INSC_DOC_A', 'INSC_FIM'],
@@ -72,16 +68,14 @@ const flow = {
       title: 'Inscrição',
       layout: {
         type: 'SingleColumnLayout',
-        // Logo fora do Form: o rodapé desta 1ª tela fica numa posição que nenhuma outra tela usa (Form>4).
-        // No WhatsApp Web, a tela seguinte com o rodapé na mesma posição herdava o botão "Iniciar inscrição"
-        // (rótulo e ação) e voltava aos Dados básicos (19/11).
-        children: [imagem(LOGO_INSCRICAO, 40), {
+        children: [{
           type: 'Form', name: 'form_processo',
           children: [
+            imagem(LOGO_INSCRICAO, 40),
             // Página 1 = porta de entrada: "Iniciar inscrição" (etapa 1) ou "LOGIN" (o servidor leva à etapa em que parou).
             { type: 'TextSubheading', text: 'Escolha seu processo e selecione uma opção' },
             // Lista fixa (a Meta não informa ao servidor qual Flow abriu): atualizar a cada semestre.
-            { type: 'RadioButtonsGroup', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
+            { type: 'Dropdown', name: 'processo_seletivo_id', label: 'Escolha o processo seletivo', required: true, 'data-source': [
               { id: '20383', title: 'Vestibular Online 2027/1' },
               { id: '20385', title: 'Transferência 2027/1' },
               { id: '20384', title: 'Portador de Diploma 2027/1' },
@@ -136,23 +130,20 @@ const flow = {
     {
       id: 'INSC_CURSO',
       title: 'Curso de interesse',
-      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes() },
+      data: { estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), valor_curso_id: str(), valor_turno_id: str() },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso',
+          'init-values': init(['curso_id', 'turno_id']),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            // Turno em tela própria (INSC_TURNO). No WhatsApp Web, tanto a escolha com on-select-action quanto um
-            // turno dentro de If (campo ainda não exibido no init-values/payload) voltam o Flow para a 1ª tela sem
-            // chamar o servidor (19/11). Aqui só o curso; o Avançar abre a tela do turno.
-            // Caixa de marcar com o turno ao lado do nome: "DIREITO - NOTURNO" (ideia do usuário, 19/11). A Meta não
-            // aceita max-selected-items 1 (mínimo 2): o servidor confere que só um curso foi marcado.
-            { type: 'CheckboxGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'min-selected-items': 1 },
-            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id'])) }
+            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'on-select-action': troca('buscar_turnos', { curso_id: '${form.curso_id}' }) },
+            { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
+            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(['curso_id', 'turno_id'])) }
           ]
         }]
       }
@@ -163,25 +154,24 @@ const flow = {
       id: 'INSC_CURSO_ENEM',
       title: 'Curso de interesse',
       data: {
-        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), anos_enem: opcoes(),
-        ...Object.fromEntries(ENEM_TEXTO.map(k => ['valor_' + k, str()]))
+        estado: str(), erro: str(), tem_erro: bool(), cursos: opcoes(), turnos: opcoes(), turno_visivel: bool(), anos_enem: opcoes(),
+        ...Object.fromEntries(CURSO_ENEM.map(k => ['valor_' + k, str()]))
       },
       layout: {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_curso_enem',
-          'init-values': init(ENEM_TEXTO),
+          'init-values': init(CURSO_ENEM),
           children: [
             imagem(LOGO_ENEM, 40),
             { type: 'TextHeading', text: 'Curso de interesse' },
             { type: 'TextBody', text: 'Conte-nos mais detalhes sobre o curso de seu interesse!' },
             erroTexto,
-            // Caixa de marcar com o turno ao lado do nome: "DIREITO - NOTURNO" (ideia do usuário, 19/11). A Meta não
-            // aceita max-selected-items 1 (mínimo 2): o servidor confere que só um curso foi marcado.
-            { type: 'CheckboxGroup', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'min-selected-items': 1 },
+            { type: 'Dropdown', name: 'curso_id', label: 'Curso', 'data-source': '${data.cursos}', required: true, 'on-select-action': troca('buscar_turnos', form(CURSO_ENEM)) },
+            { type: 'If', condition: '${data.turno_visivel} == true', then: [{ type: 'Dropdown', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true }], else: [] },
             { type: 'TextSubheading', text: 'Dados do ENEM' },
             { type: 'TextInput', name: 'numero_inscricao_enem', label: 'Número de inscrição do ENEM', 'helper-text': 'Somente números (12 a 15)', 'input-type': 'text', required: true },
-            { type: 'RadioButtonsGroup', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
+            { type: 'Dropdown', name: 'ano_enem', label: 'Ano de realização do ENEM', 'data-source': '${data.anos_enem}', required: true },
             notaEnem('nota_natureza_enem', 'Nota de ciências da natureza'),
             notaEnem('nota_humanas_enem', 'Nota de ciências humanas'),
             notaEnem('nota_matematica_enem', 'Nota de matemática'),
@@ -189,26 +179,6 @@ const flow = {
             notaEnem('nota_redacao_enem', 'Nota da redação'),
             { type: 'TextCaption', text: 'A média das notas é calculada automaticamente.' },
             { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_curso', form(CURSO_ENEM)) }
-          ]
-        }]
-      }
-    },
-    {
-      // Turno do curso escolhido (todos os processos). Tela própria, sem If: funciona igual no app e no Web.
-      id: 'INSC_TURNO',
-      title: 'Turno',
-      data: { estado: str(), erro: str(), tem_erro: bool(), curso_nome: str('Administração'), turnos: opcoes() },
-      layout: {
-        type: 'SingleColumnLayout',
-        children: [{
-          type: 'Form', name: 'form_turno',
-          children: [
-            imagem(LOGO_INSCRICAO, 40),
-            { type: 'TextHeading', text: 'Turno' },
-            { type: 'TextBody', text: '${data.curso_nome}' },
-            erroTexto,
-            { type: 'RadioButtonsGroup', name: 'turno_id', label: 'Turno', 'data-source': '${data.turnos}', required: true },
-            { type: 'Footer', label: 'Avançar', 'on-click-action': troca('escolher_turno', form(['turno_id'])) }
           ]
         }]
       }
@@ -227,7 +197,7 @@ const flow = {
         type: 'SingleColumnLayout',
         children: [{
           type: 'Form', name: 'form_quase_la',
-          'init-values': init(QUASE.filter(k => k !== 'como_conheceu')), // lista dinâmica sem valor inicial (WhatsApp Web)
+          'init-values': init(QUASE),
           children: [
             imagem(LOGO_INSCRICAO, 40),
             { type: 'TextHeading', text: 'Estamos quase lá!' },
@@ -235,14 +205,14 @@ const flow = {
             { type: 'TextCaption', text: '${data.resumo_enem}', visible: '${data.eh_nota_enem}' },
             erroTexto,
             { type: 'TextInput', name: 'cpf', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
-            { type: 'RadioButtonsGroup', name: 'nacionalidade', label: 'Nacionalidade', required: true, 'data-source': [{ id: '10', title: 'Brasileira' }, { id: '20', title: 'Naturalizado Brasileiro' }, { id: '50', title: 'Outros' }] },
+            { type: 'Dropdown', name: 'nacionalidade', label: 'Nacionalidade', required: true, 'data-source': [{ id: '10', title: 'Brasileira' }, { id: '20', title: 'Naturalizado Brasileiro' }, { id: '50', title: 'Outros' }] },
             { type: 'RadioButtonsGroup', name: 'concluiu_ensino_medio', label: 'Você já concluiu o ensino médio?', required: true, 'data-source': [{ id: 'Sim', title: 'Sim' }, { id: 'Não', title: 'Não' }] },
             { type: 'RadioButtonsGroup', name: 'possui_deficiencia', label: 'Possui alguma deficiência?', required: true, 'data-source': [{ id: 'T', title: 'Sim' }, { id: 'F', title: 'Não' }] },
             { type: 'If', condition: "${form.possui_deficiencia} == 'T'", then: [
               { type: 'CheckboxGroup', name: 'tipos_deficiencia', label: 'Necessidades especiais', required: true, 'data-source': [{ id: 'auditiva', title: 'Auditiva' }, { id: 'fala', title: 'Fala' }, { id: 'fisica', title: 'Física' }, { id: 'intelectual', title: 'Intelectual' }, { id: 'visual', title: 'Visual' }, { id: 'mental', title: 'Mental' }, { id: 'outras', title: 'Outras' }] },
               { type: 'TextInput', name: 'deficiencia_outra', label: 'Se marcou Outras, especifique:', 'input-type': 'text', required: false }
             ], else: [] },
-            { type: 'RadioButtonsGroup', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
+            { type: 'Dropdown', name: 'como_conheceu', label: 'Como ficou sabendo do processo?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
           ]
