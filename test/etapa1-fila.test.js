@@ -222,13 +222,13 @@ test('Etapa 1 ENEM: notas na tela do curso (igual ao site); o worker envia o cur
   assert.equal(avisos.length, 0, 'sem redação, sem aviso da etapa 2');
 });
 
-test('Cursos fixos no Flow: lista no JSON com o turno no nome, sem on-select nem If; o Run só guarda a escolha', async () => {
+test('Cursos fixos no Flow: nome do curso no título e o turno no subtítulo, sem on-select nem If; o Run só guarda a escolha', async () => {
   for (const id of ['INSC_CURSO', 'INSC_CURSO_ENEM']) {
     const tela = FLOW_E1.screens.find(s => s.id === id), json = JSON.stringify(tela);
     const lista = tela.layout.children[0].children.find(c => c.name === 'curso_id');
     assert.equal(lista.type, 'RadioButtonsGroup'); assert.ok(Array.isArray(lista['data-source']));
     assert.equal(lista['data-source'].length, 11);
-    for (const o of lista['data-source']) assert.ok(o.title.length <= 30 && / - (NOTURNO|INTEGRAL)$/.test(o.title), o.title);
+    for (const o of lista['data-source']) { assert.ok(o.title.length <= 30 && !/NOTURNO|INTEGRAL/.test(o.title), o.title); assert.match(o.description, /^Turno: (Noturno|Integral)$/); }
     assert.doesNotMatch(json, /on-select-action|"type":"If"|turno_id/);
   }
   const { e1: E, store, fila } = montar();

@@ -4,21 +4,23 @@
 // e `turno` é o nome do turno esperado. Conferido no catálogo do Vestibular 20383 em 19/11/2026: todos noturnos,
 // exceto Medicina Veterinária e Odontologia (integral). Atualizar a cada semestre, junto com a lista de processos.
 export const CURSOS_FIXOS = [
-  { id: 'agronomia', title: 'AGRONOMIA - NOTURNO', busca: 'AGRONOMIA', turno: 'NOTURNO' },
-  { id: 'ads', title: 'ANÁLISE DE SISTEMAS - NOTURNO', description: 'Análise e Desenvolvimento de Sistemas', busca: 'ANALISE E DESENVOLVIMENTO', turno: 'NOTURNO' },
-  { id: 'biomedicina', title: 'BIOMEDICINA - NOTURNO', busca: 'BIOMEDICINA', turno: 'NOTURNO' },
-  { id: 'contabeis', title: 'CIÊNCIAS CONTÁBEIS - NOTURNO', busca: 'CIENCIAS CONTABEIS', turno: 'NOTURNO' },
-  { id: 'direito', title: 'DIREITO - NOTURNO', busca: 'DIREITO', turno: 'NOTURNO' },
-  { id: 'enfermagem', title: 'ENFERMAGEM - NOTURNO', busca: 'ENFERMAGEM', turno: 'NOTURNO' },
-  { id: 'estetica', title: 'ESTÉTICA E COSMÉTICA - NOTURNO', busca: 'ESTETICA', turno: 'NOTURNO' },
-  { id: 'veterinaria', title: 'MED. VETERINÁRIA - INTEGRAL', description: 'Medicina Veterinária', busca: 'MEDICINA VETERINARIA', turno: 'INTEGRAL' },
-  { id: 'odontologia', title: 'ODONTOLOGIA - INTEGRAL', busca: 'ODONTOLOGIA', turno: 'INTEGRAL' },
-  { id: 'publicidade', title: 'PROD. PUBLICITÁRIA - NOTURNO', description: 'Produção Publicitária', busca: 'PRODUCAO PUBLICITARIA', turno: 'NOTURNO' },
-  { id: 'psicologia', title: 'PSICOLOGIA - NOTURNO', busca: 'PSICOLOGIA', turno: 'NOTURNO' }
+  { id: 'agronomia', title: 'AGRONOMIA', busca: 'AGRONOMIA', turno: 'NOTURNO' },
+  { id: 'ads', title: 'ANÁLISE E DESENV. DE SISTEMAS', busca: 'ANALISE E DESENVOLVIMENTO', turno: 'NOTURNO' },
+  { id: 'biomedicina', title: 'BIOMEDICINA', busca: 'BIOMEDICINA', turno: 'NOTURNO' },
+  { id: 'contabeis', title: 'CIÊNCIAS CONTÁBEIS', busca: 'CIENCIAS CONTABEIS', turno: 'NOTURNO' },
+  { id: 'direito', title: 'DIREITO', busca: 'DIREITO', turno: 'NOTURNO' },
+  { id: 'enfermagem', title: 'ENFERMAGEM', busca: 'ENFERMAGEM', turno: 'NOTURNO' },
+  { id: 'estetica', title: 'ESTÉTICA E COSMÉTICA', busca: 'ESTETICA', turno: 'NOTURNO' },
+  { id: 'veterinaria', title: 'MEDICINA VETERINÁRIA', busca: 'MEDICINA VETERINARIA', turno: 'INTEGRAL' },
+  { id: 'odontologia', title: 'ODONTOLOGIA', busca: 'ODONTOLOGIA', turno: 'INTEGRAL' },
+  { id: 'publicidade', title: 'PRODUÇÃO PUBLICITÁRIA', busca: 'PRODUCAO PUBLICITARIA', turno: 'NOTURNO' },
+  { id: 'psicologia', title: 'PSICOLOGIA', busca: 'PSICOLOGIA', turno: 'NOTURNO' }
 ];
 
 // Opções da lista no Flow (só id, título e descrição: o formato da Meta).
-export const opcoesCursos = () => CURSOS_FIXOS.map(({ id, title, description }) => ({ id, title, ...(description ? { description } : {}) }));
+// Nome do curso no título e o turno no subtítulo (description): "Turno: Noturno".
+const turnoTexto = t => 'Turno: ' + t.charAt(0) + t.slice(1).toLowerCase();
+export const opcoesCursos = () => CURSOS_FIXOS.map(({ id, title, turno }) => ({ id, title, description: turnoTexto(turno) }));
 
 const chave = v => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 export const cursoFixo = id => CURSOS_FIXOS.find(c => c.id === String(id ?? '')) ?? null;

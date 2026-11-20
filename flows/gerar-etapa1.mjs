@@ -107,8 +107,9 @@ const flow = {
             erroTexto,
             { type: 'TextInput', name: 'nome', label: 'Nome completo', 'input-type': 'text', required: true },
             { type: 'OptIn', name: 'possui_nome_social', label: 'Possuo nome social', required: false },
-            // Sem If (teste do WhatsApp Web, 20/11): o campo fica sempre visível; o Run exige quando a caixa está marcada.
-            { type: 'TextInput', name: 'nome_social', label: 'Nome social (opcional)', 'input-type': 'text', required: false },
+            // If de volta (2.16.23): o nome social só aparece com a caixa marcada. Teste para separar a causa do
+            // WhatsApp Web: a 2.16.22 (sem calendário e sem If) passou; aqui só o DatePicker continua.
+            { type: 'If', condition: '${form.possui_nome_social} == true', then: [{ type: 'TextInput', name: 'nome_social', label: 'Nome social', 'input-type': 'text', required: true }], else: [] },
             { type: 'TextInput', name: 'email', label: 'E-mail', 'input-type': 'email', required: true },
             // DatePicker (seletor clássico) no lugar do CalendarPicker: suspeito de estragar a navegação do WhatsApp Web
             // na passagem Dados básicos → Curso (20/11). Também devolve AAAA-MM-DD.

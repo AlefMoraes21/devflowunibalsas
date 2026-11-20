@@ -1,3 +1,9 @@
+# Versão 2.16.23 — nome social volta a aparecer só com a caixa marcada (teste do calendário) (20/11/2026) — COLAR O JSON NOVO NA META
+
+- 2.16.22 passou no WhatsApp Web (Vestibular 02:14 e Transferência 02:16): escolher_curso chegou ao Run e o worker achou curso e turno no Rubeus. Mudanças da 2.16.22: CalendarPicker → DatePicker e If do nome social removido.
+- Pedido do usuário: o nome social volta a aparecer só quando marca "Possuo nome social" (If de volta). O DatePicker continua. Se passar no Web, a causa era o CalendarPicker; se falhar, era o If.
+- Estética da lista de cursos (pedido do usuário): nome do curso no título ("MEDICINA VETERINÁRIA") e o turno no subtítulo ("Turno: Integral"). A lógica não muda: o worker usa busca e turno do catálogo.
+
 # Versão 2.16.22 — Dados básicos sem calendário e sem If (teste do WhatsApp Web) (20/11/2026) — COLAR O JSON NOVO NA META
 
 - Teste da 2.16.21 no Web: com a tela de curso sem nada do servidor (lista fixa, sem If, sem on-select), a passagem Dados básicos → Curso continuou falhando na 1ª passada (02:03:50 tela de curso; 02:03:53 e1_iniciar da 1ª tela). As outras passagens funcionam, então o suspeito é a tela de Dados básicos.

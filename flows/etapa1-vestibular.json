@@ -327,11 +327,18 @@
                 "required": false
               },
               {
-                "type": "TextInput",
-                "name": "nome_social",
-                "label": "Nome social (opcional)",
-                "input-type": "text",
-                "required": false
+                "type": "If",
+                "condition": "${form.possui_nome_social} == true",
+                "then": [
+                  {
+                    "type": "TextInput",
+                    "name": "nome_social",
+                    "label": "Nome social",
+                    "input-type": "text",
+                    "required": true
+                  }
+                ],
+                "else": []
               },
               {
                 "type": "TextInput",
@@ -456,50 +463,58 @@
                 "data-source": [
                   {
                     "id": "agronomia",
-                    "title": "AGRONOMIA - NOTURNO"
+                    "title": "AGRONOMIA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "ads",
-                    "title": "ANÁLISE DE SISTEMAS - NOTURNO",
-                    "description": "Análise e Desenvolvimento de Sistemas"
+                    "title": "ANÁLISE E DESENV. DE SISTEMAS",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "biomedicina",
-                    "title": "BIOMEDICINA - NOTURNO"
+                    "title": "BIOMEDICINA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "contabeis",
-                    "title": "CIÊNCIAS CONTÁBEIS - NOTURNO"
+                    "title": "CIÊNCIAS CONTÁBEIS",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "direito",
-                    "title": "DIREITO - NOTURNO"
+                    "title": "DIREITO",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "enfermagem",
-                    "title": "ENFERMAGEM - NOTURNO"
+                    "title": "ENFERMAGEM",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "estetica",
-                    "title": "ESTÉTICA E COSMÉTICA - NOTURNO"
+                    "title": "ESTÉTICA E COSMÉTICA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "veterinaria",
-                    "title": "MED. VETERINÁRIA - INTEGRAL",
-                    "description": "Medicina Veterinária"
+                    "title": "MEDICINA VETERINÁRIA",
+                    "description": "Turno: Integral"
                   },
                   {
                     "id": "odontologia",
-                    "title": "ODONTOLOGIA - INTEGRAL"
+                    "title": "ODONTOLOGIA",
+                    "description": "Turno: Integral"
                   },
                   {
                     "id": "publicidade",
-                    "title": "PROD. PUBLICITÁRIA - NOTURNO",
-                    "description": "Produção Publicitária"
+                    "title": "PRODUÇÃO PUBLICITÁRIA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "psicologia",
-                    "title": "PSICOLOGIA - NOTURNO"
+                    "title": "PSICOLOGIA",
+                    "description": "Turno: Noturno"
                   }
                 ],
                 "required": true
@@ -618,50 +633,58 @@
                 "data-source": [
                   {
                     "id": "agronomia",
-                    "title": "AGRONOMIA - NOTURNO"
+                    "title": "AGRONOMIA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "ads",
-                    "title": "ANÁLISE DE SISTEMAS - NOTURNO",
-                    "description": "Análise e Desenvolvimento de Sistemas"
+                    "title": "ANÁLISE E DESENV. DE SISTEMAS",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "biomedicina",
-                    "title": "BIOMEDICINA - NOTURNO"
+                    "title": "BIOMEDICINA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "contabeis",
-                    "title": "CIÊNCIAS CONTÁBEIS - NOTURNO"
+                    "title": "CIÊNCIAS CONTÁBEIS",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "direito",
-                    "title": "DIREITO - NOTURNO"
+                    "title": "DIREITO",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "enfermagem",
-                    "title": "ENFERMAGEM - NOTURNO"
+                    "title": "ENFERMAGEM",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "estetica",
-                    "title": "ESTÉTICA E COSMÉTICA - NOTURNO"
+                    "title": "ESTÉTICA E COSMÉTICA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "veterinaria",
-                    "title": "MED. VETERINÁRIA - INTEGRAL",
-                    "description": "Medicina Veterinária"
+                    "title": "MEDICINA VETERINÁRIA",
+                    "description": "Turno: Integral"
                   },
                   {
                     "id": "odontologia",
-                    "title": "ODONTOLOGIA - INTEGRAL"
+                    "title": "ODONTOLOGIA",
+                    "description": "Turno: Integral"
                   },
                   {
                     "id": "publicidade",
-                    "title": "PROD. PUBLICITÁRIA - NOTURNO",
-                    "description": "Produção Publicitária"
+                    "title": "PRODUÇÃO PUBLICITÁRIA",
+                    "description": "Turno: Noturno"
                   },
                   {
                     "id": "psicologia",
-                    "title": "PSICOLOGIA - NOTURNO"
+                    "title": "PSICOLOGIA",
+                    "description": "Turno: Noturno"
                   }
                 ],
                 "required": true
