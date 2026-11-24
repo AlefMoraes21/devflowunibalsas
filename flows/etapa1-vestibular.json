@@ -22,7 +22,16 @@
     ],
     "INSC_QUASE_LA": [
       "INSC_CONCLUIDA",
+      "INSC_JA_INSCRITO",
       "INSC_FIM"
+    ],
+    "INSC_JA_INSCRITO": [
+      "INSC_CONCLUIDA",
+      "INSC_FIM",
+      "MATR_PORTAL",
+      "MATR_STATUS",
+      "MATR_FIM",
+      "INSC_PORTAL"
     ],
     "INSC_CONCLUIDA": [
       "INSC_PORTAL",
@@ -65,6 +74,13 @@
     "INSC_FINALIZADA": [],
     "INSC_FIM": [],
     "MATR_LOGIN": [
+      "MATR_ESCOLHA",
+      "MATR_PORTAL",
+      "MATR_STATUS",
+      "MATR_FIM",
+      "INSC_PORTAL"
+    ],
+    "MATR_ESCOLHA": [
       "MATR_PORTAL",
       "MATR_STATUS",
       "MATR_FIM",
@@ -1048,6 +1064,101 @@
       }
     },
     {
+      "id": "INSC_JA_INSCRITO",
+      "title": "Inscrição",
+      "data": {
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "mensagem": {
+          "type": "string",
+          "__example__": "Olá, Ana! Identificamos que você já possui uma inscrição em Vestibular Online 2027/1, no curso DIREITO."
+        },
+        "opcoes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": [
+            {
+              "id": "seguir_0",
+              "title": "Vestibular Online 2027/1",
+              "description": "Seguir com esta inscrição (DIREITO)"
+            }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_ja_inscrito",
+            "children": [
+              {
+                "type": "Image",
+                "src": "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",
+                "height": 40,
+                "scale-type": "contain"
+              },
+              {
+                "type": "TextSubheading",
+                "text": "Você já possui uma inscrição"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.mensagem}"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "inscricao",
+                "label": "O que deseja fazer?",
+                "required": true,
+                "data-source": "${data.opcoes}"
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "decidir_inscricao",
+                    "estado": "${data.estado}",
+                    "inscricao": "${form.inscricao}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": "INSC_CONCLUIDA",
       "title": "Inscrição",
       "data": {
@@ -1884,6 +1995,97 @@
                     "acao": "entrar",
                     "login": "${form.login}",
                     "data_nascimento": "${form.data_nascimento}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MATR_ESCOLHA",
+      "title": "Portal do candidato",
+      "data": {
+        "estado": {
+          "type": "string",
+          "__example__": ""
+        },
+        "erro": {
+          "type": "string",
+          "__example__": ""
+        },
+        "tem_erro": {
+          "type": "boolean",
+          "__example__": false
+        },
+        "opcoes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "__example__": [
+            {
+              "id": "14320114",
+              "title": "Transferência 2027/1",
+              "description": "DIREITO"
+            }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_escolha",
+            "children": [
+              {
+                "type": "Image",
+                "src": "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",
+                "height": 40,
+                "scale-type": "contain"
+              },
+              {
+                "type": "TextSubheading",
+                "text": "Suas inscrições"
+              },
+              {
+                "type": "TextBody",
+                "text": "Encontramos mais de uma inscrição com este CPF. Qual você quer acompanhar?"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.erro}",
+                "visible": "${data.tem_erro}"
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "inscricao",
+                "label": "Inscrição",
+                "required": true,
+                "data-source": "${data.opcoes}"
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "acao": "escolher_inscricao",
+                    "estado": "${data.estado}",
+                    "inscricao": "${form.inscricao}"
                   }
                 }
               }

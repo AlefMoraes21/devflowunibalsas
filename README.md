@@ -2,7 +2,7 @@
 
 Endpoint do **WhatsApp Flow** dos processos seletivos 2027/1 da UniBalsas: inscrição (Vestibular, Transferência, Portador de Diploma e Nota do ENEM), redação, documentos de inscrição, matrícula, contrato e pagamento, sem sair do WhatsApp e seguindo o site do vestibular.
 
-- Versão atual: **2.17.7** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.7`; histórico em `LEIA-ME.md`)
+- Versão atual: **2.17.8** (`GET /api/flow` responde `unibalsas-cloudrun-jornada-2.17.8`; histórico em `LEIA-ME.md`)
 - Flow da WABA (único): `flows/etapa1-vestibular.json` (JSON 7.3, Data API 3.0), gerado por `node flows/gerar-etapa1.mjs`
 - Execução: Node.js 22+, sem dependências externas
 - Hospedagem: Google Cloud Run (`southamerica-east1`), Firestore e Cloud Tasks
@@ -115,6 +115,7 @@ Variáveis de ambiente (no Cloud Run; nunca no código):
 | `BLIP_API_URL`, `BLIP_BOT_KEY`, `BLIP_FLOW_ID`, `BLIP_STATE_ID`, `BLIP_MASTERSTATE` | Avisos e cobrança pelo Blip (sem URL e chave, nada é enviado). `BLIP_API_URL` sem `/commands` |
 | `BLIP_TEMPLATE_ATUALIZACAO`, `BLIP_TEMPLATE_COBRANCA` | Opcionais. Padrão `unibalsas_atualizacao_processo` e `unibalsas_cobranca_matriculav1` |
 | `PIX_CHAVE` | Reserva: a chave Pix vem da própria cobrança; usada quando a cobrança traz chave aleatória (EVP) |
+| `TELAS_INSCRICAO_MULTIPLA` | `on` liga o aviso de inscrição existente e a escolha no LOGIN (só depois do JSON novo na Meta) |
 | `AVISOS_SO_PARA`, `AVISOS_DESLIGADOS` | Números de teste (só eles recebem avisos) e chave geral para desligar os avisos |
 | `PORT` | Opcional. Padrão `8080` |
 
@@ -219,6 +220,23 @@ de teste, celular fora do `AVISOS_SO_PARA` não gera Pix nem alerta a equipe.
 `cobranca_enviando` é exclusiva pela gravação condicional: outra execução não a pega, não a apaga e não remarca pedido
 já enviado (não depende só da trava do vigia). Envio sem confirmação do Blip mostra "Solicitamos o envio…" em vez de
 "Enviamos…". Roteiro de homologação: `ROTEIRO-HOMOLOGACAO.md`.
+
+## Mais de uma inscrição no mesmo CPF (2.17.8)
+
+O site deixa a pessoa ter inscrições em mais de um processo ("+ Nova inscrição"). O portal abre numa delas (o seletor
+"Processos abertos" troca pelo `POST /api/applyment/change-current-applyment {applyment_id, token}`).
+
+- **Workers e vigias** entram sempre na inscrição da fila: `portalSite.entrar(cpf, nasc, { applyment_id })` troca e
+  confere na lista (`person-applyment`) antes de seguir; sem confirmação, erro e nova tentativa. No Rubeus oficial
+  (matrícula), o `/portal` recebe o `applyment_id` da fila e o processo devolvido é conferido (`outra_inscricao`).
+  Com uma inscrição só, o caminho é o de antes (nenhuma chamada a mais).
+- **Inscrição nova** (tela `INSC_JA_INSCRITO`): no "Concluir", se o CPF já tem inscrição em **outro** processo (fila do
+  Flow ou portal, até 3,5 s), o Flow pergunta: "Olá, Fulano! Identificamos que você já possui uma inscrição em X, no
+  curso Y. Deseja seguir com essa inscrição ou realmente quer fazer uma nova…?". "Seguir" abre a existente (como o
+  LOGIN) e não cria a nova; "Fazer uma nova inscrição" conclui. O mesmo processo continua com a regra de duplicada.
+- **LOGIN** (tela `MATR_ESCOLHA`): com mais de uma inscrição, pergunta qual acompanhar.
+- As duas telas só aparecem com `TELAS_INSCRICAO_MULTIPLA=on` (ligar **depois** de publicar o JSON novo na Meta).
+  Desligada, inscrição e LOGIN ficam como antes; o conserto dos workers vale sempre.
 
 ## Avisos pelo Blip (vigias)
 

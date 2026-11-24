@@ -17,6 +17,11 @@ const MIME = { pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", pn
 
 const str = v => (v === null || v === undefined ? "" : String(v));
 
+// Rótulo da inscrição igual ao do seletor do portal (pipe applymentTitle do site): title, ou "processo - curso".
+export function tituloInscricao(a) {
+  return str(a?.title) || (a?.course ? `${str(a.name)} - ${str(a.course)}` : str(a?.name));
+}
+
 // Lê o passo de documentos (getApplymentDataByStep) e devolve só o que o envio precisa.
 export function lerPassoDocumentos(resp) {
   const cs = resp?.data?.steps?.currentStep;
@@ -95,13 +100,37 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
   }
 
   // Sessão do candidato, como o navegador: settings → login-portal (CPF + nascimento DDMMAAAA, sem captcha).
-  async function entrar(cpf, nascimentoIso) {
+  // Com mais de uma inscrição, o portal abre numa delas. Com `applyment_id`, troca para a inscrição pedida,
+  // como o seletor "Processos abertos" do site, e confere a troca antes de devolver a sessão. Sem ele (ou
+  // quando o portal já abriu nela), o caminho é o mesmo de antes.
+  async function entrar(cpf, nascimentoIso, { applyment_id: quer = "" } = {}) {
     const s = await post("settings", { domain: DOMAIN });
     const token = s?.data?.token;
     if (!token) throw new Error("Portal do candidato sem token de sessão.");
     const [y, m, d] = str(nascimentoIso).split("-");
     const l = await post("login-portal", { domain: DOMAIN, user_data: { token_captcha: "", typeLogin: str(cpf).replace(/\D/g, ""), dataNascimento: `${d}${m}${y}` }, token, substitute_id: null, session_id: null });
-    return { token, session_id: l?.data?.session_id ?? null, applyment_id: str(l?.data?.applyment_id), person_id: str(l?.data?.person_id) };
+    const sessao = { token, session_id: l?.data?.session_id ?? null, applyment_id: str(l?.data?.applyment_id), person_id: str(l?.data?.person_id) };
+    if (str(quer) && str(quer) !== sessao.applyment_id) await trocar(sessao, quer);
+    return sessao;
+  }
+
+  // Inscrições da pessoa, como o seletor "Processos abertos" do portal (título igual ao do site).
+  async function inscricoes(sessao) {
+    const r = await post("person-applyment", { token: sessao.token, domain: DOMAIN }, { timeoutMs: 20000 });
+    return (Array.isArray(r?.data) ? r.data : []).map(a => ({
+      applyment_id: str(a.applyment_id), processo: str(a.id), titulo: tituloInscricao(a), curso: str(a.course), atual: str(a.current_process) === "1"
+    }));
+  }
+
+  // Troca a inscrição aberta na sessão (o mesmo POST do seletor do site) e confere na lista que trocou.
+  async function trocar(sessao, applymentId) {
+    const quer = str(applymentId);
+    await post("change-current-applyment", { applyment_id: Number(quer), token: sessao.token }, { timeoutMs: 60000 });
+    const atual = (await inscricoes(sessao)).find(a => a.atual);
+    if (atual?.applyment_id !== quer) throw new Error("O Portal do candidato não abriu a inscrição pedida.");
+    log({ event: "portal_site", rota: "troca_inscricao", ok: true });
+    sessao.applyment_id = quer;
+    return sessao;
   }
 
   // Processo seletivo da inscrição (o mesmo que o portal mostra) e as etapas. O site leva ~16 s aqui.
@@ -146,7 +175,7 @@ export function createPortalSite({ fetcher = fetch, log = e => console.info(JSON
     return post("page", { page_id: String(pageId), process_id: String(processo), stage_id: null, token: sessao.token }, { timeoutMs: 30000 });
   }
 
-  return { entrar, inscricao, processo, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup, pagina };
+  return { entrar, inscricao, inscricoes, trocar, processo, passoDocumentos, enviarDocumentos, passoBruto, clicar, popup, pagina };
 }
 
 // Valores do candidato que o portal devolve junto com o passo ou a página (applicantData: field_id → value).

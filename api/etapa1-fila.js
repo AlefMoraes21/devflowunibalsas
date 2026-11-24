@@ -48,6 +48,12 @@ export function createEtapa1({
   // (api/portal-site.js) e, depois do envio, o vigia da análise (etapa 2). Nada disso vale para o Vestibular.
   docsInscricao = () => [], portalSite = null, baixarMidia = null, aoEnviarDocsInscricao = async () => {},
   mediaEnem = () => '',
+  // CPF com inscrição em outro processo (aviso antes de concluir): processos do Flow, título de cada um, o LOGIN
+  // (api/etapa2-matricula.js abrirLogin) para seguir com a existente e quanto esperar a lista do portal.
+  processos = ['20383', '20385', '20384', '20386'], tituloProcesso = p => String(p), abrirLogin = null,
+  esperaInscricoesMs = Number(process.env.ETAPA1_ESPERA_INSCRICOES_MS) || 3500,
+  // Telas novas (INSC_JA_INSCRITO, MATR_ESCOLHA) só depois de o JSON do Flow com elas estar publicado na Meta.
+  telasMultiplaAtivas = () => process.env.TELAS_INSCRICAO_MULTIPLA === 'on',
   // Calma entre o Concluir e o envio dos documentos: o RM ainda sincroniza a inscrição.
   esperaDocsInscricaoMs = Number(process.env.ETAPA1_ESPERA_DOCS_MS) || 60000,
   clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
@@ -134,6 +140,7 @@ export function createEtapa1({
     // Nota do ENEM: as notas ficam na tela do curso, como no site (passo 300708).
     INSC_CURSO_ENEM: ['estado', 'erro', 'tem_erro', 'anos_enem', ...valor(...ENEM_CAMPOS.filter(k => k !== 'ano_enem'))],
     INSC_QUASE_LA: ['estado', 'erro', 'tem_erro', 'origens', 'eh_nota_enem', 'resumo_enem', ...valor('cpf', 'nacionalidade', 'concluiu_ensino_medio', 'possui_deficiencia', 'tipos_deficiencia', 'deficiencia_outra', 'como_conheceu', 'como_conheceu_outro')],
+    INSC_JA_INSCRITO: ['estado', 'erro', 'tem_erro', 'mensagem', 'opcoes'],
     INSC_CONCLUIDA: ['estado'],
     INSC_PORTAL: ['estado'],
     INSC_STATUS: ['estado', 'eh_nota_enem'],
@@ -156,6 +163,7 @@ export function createEtapa1({
       else if (k === 'tem_erro') out.tem_erro = Boolean(trusted.erro);
       else if (k.startsWith('valor_')) out[k] = values[k.slice(6)] ?? INSC_PADRAO[k] ?? '';
       else if (LISTAS.includes(k)) out[k] = proj(trusted[k]);
+      else if (k === 'opcoes') out.opcoes = (trusted.opcoes ?? []).map(o => ({ id: String(o.id), title: String(o.title), description: String(o.description ?? '') }));
       else out[k] = trusted[k] ?? INSC_PADRAO[k] ?? '';
     }
     return { screen, data: out };
@@ -228,6 +236,83 @@ export function createEtapa1({
     throw new Error('conflito');
   }
 
+  // ---------------------------------------------------------------- CPF já inscrito em outro processo
+  // Concluir a inscrição: confere duplicada no mesmo processo (RM e fila), grava e agenda o worker.
+  // Devolve { tela } ou { erro } (a tela que chamou mostra o erro).
+  async function concluir(s, u, req, base) {
+    const processo = s.processo_seletivo_id;
+    const cpf = digits(u.cpf);
+    try {
+      if (await jaInscritoNoRm(academicId(processo), cpf)) { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_rm' }); return { erro: DUPLICADA_MSG }; }
+      const idx = hash('etapa1:' + processo + ':' + cpf);
+      if (!await store.create(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, CPF_IDX)) {
+        const atual = await store.get(idx, CPF_IDX);
+        if (atual && atual.record.fila_id !== s.fila_id) {
+          const outra = await store.get(atual.record.fila_id, FILA);
+          if (outra && outra.record.status !== 'falhou') { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_fila' }); return { erro: DUPLICADA_MSG }; }
+          await store.update(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, atual.version, CPF_IDX);
+        }
+      }
+      await gravarTela(s.fila_id, processo, req.flow_token, u, { concluida_em: clock() });
+      log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'dados_recebidos', status: 'pendente' });
+    } catch (e) { falha('quase_la', e); return { erro: ERRO_GRAVAR }; }
+    if (requiresEssay(processo) || docsInscricao(processo).length) return { tela: renderE1('INSC_CONCLUIDA', { ...base, erro: '' }) };
+    return { tela: sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo }) };
+  }
+
+  // Título do processo (até 30 caracteres, para a lista do Flow).
+  const nomeProcesso = (p, reserva = '') => {
+    const t = String(tituloProcesso(p) ?? '');
+    return (t && t !== String(p) && !/^processo seletivo/i.test(t) ? t : reserva || 'Outro processo seletivo').slice(0, 30);
+  };
+  // Outras inscrições do CPF (outros processos): a fila do Flow (na hora) e o Portal do candidato (inclui as
+  // feitas pelo site). Portal sem resposta a tempo: fica só com a fila. Inscrição que falhou ou duplicada não conta.
+  async function outrasInscricoes(filaId, cpf, processo, nascimento) {
+    const doFlow = (await Promise.all(processos.filter(p => String(p) !== String(processo)).map(async p => {
+      const idx = await store.get(hash('etapa1:' + p + ':' + cpf), CPF_IDX).catch(() => null);
+      if (!idx?.record?.fila_id || idx.record.fila_id === filaId) return null;
+      const outra = (await store.get(idx.record.fila_id, FILA).catch(() => null))?.record;
+      if (!outra || ['falhou', 'duplicada'].includes(outra.status)) return null;
+      return { processo: String(p), applyment_id: String(outra.applyment_id ?? ''), curso: cursoFixo(outra.respostas?.curso_id)?.title ?? '' };
+    }))).filter(Boolean);
+    let doPortal = [];
+    if (portalSite?.inscricoes && nascimento) {
+      let timer;
+      const prazo = new Promise(r => { timer = setTimeout(() => r(null), esperaInscricoesMs); timer.unref?.(); });
+      const lista = portalSite.entrar(cpf, nascimento).then(sx => portalSite.inscricoes(sx)).catch(() => null);
+      try { doPortal = (await Promise.race([lista, prazo])) ?? []; } finally { clearTimeout(timer); }
+    }
+    const res = doPortal.filter(a => a.processo !== String(processo))
+      .map(a => ({ processo: a.processo, applyment_id: a.applyment_id, curso: a.curso || '', nome_portal: a.titulo }));
+    for (const x of doFlow) if (!res.some(a => a.processo === x.processo)) res.push(x);
+    return res.map(({ nome_portal, ...a }) => ({ ...a, titulo: nomeProcesso(a.processo, String(nome_portal ?? '').split(' - ')[0]) }));
+  }
+  async function avisoInscricaoExistente(s, u, base) {
+    if (s.nova_confirmada || !telasMultiplaAtivas()) return null;
+    const rec = (await store.get(s.fila_id, FILA).catch(() => null))?.record;
+    // Toque repetido no Concluir (a 1ª vez já concluiu): segue o caminho de sempre.
+    if (!rec || rec.concluida_em) return null;
+    const R = rec.respostas ?? {};
+    const cpf = digits(u.cpf);
+    const existentes = (await outrasInscricoes(s.fila_id, cpf, s.processo_seletivo_id, R.data_nascimento)).slice(0, 5);
+    if (!existentes.length) return null;
+    log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'ja_inscrito_outro_processo', quantidade: existentes.length });
+    const nome = String(R.nome ?? '').trim().split(/\s+/)[0] || 'candidato(a)';
+    const nova = nomeProcesso(s.processo_seletivo_id);
+    const cursoNovo = cursoFixo(R.curso_id)?.title ?? '';
+    const desc = e => e.titulo + (e.curso ? `, no curso ${e.curso}` : '');
+    const mensagem = existentes.length === 1
+      ? `Olá, ${nome}! Identificamos que você já possui uma inscrição em ${desc(existentes[0])}.\n\nDeseja seguir com essa inscrição ou realmente quer fazer uma nova inscrição em ${nova}?`
+      : `Olá, ${nome}! Identificamos que você já possui inscrições em:\n${existentes.map(e => '• ' + desc(e)).join('\n')}\n\nDeseja seguir com uma delas ou realmente quer fazer uma nova inscrição em ${nova}?`;
+    const opcoes = [
+      ...existentes.map((e, i) => existentes.length === 1
+        ? { id: 'seguir_' + i, title: 'Seguir com a inscrição atual', description: e.titulo + (e.curso ? ' · ' + e.curso : '') }
+        : { id: 'seguir_' + i, title: e.titulo, description: 'Seguir com esta inscrição' + (e.curso ? ' · ' + e.curso : '') }),
+      { id: 'nova', title: 'Fazer uma nova inscrição', description: nova + (cursoNovo ? ' · ' + cursoNovo : '') }
+    ];
+    return renderE1('INSC_JA_INSCRITO', { ...base, origens: s.origens, pendente: u, existentes, cpf_login: cpf, nasc_login: R.data_nascimento, nova_confirmada: true, mensagem, opcoes, erro: '' });
+  }
+
   async function routeE1(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
     if (screen === 'INSC_INICIO') {
@@ -277,23 +362,27 @@ export function createEtapa1({
       try {
         validateFinal({ ...u, origens: s.origens });
       } catch (e) { return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: e.message }); }
-      const cpf = digits(u.cpf);
-      try {
-        if (await jaInscritoNoRm(academicId(processo), cpf)) { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_rm' }); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: DUPLICADA_MSG }); }
-        const idx = hash('etapa1:' + processo + ':' + cpf);
-        if (!await store.create(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, CPF_IDX)) {
-          const atual = await store.get(idx, CPF_IDX);
-          if (atual && atual.record.fila_id !== s.fila_id) {
-            const outra = await store.get(atual.record.fila_id, FILA);
-            if (outra && outra.record.status !== 'falhou') { log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'duplicada_fila' }); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: DUPLICADA_MSG }); }
-            await store.update(idx, { fila_id: s.fila_id, expires: clock() + 30 * DIA }, atual.version, CPF_IDX);
-          }
-        }
-        await gravarTela(s.fila_id, processo, req.flow_token, u, { concluida_em: clock() });
-        log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'dados_recebidos', status: 'pendente' });
-      } catch (e) { falha('quase_la', e); return renderE1('INSC_QUASE_LA', { ...s, values: u, erro: ERRO_GRAVAR }); }
-      if (requiresEssay(processo) || docsInscricao(processo).length) return renderE1('INSC_CONCLUIDA', { ...base, erro: '' });
-      return sucesso(req.flow_token, { status: 'dados_recebidos', protocolo_fila: curto(s.fila_id), processo_seletivo_id: processo });
+      // CPF com inscrição em outro processo seletivo: pergunta antes de criar a nova.
+      const aviso = await avisoInscricaoExistente(s, u, base).catch(e => { falha('ja_inscrito', e); return null; });
+      if (aviso) return aviso;
+      const r = await concluir(s, u, req, base);
+      return r.erro ? renderE1('INSC_QUASE_LA', { ...s, values: u, erro: r.erro }) : r.tela;
+    }
+
+    // Já inscrito em outro processo: "Fazer uma nova inscrição" conclui esta; "Seguir" abre a existente (LOGIN).
+    if (screen === 'INSC_JA_INSCRITO' && acao === 'decidir_inscricao') {
+      const escolha = String(d.inscricao ?? '');
+      if (escolha === 'nova') {
+        log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'nova_inscricao_confirmada' });
+        const r = await concluir(s, s.pendente ?? {}, req, base);
+        return r.erro ? renderE1('INSC_JA_INSCRITO', { ...s, erro: r.erro }) : r.tela;
+      }
+      const m = escolha.match(/^seguir_(\d+)$/);
+      const e = m ? (s.existentes ?? [])[Number(m[1])] : null;
+      if (!e) return renderE1('INSC_JA_INSCRITO', { ...s, erro: 'Escolha uma das opções.' });
+      log({ event: 'etapa1_fila', id: curto(s.fila_id), passo: 'seguiu_inscricao_existente', processo: e.processo });
+      if (!e.applyment_id || !abrirLogin) return fimE1('Sua inscrição continua valendo ✅', `Sua inscrição em ${e.titulo} continua valendo. Para acompanhar, abra a mensagem de novo e toque em "Já sou inscrito (LOGIN)" com seu CPF e a data de nascimento.`);
+      return abrirLogin({ login: s.cpf_login, data_nascimento: s.nasc_login, flowToken: req.flow_token, escolha: { id: e.applyment_id, processo: e.processo }, volta: erro => renderE1('INSC_JA_INSCRITO', { ...s, erro }) });
     }
 
     // Igual ao site: Obrigado pelo seu cadastro → Portal do candidato → Avaliação online disponível →
@@ -457,7 +546,8 @@ export function createEtapa1({
   async function entregarDocsInscricao(rec) {
     const login = rec.via_login?.login, nasc = rec.via_login?.data_nascimento;
     if (!login || !nasc) throw new ErroPasso('Sem CPF ou data de nascimento para entrar no portal.', { final: true, motivo: 'login' });
-    const sessao = await portalSite.entrar(login, nasc);
+    // Com duas inscrições no mesmo CPF, o portal pode abrir na outra: entra direto nesta (applyment_id).
+    const sessao = await portalSite.entrar(login, nasc, { applyment_id: rec.applyment_id });
     const { processo: procPortal, stages } = await portalSite.inscricao(sessao);
     const processo = procPortal || String(rec.processo);
     const etapa = (stages ?? []).find(x => ehDocsInscricao(x.title));
@@ -514,7 +604,7 @@ export function createEtapa1({
   async function redacaoConfirmada(rec, salvar) {
     const r = await salvar({ passo: 'fim', status: 'concluida', concluida_em: clock() });
     const R = rec.respostas ?? {};
-    try { await aoConfirmarRedacao({ login: rec.via_login?.login ?? R.cpf, data_nascimento: rec.via_login?.data_nascimento ?? R.data_nascimento, celular: R.celular, nome: R.nome }); }
+    try { await aoConfirmarRedacao({ login: rec.via_login?.login ?? R.cpf, data_nascimento: rec.via_login?.data_nascimento ?? R.data_nascimento, celular: R.celular, nome: R.nome, applyment_id: rec.applyment_id }); }
     catch (e) { log({ event: 'etapa1_fila_erro', passo: 'vigia_redacao', message: String(e?.message ?? e).slice(0, 120) }); }
     return r;
   }

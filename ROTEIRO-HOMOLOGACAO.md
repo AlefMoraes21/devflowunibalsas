@@ -51,6 +51,16 @@ Resultado:
 Repetir inscrição → redação/documentos → matrícula → pagamento num número de teste diferente do atual, colocado na
 trava (`AVISOS_SO_PARA`) só para isso. Conferir que cada aviso chega **uma vez**. Só depois disso remover a trava.
 
+## 4. Duas inscrições no mesmo CPF (2.17.8)
+
+Depois de publicar o JSON novo na Meta e ligar `TELAS_INSCRICAO_MULTIPLA=on`:
+1. Com um CPF fictício que já tem inscrição (ex.: Vestibular), começar outra (ex.: Transferência) e tocar em Concluir.
+   - Esperado: tela "Você já possui uma inscrição" com o processo e o curso. Log `ja_inscrito_outro_processo`.
+2. "Seguir com a inscrição atual": abre o portal da existente; a nova não é criada (`seguiu_inscricao_existente`).
+3. Repetir e escolher "Fazer uma nova inscrição": segue para "Obrigado…" e os documentos; o worker entrega na inscrição
+   certa (log `portal_site` `troca_inscricao`).
+4. LOGIN com esse CPF: tela "Suas inscrições" para escolher qual acompanhar.
+
 ## Cobrança (2.17.6) — o que esperar
 
 - Toque em "Realizar pagamento": uma mensagem. Se o Blip não responder (tempo esgotado/erro dele), a mensagem **não é

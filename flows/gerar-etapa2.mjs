@@ -22,6 +22,8 @@ const dados = (names, extra = {}) => ({ estado: str(), erro: str(), tem_erro: bo
 const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
 const RESP = ['nome', 'email', 'cpf', 'data_nascimento', 'celular'];
 const IDENT = ['rg', 'orgao_emissor', 'uf_rg', 'cor_raca', 'estado_civil', 'ano_conclusao', 'busca_escola', 'escola'];
+const OPCOES_INSCRICAO = { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } },
+  __example__: [{ id: '14320114', title: 'Transferência 2027/1', description: 'DIREITO' }] };
 const ESCOLAS = { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } },
   __example__: [{ id: '1', title: 'Escola exemplo', description: 'Escola exemplo' }] };
 
@@ -44,7 +46,9 @@ const camposEndereco = acaoCep => [
 const docRotas = Object.fromEntries(DOCS.map((d, i) => [d.tela, i < DOCS.length - 1 ? [DOCS[i + 1].tela, 'MATR_FIM'] : ['MATR_FIM']]));
 
 export const routing = {
-  MATR_LOGIN: ['MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
+  MATR_LOGIN: ['MATR_ESCOLHA', 'MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
+  // Mais de uma inscrição no CPF: o candidato escolhe qual acompanhar.
+  MATR_ESCOLHA: ['MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
   MATR_PORTAL: ['MATR_STATUS', 'MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_FIM', 'INSC_PORTAL'],
   // "Documentos inscrição: Pendentes [Verificar]" (Transferência, Portador, ENEM) abre as telas da etapa 1.
   MATR_STATUS: ['MATR_RESPONSAVEL', 'MATR_RESP_DADOS', 'MATR_ENDERECO', 'MATR_IDENTIDADE', DOCS[0].tela, 'CONTR_TERMOS', 'MATR_PAGAMENTO', 'MATR_FIM', 'INSC_PORTAL', 'INSC_DOC_A'],
@@ -70,6 +74,19 @@ export const screens = [
       { type: 'TextInput', name: 'login', label: 'CPF', 'helper-text': 'Somente os 11 números', 'input-type': 'text', required: true },
       { type: 'CalendarPicker', name: 'data_nascimento', label: 'Data de nascimento', mode: 'single', 'min-date': '1920-01-01', required: true },
       { type: 'Footer', label: 'Entrar', 'on-click-action': { name: 'data_exchange', payload: { acao: 'entrar', login: '${form.login}', data_nascimento: '${form.data_nascimento}' } } }
+    ] }] }
+  },
+  {
+    // Mais de uma inscrição no mesmo CPF (como o seletor "Processos abertos" do portal): qual acompanhar.
+    id: 'MATR_ESCOLHA', title: 'Portal do candidato',
+    data: { estado: str(), erro: str(), tem_erro: bool(), opcoes: OPCOES_INSCRICAO },
+    layout: { type: 'SingleColumnLayout', children: [{ type: 'Form', name: 'form_escolha', children: [
+      imagem(LOGO_PORTAL),
+      { type: 'TextSubheading', text: 'Suas inscrições' },
+      { type: 'TextBody', text: 'Encontramos mais de uma inscrição com este CPF. Qual você quer acompanhar?' },
+      erroTexto,
+      { type: 'RadioButtonsGroup', name: 'inscricao', label: 'Inscrição', required: true, 'data-source': '${data.opcoes}' },
+      { type: 'Footer', label: 'Continuar', 'on-click-action': troca('escolher_inscricao', form(['inscricao'])) }
     ] }] }
   },
   {

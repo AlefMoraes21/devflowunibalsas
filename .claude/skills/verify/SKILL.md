@@ -60,6 +60,7 @@ Todos usam `lib.mjs`: o cliente criptografa como a Meta e confere cada resposta 
 | `transf.mjs` | Transferência e Portador, com 3 documentos |
 | `vest.mjs` | Confirma que o Vestibular continua indo para a prova |
 | `login2.mjs <juan\|rosa\|rebeca>` | LOGIN → Atualizar → lista com ícones → vigia → 2º LOGIN (V1) |
+| `multipla.mjs <seguir|nova|login>` | Aviso de inscrição existente com a Rebeca (portal real); ligue `TELAS_INSCRICAO_MULTIPLA=on` pelo `/env` |
 | `worker.mjs <quem>` | Worker `docs_inscricao` no portal real, com registro semeado |
 
 ## Cuidados

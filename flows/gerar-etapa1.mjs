@@ -18,6 +18,9 @@ const imagem = (src, height) => ({ type: 'Image', src, height, 'scale-type': 'co
 const str = (ex = '') => ({ type: 'string', __example__: ex });
 const bool = (ex = false) => ({ type: 'boolean', __example__: ex });
 const opcoes = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } }, __example__: [] });
+// Opções com descrição (título até 30 caracteres; o curso vai na descrição).
+const opcoesDesc = () => ({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } } },
+  __example__: [{ id: 'seguir_0', title: 'Vestibular Online 2027/1', description: 'Seguir com esta inscrição (DIREITO)' }] });
 const erroTexto = { type: 'TextBody', text: '${data.erro}', visible: '${data.tem_erro}' };
 const troca = (acao, campos = {}) => ({ name: 'data_exchange', payload: { acao, estado: '${data.estado}', ...campos } });
 const form = names => Object.fromEntries(names.map(n => [n, '${form.' + n + '}']));
@@ -50,7 +53,9 @@ const flow = {
     INSC_DADOS: ['INSC_CURSO', 'INSC_CURSO_ENEM', 'INSC_FIM'],
     INSC_CURSO: ['INSC_QUASE_LA', 'INSC_FIM'],
     INSC_CURSO_ENEM: ['INSC_QUASE_LA', 'INSC_FIM'],
-    INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_FIM'],
+    INSC_QUASE_LA: ['INSC_CONCLUIDA', 'INSC_JA_INSCRITO', 'INSC_FIM'],
+    // CPF com inscrição em outro processo: segue com ela (abre o LOGIN dela) ou faz a nova.
+    INSC_JA_INSCRITO: ['INSC_CONCLUIDA', 'INSC_FIM', 'MATR_PORTAL', 'MATR_STATUS', 'MATR_FIM', 'INSC_PORTAL'],
     INSC_CONCLUIDA: ['INSC_PORTAL', 'INSC_STATUS', 'INSC_FIM'],
     INSC_STATUS: ['INSC_DOC_A', 'INSC_FIM'],
     INSC_DOC_A: ['INSC_DOC_B', 'INSC_DOCS_FIM', 'INSC_FIM'],
@@ -211,6 +216,31 @@ const flow = {
             { type: 'Dropdown', name: 'como_conheceu', label: 'Como nos conheceu?', required: true, 'data-source': '${data.origens}' },
             { type: 'If', condition: "${form.como_conheceu} == '10'", then: [{ type: 'TextInput', name: 'como_conheceu_outro', label: 'Especifique o canal:', 'input-type': 'text', required: true }], else: [] },
             { type: 'Footer', label: 'Concluir', 'on-click-action': troca('enviar_informacoes_complementares', form(QUASE)) }
+          ]
+        }]
+      }
+    },
+    {
+      // CPF que já tem inscrição em outro processo seletivo (pelo Flow ou pelo site): pergunta se segue com ela
+      // ou se quer mesmo uma nova. A nova só é criada se o candidato escolher.
+      id: 'INSC_JA_INSCRITO',
+      title: 'Inscrição',
+      data: {
+        estado: str(), erro: str(), tem_erro: bool(),
+        mensagem: str('Olá, Ana! Identificamos que você já possui uma inscrição em Vestibular Online 2027/1, no curso DIREITO.'),
+        opcoes: opcoesDesc()
+      },
+      layout: {
+        type: 'SingleColumnLayout',
+        children: [{
+          type: 'Form', name: 'form_ja_inscrito',
+          children: [
+            imagem(LOGO_INSCRICAO, 40),
+            { type: 'TextSubheading', text: 'Você já possui uma inscrição' },
+            { type: 'TextBody', text: '${data.mensagem}' },
+            erroTexto,
+            { type: 'RadioButtonsGroup', name: 'inscricao', label: 'O que deseja fazer?', required: true, 'data-source': '${data.opcoes}' },
+            { type: 'Footer', label: 'Continuar', 'on-click-action': troca('decidir_inscricao', form(['inscricao'])) }
           ]
         }]
       }

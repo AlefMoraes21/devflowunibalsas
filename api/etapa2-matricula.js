@@ -187,7 +187,11 @@ export function createEtapa2({
   // Calma antes dos documentos: o RM gera o RA e sincroniza a inscrição depois da identidade.
   esperaDocsMs = Number(process.env.ETAPA2_ESPERA_DOCS_MS) || 120000,
   // Link do contrato aberto durante uma geração em andamento: espera o PDF ficar pronto (até ~40 s).
-  esperaContratoMs = 40000, dormir = ms => new Promise(r => setTimeout(r, ms))
+  esperaContratoMs = 40000, dormir = ms => new Promise(r => setTimeout(r, ms)),
+  // LOGIN: quanto espera a lista de inscrições do CPF (portal do site) antes de seguir sem ela.
+  listaInscricoesMs = Number(process.env.ETAPA2_ESPERA_LISTA_MS) || 3500,
+  // Tela MATR_ESCOLHA só depois de o JSON do Flow com ela estar publicado na Meta.
+  telasMultiplaAtivas = () => process.env.TELAS_INSCRICAO_MULTIPLA === 'on'
 }) {
   // Todo envio agendado da matrícula marca no registro quando deve rodar: se a tarefa se perder (ou a execução
   // cair no meio), a varredura (reconciliar) encontra a marca vencida e agenda de novo.
@@ -231,6 +235,8 @@ export function createEtapa2({
   const END = ['cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'estado_natal', 'cidade_natal'];
   const KEYS = {
     MATR_LOGIN: ['erro', 'tem_erro', ...valor('login', 'data_nascimento')],
+    // Mais de uma inscrição no CPF: qual acompanhar (como o seletor "Processos abertos" do portal).
+    MATR_ESCOLHA: ['estado', 'erro', 'tem_erro', 'opcoes'],
     MATR_PORTAL: ['estado', 'resumo', 'botao'],
     CONTR_TERMOS: ['link_contrato'],
     MATR_PAGAMENTO: ['estado', 'valor', 'mensagem', 'botao'],
@@ -249,6 +255,7 @@ export function createEtapa2({
       if (k === 'estado') { const { escolas, ...selar } = trusted; out.estado = sealState(screen, selar); }
       else if (k === 'tem_erro') out.tem_erro = Boolean(trusted.erro);
       else if (k === 'escolas') out.escolas = trusted.escolas ?? [];
+      else if (k === 'opcoes') out.opcoes = (trusted.opcoes ?? []).map(o => ({ id: String(o.id), title: String(o.title), description: String(o.description ?? '') }));
       else if (k === 'tem_escolas') out.tem_escolas = Boolean(trusted.escolas?.length);
       else if (k.startsWith('valor_')) out[k] = values[k.slice(6)] == null ? '' : String(values[k.slice(6)]);
       else out[k] = trusted[k] ?? '';
@@ -323,14 +330,32 @@ export function createEtapa2({
     memoEscolas.at = clock(); memoEscolas.lista = enxuta;
     log({ event: 'etapa2_fila', passo: 'escolas_cache', quantidade: enxuta.length });
   }
+  // Duas inscrições no mesmo CPF: o login do Rubeus abre numa delas. A sessão passa a apontar para a inscrição
+  // desta fila (o /portal recebe o applyment_id) e o processo devolvido é conferido antes de qualquer envio.
+  const processoEsperado = rec => String(rec?.processo_inscricao || rec?.insc_vigia?.processo || rec?.ultimo_status?.processo || '');
+  async function loginDaFila(rec) {
+    const s = await matricula.login(rec.login ?? rec.cpf, rec.data_nascimento);
+    const quer = String(rec.applyment_id ?? '');
+    if (!quer || quer === String(s.applyment_id ?? '')) return s;
+    log({ event: 'etapa2_fila', id: curto(rec.id ?? ''), passo: 'outra_inscricao_aberta' });
+    return { ...s, applyment_id: quer, conferir_processo: processoEsperado(rec) };
+  }
+  async function portalDaFila(sessao) {
+    const p = await matricula.portal(sessao);
+    if (sessao.conferir_processo && p.processo_seletivo_id && String(p.processo_seletivo_id) !== sessao.conferir_processo) {
+      throw new ErroPasso('O portal abriu outra inscrição do mesmo CPF.', { motivo: 'outra_inscricao' });
+    }
+    return p;
+  }
+
   // Sem cache: abre o passo liberado no Rubeus (a identidade, quando a pessoa já chegou nesta tela) e guarda a lista.
   async function carregarEscolas(filaId) {
     const em = await lerEscolas();
     if (em) return em;
     const f = await store.get(filaId, FILA);
     if (!f) throw new Error('matrícula não encontrada');
-    let sessao = await matricula.login(f.record.login ?? f.record.cpf, f.record.data_nascimento);
-    const p = await matricula.portal(sessao);
+    let sessao = await loginDaFila(f.record);
+    const p = await portalDaFila(sessao);
     sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
     const next = summarizeStages(p.stages).next;
     if (!next) throw new Error('sem passo liberado');
@@ -410,8 +435,8 @@ export function createEtapa2({
     const f = await store.get(id, FILA);
     if (!f) return 204;
     await runCtx(async () => {
-      const sessao = await matricula.login(f.record.login ?? f.record.cpf, f.record.data_nascimento);
-      const p = await matricula.portal(sessao);
+      const sessao = await loginDaFila(f.record);
+      const p = await portalDaFila(sessao);
       await salvarStatus(id, p.stages, p.processo_seletivo_id);
       await religarVigias(id, summarizeStages(p.stages ?? []));
       log({ event: 'etapa2_fila', id: curto(id), passo: 'status_salvo' });
@@ -549,7 +574,7 @@ export function createEtapa2({
   }
   async function gerarContratoAgora(filaId, rec, ip = '', { calma = false, statusSalvo = false } = {}) {
     const inicio = clock();
-    const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
+    const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento, { applyment_id: rec.applyment_id });
     const passoDe = stages => stepFromLink((stages ?? []).find(x => /contrato/.test(norm(x.title)))?.cta_link);
     let processo = '', passoId = statusSalvo ? passoDe(rec.ultimo_status?.stages) : null;
     if (passoId) { try { processo = await portalSite.processo(sessao); } catch {} }
@@ -798,7 +823,7 @@ export function createEtapa2({
     // Ritmo dos outros vigias: 10 min nas 2 primeiras horas depois do contrato, depois de hora em hora.
     let proximoEm = rec.final_vigiando ? intervaloVigia(rec.final_vigiando) : VIGIA_LONGO_S;
     try {
-      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
+      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento, { applyment_id: rec.applyment_id });
       const { stages, processo } = await portalSite.inscricao(sessao);
       await salvarStatus(id, stages, processo || rec.ultimo_status?.processo).catch(() => {});
       const st = summarizeStages(stages ?? []);
@@ -1007,11 +1032,11 @@ export function createEtapa2({
     aprovada: { processo: 'inscrição no Vestibular 2027/1', situacao: 'Sua redação foi corrigida e você foi aprovado(a)! 🎉', proximo: 'informe o responsável financeiro, seus dados e envie os documentos da matrícula pelo botão abaixo.' },
     reprovada: { processo: 'inscrição no Vestibular 2027/1', situacao: 'Sua redação foi corrigida e não atingiu a nota necessária.', proximo: 'você pode realizar a avaliação mais uma vez pelo botão abaixo.' }
   };
-  async function iniciarVigiaRedacao({ login, data_nascimento, celular, nome }) {
+  async function iniciarVigiaRedacao({ login, data_nascimento, celular, nome, applyment_id = '' }) {
     const cpf = digits(login);
     if (cpf.length !== 11 || !data_nascimento) return false;
     const id = hash('redacao:' + cpf);
-    const novo = { id, login: cpf, data_nascimento, contato: digits(celular) ? { nome: String(nome ?? ''), celular: digits(celular) } : null, desde: clock(), ate: clock() + VIGIA_MAX_MS, expires: clock() + 20 * DIA };
+    const novo = { id, login: cpf, data_nascimento, ...(applyment_id ? { applyment_id: String(applyment_id) } : {}), contato: digits(celular) ? { nome: String(nome ?? ''), celular: digits(celular) } : null, desde: clock(), ate: clock() + VIGIA_MAX_MS, expires: clock() + 20 * DIA };
     const atual = await store.get(id, REDACAO);
     // Nova redação (ex.: refez a avaliação): recomeça o vigia.
     if (atual) await store.update(id, novo, atual.version, REDACAO); else await store.create(id, novo, REDACAO);
@@ -1037,7 +1062,7 @@ export function createEtapa2({
     const rec = f.record;
     let proximoEm = intervaloVigia(rec.desde);
     try {
-      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento);
+      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento, { applyment_id: rec.applyment_id });
       const { stages, processo } = await portalSite.inscricao(sessao);
       // V1: o último status fica salvo para o LOGIN abrir a lista na hora (o portal passa do tempo do WhatsApp).
       await guardarStatusDaInscricao({ applyment_id: sessao.applyment_id, login: rec.login, data_nascimento: rec.data_nascimento, stages, processo }).catch(() => {});
@@ -1140,7 +1165,7 @@ export function createEtapa2({
     const salvarFila = salvarFilaDe(id);
     let proximoEm = intervaloVigia(v.desde);
     try {
-      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento);
+      const sessao = await portalSite.entrar(rec.login, rec.data_nascimento, { applyment_id: rec.applyment_id });
       const { stages, processo: procPortal } = await portalSite.inscricao(sessao);
       const processo = procPortal || v.processo || rec.ultimo_status?.processo || '';
       await salvarStatus(id, stages, processo).catch(() => {});
@@ -1198,6 +1223,95 @@ export function createEtapa2({
     }
   }
 
+  // Inscrições do CPF pelo portal do site (~2 s). Sem resposta a tempo, segue como antes (a que o Rubeus abrir).
+  async function listarInscricoes(login, data_nascimento) {
+    if (!portalSite?.inscricoes) return null;
+    let timer;
+    const prazo = new Promise(r => { timer = setTimeout(() => r(null), listaInscricoesMs); timer.unref?.(); });
+    const lista = portalSite.entrar(login, data_nascimento).then(s => portalSite.inscricoes(s)).catch(() => null);
+    try { return await Promise.race([lista, prazo]); } finally { clearTimeout(timer); }
+  }
+  // Opção da lista de inscrições (título do processo até 30 caracteres; o curso na descrição).
+  function opcaoInscricao(a) {
+    const conhecido = tituloProcesso(a.processo);
+    const title = (conhecido && conhecido !== 'processo seletivo 2027/1' ? conhecido : a.titulo || 'Inscrição').slice(0, 30);
+    return { id: String(a.applyment_id), title, description: String(a.curso || a.titulo || '').slice(0, 300), processo: String(a.processo ?? '') };
+  }
+
+  // Abre a inscrição depois do login (CPF + nascimento conferidos no Rubeus). `escolha` = inscrição escolhida
+  // (MATR_ESCOLHA ou o aviso de inscrição existente); sem ela, com uma inscrição só, é o caminho de sempre.
+  async function abrirLogin({ login, data_nascimento, flowToken, escolha = null, volta }) {
+    const t0 = clock();
+    let sessao;
+    // Inscrições do CPF (portal do site), em paralelo ao login do Rubeus: com mais de uma, pergunta qual.
+    const listaP = escolha || !telasMultiplaAtivas() ? Promise.resolve(null) : listarInscricoes(login, data_nascimento);
+    try { sessao = await matricula.login(login, data_nascimento); }
+    catch (e) {
+      // Rede, tempo esgotado, resposta não JSON ou HTTP 5xx = sistema fora; qualquer outra recusa = dados não conferem.
+      const m = String(e?.message ?? e);
+      if (!/HTTP 5\d\d|demorou|abort|fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|network|RUBEUS_RESPOSTA/i.test(m)) return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.');
+      log({ event: 'etapa2_fila', passo: 'login_indisponivel', message: m.slice(0, 80), ms: clock() - t0 });
+      return volta('O sistema da UniBalsas está indisponível no momento. Tente de novo em alguns minutos.');
+    }
+    if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esses dados.');
+    if (escolha) sessao = { ...sessao, applyment_id: escolha.id, conferir_processo: String(escolha.processo ?? '') };
+    else {
+      const lista = await listaP;
+      if (lista?.length > 1) {
+        log({ event: 'etapa2_fila', passo: 'escolha_inscricao', quantidade: lista.length, ms: clock() - t0 });
+        return render('MATR_ESCOLHA', { escolha_login: true, login, data_nascimento, opcoes: lista.map(opcaoInscricao), erro: '' });
+      }
+    }
+    const id = hash('matr:' + sessao.applyment_id);
+    const flow = hash(flowToken ?? '');
+    // Abertura rápida: com um status guardado (último login, worker ou vigia), espera o portal só um pouco; se
+    // ele demorar, abre com o guardado e o Run relê o portal em segundo plano (etapa2_status).
+    const portalP = portalDaFila(sessao); portalP.catch(() => {});
+    const temGuardado = Boolean(statusSalvo((await store.get(id, FILA).catch(() => null))?.record));
+    // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
+    // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
+    let s2 = null, stLido = null;
+    try {
+      const espera = temGuardado ? esperaCacheMs : Math.max(1500, esperaPortalMs - (clock() - t0));
+      const st = stLido = await Promise.race([portalP, new Promise((_, r) => setTimeout(() => r(new Error('lento')), espera))]);
+      s2 = summarizeStages(st.stages ?? []);
+      // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
+      if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
+        return await entrarNaProva({ applyment_id: sessao.applyment_id, processo: st.processo_seletivo_id, login, data_nascimento, flowToken });
+      }
+    } catch (e) { log({ event: 'etapa2_fila', passo: 'portal_lento', message: String(e?.message ?? e).slice(0, 60) }); }
+    // Inscrição da matrícula no Firestore (login e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
+    const novo = { id, applyment_id: sessao.applyment_id, ...(escolha ? { processo_inscricao: String(escolha.processo ?? '') } : {}), flow, login, data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
+    const ultimo = s2 ? { ultimo_status: { stages: enxugar(stLido.stages), processo: String(stLido.processo_seletivo_id ?? ''), at: clock() } } : {};
+    // Uma escrita só: fila + último status (sem reler depois).
+    let rec = null, agendar = false;
+    for (let i = 0; i < 3 && !rec; i++) {
+      const atual = await store.get(id, FILA);
+      if (!atual) { const r = { ...novo, ...ultimo }; if (await store.create(id, r, FILA).then(() => true, () => false)) rec = r; continue; }
+      const a = atual.record;
+      // Fila que falhou (ex.: sistema acadêmico fora do ar): entrar de novo reabre e retoma o envio do que já foi gravado.
+      const reabrir = a.status === 'falhou';
+      // Dado gravado sem worker rodando (agendamento perdido): agenda o envio de novo.
+      const parado = a.status === 'pendente' && (a.rodando_ate ?? 0) <= clock() && (
+        Object.keys(a.blocos ?? {}).some(b => b !== 'documentos' && !a.enviados?.[b]) ||
+        (a.blocos?.documentos?.completo && Object.keys(a.blocos.documentos.arquivos ?? {}).some(k => !a.enviados_docs?.[k])));
+      const r = { ...a, flow, login, data_nascimento: novo.data_nascimento, ...ultimo, ...(reabrir ? { status: 'pendente', tentativas: 0, rodando_ate: 0 } : {}) };
+      if (await store.update(id, r, atual.version, FILA)) { rec = r; agendar = reabrir || parado; if (agendar) log({ event: 'etapa2_fila', id: curto(id), passo: reabrir ? 'reaberta' : 'retomada' }); }
+    }
+    if (!rec) rec = (await store.get(id, FILA))?.record ?? novo;
+    if (agendar) { try { await enqueue(id, { tipo: 'etapa2' }); } catch {} }
+    const menor = (idade(data_nascimento) ?? 18) < 18;
+    if (s2) await religarVigias(id, s2);
+    else {
+      s2 = statusSalvo(rec);
+      // Portal lento: busca em segundo plano; o candidato toca em Atualizar (ou já usa o último status salvo).
+      try { await enqueue(id, { tipo: 'etapa2_status' }); } catch {}
+    }
+    log({ event: 'etapa2_fila', id: curto(id), passo: 'login', ms: clock() - t0 });
+    // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
+    return telaPortal({ id, menor, s2, blocos: rec.blocos, rec, flowToken });
+  }
+
   async function routeTela(req) {
     const d = req.data ?? {}, acao = d.acao, screen = req.screen;
 
@@ -1209,66 +1323,17 @@ export function createEtapa2({
       const texto = String(u.login ?? '').trim();
       if (!validCpf(texto)) return volta('Confira o CPF (11 números).');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(u.data_nascimento ?? ''))) return volta('Informe a data de nascimento.');
-      const login = digits(texto);
-      const t0 = clock();
-      let sessao;
-      try { sessao = await matricula.login(login, u.data_nascimento); }
-      catch (e) {
-        // Rede, tempo esgotado, resposta não JSON ou HTTP 5xx = sistema fora; qualquer outra recusa = dados não conferem.
-        const m = String(e?.message ?? e);
-        if (!/HTTP 5\d\d|demorou|abort|fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|network|RUBEUS_RESPOSTA/i.test(m)) return volta('Não encontramos uma inscrição com esses dados. Confira e tente de novo.');
-        log({ event: 'etapa2_fila', passo: 'login_indisponivel', message: m.slice(0, 80), ms: clock() - t0 });
-        return volta('O sistema da UniBalsas está indisponível no momento. Tente de novo em alguns minutos.');
-      }
-      if (!sessao.applyment_id) return volta('Não encontramos uma inscrição com esses dados.');
-      const id = hash('matr:' + sessao.applyment_id);
-      const flow = hash(req.flow_token ?? '');
-      // Abertura rápida: com um status guardado (último login, worker ou vigia), espera o portal só um pouco; se
-      // ele demorar, abre com o guardado e o Run relê o portal em segundo plano (etapa2_status).
-      const portalP = matricula.portal(sessao); portalP.catch(() => {});
-      const temGuardado = Boolean(statusSalvo((await store.get(id, FILA).catch(() => null))?.record));
-      // Situação das etapas, como no portal. Quem decide o que está liberado é o portal (próximo passo);
-      // a única espera é a prova "Aguardando correção". Se o portal demorar, segue e o worker confere a ordem.
-      let s2 = null, stLido = null;
-      try {
-        const espera = temGuardado ? esperaCacheMs : Math.max(1500, esperaPortalMs - (clock() - t0));
-        const st = stLido = await Promise.race([portalP, new Promise((_, r) => setTimeout(() => r(new Error('lento')), espera))]);
-        s2 = summarizeStages(st.stages ?? []);
-        // Próximo passo é a prova: segue para a redação, como na jornada direta da etapa 1.
-        if (s2.next && /prova|avaliacao|redacao/.test(norm(s2.next.title)) && entrarNaProva) {
-          return await entrarNaProva({ applyment_id: sessao.applyment_id, processo: st.processo_seletivo_id, login, data_nascimento: u.data_nascimento, flowToken: req.flow_token });
-        }
-      } catch (e) { log({ event: 'etapa2_fila', passo: 'portal_lento', message: String(e?.message ?? e).slice(0, 60) }); }
-      // Inscrição da matrícula no Firestore (login e data de nascimento ficam criptografados, para o worker entrar no Rubeus).
-      const novo = { id, applyment_id: sessao.applyment_id, flow, login, data_nascimento: u.data_nascimento, blocos: {}, enviados: {}, status: 'pendente', tentativas: 0, criado: clock(), expires: clock() + 30 * DIA };
-      const ultimo = s2 ? { ultimo_status: { stages: enxugar(stLido.stages), processo: String(stLido.processo_seletivo_id ?? ''), at: clock() } } : {};
-      // Uma escrita só: fila + último status (sem reler depois).
-      let rec = null, agendar = false;
-      for (let i = 0; i < 3 && !rec; i++) {
-        const atual = await store.get(id, FILA);
-        if (!atual) { const r = { ...novo, ...ultimo }; if (await store.create(id, r, FILA).then(() => true, () => false)) rec = r; continue; }
-        const a = atual.record;
-        // Fila que falhou (ex.: sistema acadêmico fora do ar): entrar de novo reabre e retoma o envio do que já foi gravado.
-        const reabrir = a.status === 'falhou';
-        // Dado gravado sem worker rodando (agendamento perdido): agenda o envio de novo.
-        const parado = a.status === 'pendente' && (a.rodando_ate ?? 0) <= clock() && (
-          Object.keys(a.blocos ?? {}).some(b => b !== 'documentos' && !a.enviados?.[b]) ||
-          (a.blocos?.documentos?.completo && Object.keys(a.blocos.documentos.arquivos ?? {}).some(k => !a.enviados_docs?.[k])));
-        const r = { ...a, flow, login, data_nascimento: novo.data_nascimento, ...ultimo, ...(reabrir ? { status: 'pendente', tentativas: 0, rodando_ate: 0 } : {}) };
-        if (await store.update(id, r, atual.version, FILA)) { rec = r; agendar = reabrir || parado; if (agendar) log({ event: 'etapa2_fila', id: curto(id), passo: reabrir ? 'reaberta' : 'retomada' }); }
-      }
-      if (!rec) rec = (await store.get(id, FILA))?.record ?? novo;
-      if (agendar) { try { await enqueue(id, { tipo: 'etapa2' }); } catch {} }
-      const menor = (idade(u.data_nascimento) ?? 18) < 18;
-      if (s2) await religarVigias(id, s2);
-      else {
-        s2 = statusSalvo(rec);
-        // Portal lento: busca em segundo plano; o candidato toca em Atualizar (ou já usa o último status salvo).
-        try { await enqueue(id, { tipo: 'etapa2_status' }); } catch {}
-      }
-      log({ event: 'etapa2_fila', id: curto(id), passo: 'login', ms: clock() - t0 });
-      // Tela inicial após o login = status do Portal do candidato, com o botão da etapa pendente (como no site).
-      return telaPortal({ id, menor, s2, blocos: rec.blocos, rec, flowToken: req.flow_token });
+      return abrirLogin({ login: digits(texto), data_nascimento: u.data_nascimento, flowToken: req.flow_token, volta });
+    }
+
+    // Mais de uma inscrição no CPF: o candidato escolheu qual acompanhar.
+    if (screen === 'MATR_ESCOLHA' && acao === 'escolher_inscricao') {
+      let s;
+      try { s = openState(d.estado, screen); } catch { return fim('Sessão expirada', 'Esta sessão ficou muito tempo parada. Abra a mensagem de novo e entre com seu CPF e data de nascimento.'); }
+      if (!s.escolha_login) return null;
+      const op = (s.opcoes ?? []).find(o => o.id === String(d.inscricao ?? ''));
+      if (!op) return render('MATR_ESCOLHA', { ...s, erro: 'Escolha uma das inscrições.' });
+      return abrirLogin({ login: s.login, data_nascimento: s.data_nascimento, flowToken: req.flow_token, escolha: op, volta: erro => render('MATR_ESCOLHA', { ...s, erro }) });
     }
 
     let s;
@@ -1477,7 +1542,7 @@ export function createEtapa2({
     // Documentos de matrícula pelo mesmo caminho do site (api/portal-site.js): entra no Portal do candidato,
     // lê o passo de documentos, envia num único "Enviar" (multipart file_0…) e confere no próprio passo.
     async function entregarDocumentos(passoId, docsB) {
-      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento);
+      const sessao = await portalSite.entrar(rec.login ?? rec.cpf, rec.data_nascimento, { applyment_id: rec.applyment_id });
       let processo = '';
       try { processo = await portalSite.processo(sessao); } catch {}
       if (!processo) processo = (await portalSite.inscricao(sessao)).processo;
@@ -1518,10 +1583,10 @@ export function createEtapa2({
     }
     try {
       await runCtx(async () => {
-        let sessao = await matricula.login(rec.login ?? rec.cpf, rec.data_nascimento);
+        let sessao = await loginDaFila(rec);
         while (clock() - inicio < orcamentoMs) {
           // O portal diz qual é o próximo passo liberado (os concluídos ficam de fora).
-          const p = await matricula.portal(sessao);
+          const p = await portalDaFila(sessao);
           sessao = { ...sessao, token: p.token, processo_seletivo_id: p.processo_seletivo_id };
           // Resposta vazia ou botão em formato desconhecido nunca vira "concluída" (sem envio): tenta de novo ou a equipe confere.
           if (!(p.stages ?? []).length) throw new ErroPasso('O portal devolveu a lista de etapas vazia.', { motivo: 'portal_vazio' });
@@ -1594,5 +1659,5 @@ export function createEtapa2({
     return 204;
   }
 
-  return { route, worker, reconciliar, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao, iniciarVigiaInscricao, vigiarInscricao, guardarStatusDaInscricao };
+  return { route, worker, reconciliar, render, atualizarStatus, baixarContrato, criarLinkContrato, vigiarContrato, vigiarFinal, iniciarVigiaRedacao, vigiarRedacao, iniciarVigiaInscricao, vigiarInscricao, guardarStatusDaInscricao, abrirLogin };
 }

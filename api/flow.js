@@ -1520,7 +1520,9 @@ const etapa1=createEtapa1({
   // Transferência, Portador e ENEM: documentos de inscrição pelo caminho do site e vigia da análise (etapa 2).
   docsInscricao,portalSite:createPortalSite(),baixarMidia:m=>downloadMedia(m),
   mediaEnem:d=>enemAverage(d,{checkTyped:false}),
-  aoEnviarDocsInscricao:dados=>etapa2.iniciarVigiaInscricao(dados)
+  aoEnviarDocsInscricao:dados=>etapa2.iniciarVigiaInscricao(dados),
+  // CPF já inscrito em outro processo: aviso antes de concluir; "Seguir" abre a inscrição existente pelo LOGIN.
+  tituloProcesso,abrirLogin:a=>etapa2.abrirLogin(a)
 });
 // Etapa 2 (matrícula): telas MATR_* gravam no Firestore; o worker envia cada subetapa ao Rubeus, em ordem.
 const etapa2=createEtapa2({
@@ -1641,7 +1643,7 @@ async function rotear(req) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.17.7" });
+    return res.status(200).json({ status: "ok", version: "unibalsas-cloudrun-jornada-2.17.8" });
   }
   if (req.method !== "POST") {
     return res.status(405).send("Method not allowed");

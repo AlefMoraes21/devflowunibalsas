@@ -1,3 +1,10 @@
+# Versão 2.17.8 — mais de uma inscrição no mesmo CPF (24/11/2026) — servidor + Flow
+
+- Caso real (homologação, 23/11): candidata com Vestibular e Transferência. O portal abria no Vestibular e o worker dos documentos da Transferência ficou em "Documentos inscrição ainda não apareceu" (tentativa 94 de 150); os documentos ficaram guardados, nada se perdeu.
+- Workers e vigias entram na inscrição da fila: troca pelo mesmo POST do seletor do site (`change-current-applyment`) e confere em `person-applyment`; no Rubeus oficial, `/portal` com o `applyment_id` da fila e o processo conferido antes de qualquer envio.
+- Inscrição nova: aviso `INSC_JA_INSCRITO` ("já possui inscrição em X, no curso Y… seguir ou fazer uma nova?"). LOGIN: `MATR_ESCOLHA` com mais de uma inscrição. Ambas atrás de `TELAS_INSCRICAO_MULTIPLA=on`.
+- Testes novos (13): os que cobrem duas inscrições falham na 2.17.7; os de "nada muda" passam nas duas. Suíte: 231 passando. Conferido no servidor local com o portal real (Rebeca): aviso em 2,4–3,2 s, "Seguir" abre a Transferência sem concluir a nova, "Nova" conclui; chave desligada = igual a antes. A troca real foi aceita pelo portal (HTTP 200); a troca entre duas inscrições diferentes será provada pela fila da Manuela depois de publicar.
+
 # Versão 2.17.7 — cobrança: Pix só com celular e marca de envio exclusiva (20/11/2026) — só servidor
 
 - Sem celular (nem no passo do portal nem guardado na fila): não gera o Pix no TOTVS, não gasta as 5 tentativas; alerta `sem_celular` uma vez; a tela orienta o Portal do candidato. Vale com ou sem `AVISOS_SO_PARA`.
